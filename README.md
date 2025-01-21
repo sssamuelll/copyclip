@@ -18,7 +18,7 @@
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/your-username/copyclip.git
+   git clone https://github.com/sssamuelll/copyclip.git
    cd copyclip
    ```
 2. **Install dependencies and the script:**
