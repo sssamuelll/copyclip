@@ -1,0 +1,137 @@
+# Archivos y carpetas comunes a ignorar
+*.log
+*.tmp
+*.bak
+*.swp
+*.class
+*.pyc
+*.pyo
+*.DS_Store
+*.lock
+*.iml
+*.ipr
+*.iws
+*.orig
+*.rej
+*.patch
+*.sqlite
+*.sql
+*.db
+*.tar
+*.zip
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+
+# Archivos de configuración
+*.json
+*.yaml
+*.yml
+*.xml
+*.ini
+*.toml
+*.conf
+*.config
+*.env
+*.editorconfig
+*.eslint*
+*.prettierrc*
+*.babelrc*
+*.mocharc*
+*.stylelintrc*
+*.tsconfig*
+*.eslintrc
+*.gitignore
+*.copyclipignore
+
+# Archivos de control de versiones y CI/CD
+.git/
+.gitignore
+.gitattributes
+.gitmodules
+.hg/
+.hgignore
+.svn/
+.circleci/
+.github/
+.gitlab-ci.yml
+
+# IDEs y configuraciones del entorno de desarrollo
+.idea/
+.vscode/
+*.code-workspace
+*.sublime-project
+*.sublime-workspace
+
+# Archivos y carpetas de dependencias y compilación
+node_modules/
+vendor/
+dist/
+build/
+.cache/
+coverage/
+__pycache__/
+.vscode/
+.venv/
+.env/
+.env.local
+.env.development
+.env.production
+
+# Archivos temporales y backups
+*.tmp
+*.bak
+*.swp
+*.~lock.*
+
+# Archivos binarios y empaquetados
+*.exe
+*.dll
+*.dylib
+*.so
+*.o
+*.a
+*.out
+*.bin
+
+# Archivos de documentación autogenerada
+*.md.html
+*.rst.html
+
+# Archivos de CI/CD y automatización
+Dockerfile*
+docker-compose.yml
+.k8s/
+.kubernetes/
+
+# Otros archivos no relevantes
+*.zip
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+
+# Archivos de texto y documentación
+*.txt
+README.md
+CHANGELOG.md
+
+go.mod
+go.sum
+
+# Ignorar imágenes
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.ico
+*.webp
+*.bmp
+
+# Ignorar tipografías
+*.ttf
+*.otf
+*.woff
+*.woff2
+*.eot
