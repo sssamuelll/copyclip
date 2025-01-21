@@ -1,3 +1,5 @@
 .venv/
+build/
+copyclip.egg*
 *.pyc
 __pycache__/
