@@ -23,6 +23,7 @@
 *.tgz
 *.7z
 *.rar
+*.git
 
 # Archivos de configuración
 *.json
