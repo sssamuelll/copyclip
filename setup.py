@@ -8,6 +8,10 @@ setup(
     description="Copy file contents from a directory to the clipboard.",
     packages=find_packages(),
     py_modules=["copyclip"],  # Nombre del script sin extensión
+    include_package_data=True,  # Incluir archivos declarados en MANIFEST.in
+    package_data={
+        '': ['.copyclipignore'],  # Archivos específicos
+    },
     install_requires=[
         "pyperclip",
         "tqdm",
@@ -25,3 +29,4 @@ setup(
     ],
     python_requires=">=3.6",
 )
+

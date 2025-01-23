@@ -1,5 +1,6 @@
 .venv/
 build/
+dist/
 copyclip.egg*
 *.pyc
 __pycache__/
