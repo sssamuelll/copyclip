@@ -1,3 +1,127 @@
-.venv/
-*.pyc
+# ------------------------------
+# Python bytecode & caches
+# ------------------------------
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ------------------------------
+# Virtual envs
+# ------------------------------
+.venv/
+venv/
+env/
+.env/
+
+# ------------------------------
+# Packaging / build artifacts
+# ------------------------------
+build/
+dist/
+wheels/
+*.egg-info/
+.eggs/
+*.egg
+.share/python-wheels/
+MANIFEST
+
+# ------------------------------
+# Test / Coverage / Hypothesis
+# ------------------------------
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+
+# ------------------------------
+# Linters / Type checkers caches
+# ------------------------------
+.mypy_cache/
+.pyre/
+.pytype/
+.ruff_cache/
+.pylint.d/
+
+# ------------------------------
+# Jupyter / IPython
+# ------------------------------
+.ipynb_checkpoints/
+.profile_default/
+ipython_config.py
+
+# ------------------------------
+# Logs & runtime junk
+# ------------------------------
+*.log
+logs/
+*.pid
+*.out
+*.err
+.DS_Store
+Thumbs.db
+copyclip_metrics.jsonl
+
+# ------------------------------
+# Env & secrets (keep out of git)
+# ------------------------------
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.crt
+*.p12
+*.der
+secrets.*
+*.credentials.json
+
+# ------------------------------
+# App config (project-specific)
+# ------------------------------
+llm.yaml
+# Si generas variantes locales:
+llm.local.yaml
+*.local.yaml
+*config.local.*
+
+# ------------------------------
+# Docs / build cache
+# ------------------------------
+.site/
+docs/_build/
+*.novel
+
+# ------------------------------
+# Optional: Node/Frontend (descomenta si aplica)
+# ------------------------------
+# node_modules/
+# .pnpm-store/
+# .turbo/
+# .next/
+# .vite/
+# dist/
+# coverage/
+# *.tsbuildinfo
+
+# ------------------------------
+# IDE/editor
+# ------------------------------
+.vscode/
+.idea/
+*.iml
+
+# ------------------------------
+# OS cruft
+# ------------------------------
+*.swp
+*.swo
+*~
+
+# ------------------------------
+# Kilocode
+# ------------------------------
+.kilocode/

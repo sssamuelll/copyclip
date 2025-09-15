@@ -1,3 +1,4 @@
 tqdm
 pyperclip
 gitignore-parser
+aiofiles
