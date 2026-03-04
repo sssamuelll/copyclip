@@ -305,7 +305,7 @@ def _analyze_git_folder(project_root: str, project_id: int, conn) -> Dict:
 
 # Brief: analyze
 
-async def analyze(project_root: str) -> Dict[str, int]:
+async def analyze(project_root: str, progress_cb=None) -> Dict[str, int]:
     root = os.path.abspath(project_root)
     conn = connect(root)
     init_schema(conn)
@@ -346,6 +346,16 @@ async def analyze(project_root: str) -> Dict[str, int]:
     repo_files: Set[str] = set()
     complexity_by_file: Dict[str, int] = {}
 
+    if progress_cb:
+        progress_cb("discovery", 0, 0, "discovering project files")
+
+    total_files = 0
+    for _p, _rel in _iter_repo_files(root):
+        total_files += 1
+
+    if progress_cb:
+        progress_cb("metadata_hash", 0, total_files, "computing file metadata and hashes")
+
     for p, rel in _iter_repo_files(root):
         try:
             st = p.stat()
@@ -358,6 +368,8 @@ async def analyze(project_root: str) -> Dict[str, int]:
             )
             indexed += 1
             repo_files.add(rel)
+            if progress_cb and indexed % 200 == 0:
+                progress_cb("metadata_hash", indexed, total_files, f"processed {indexed} files")
 
             mod = _module_from_relpath(rel)
             modules_seen[mod] += 1
@@ -373,6 +385,9 @@ async def analyze(project_root: str) -> Dict[str, int]:
         except Exception:
             continue
 
+    if progress_cb:
+        progress_cb("import_graph", indexed, total_files, "building module and dependency graph")
+
     for module in modules_seen:
         conn.execute(
             "INSERT OR REPLACE INTO modules(project_id,name,path_prefix) VALUES(?,?,?)",
@@ -386,6 +401,9 @@ async def analyze(project_root: str) -> Dict[str, int]:
             "INSERT OR IGNORE INTO dependencies(project_id,from_module,to_module,edge_type) VALUES(?,?,?,?)",
             (project_id, frm, to, "import"),
         )
+
+    if progress_cb:
+        progress_cb("git_history", indexed, total_files, "collecting git history")
 
     log = _safe_git(root, ["log", "--pretty=format:%H|%an|%ad|%s", "--date=iso", "-n", "300"])
     commits = 0
@@ -417,6 +435,9 @@ async def analyze(project_root: str) -> Dict[str, int]:
                 "INSERT INTO file_changes(project_id,commit_sha,file_path,additions,deletions) VALUES(?,?,?,?,?)",
                 (project_id, current_sha, line, 0, 0),
             )
+
+    if progress_cb:
+        progress_cb("risk_signals", indexed, total_files, "computing risk signals")
 
     risk_count = 0
 
@@ -492,6 +513,9 @@ async def analyze(project_root: str) -> Dict[str, int]:
     ).fetchall()
     risk_breakdown = {r[0]: r[1] for r in risk_breakdown_rows}
 
+    if progress_cb:
+        progress_cb("snapshots", indexed, total_files, "writing snapshots and finalizing")
+
     conn.execute(
         "INSERT INTO snapshots(project_id, summary_json) VALUES(?,?)",
         (project_id, json.dumps({**summary, "risk_breakdown": risk_breakdown})),
@@ -503,4 +527,8 @@ async def analyze(project_root: str) -> Dict[str, int]:
 
     conn.commit()
     conn.close()
+
+    if progress_cb:
+        progress_cb("completed", total_files, total_files, "analysis completed")
+
     return summary

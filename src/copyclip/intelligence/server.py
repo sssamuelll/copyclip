@@ -89,12 +89,43 @@ def run_server(project_root: str, port: int = 4310) -> None:
         if not value:
             return None
         try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
         except Exception:
             try:
-                return datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+                dt = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+                return dt.replace(tzinfo=timezone.utc)
             except Exception:
                 return None
+
+    def _job_payload(row):
+        # row: id,status,phase,processed,total,message,started_at,finished_at
+        processed = int(row[3] or 0)
+        total = int(row[4] or 0)
+        started_at = row[6]
+        elapsed = None
+        throughput = None
+        eta_sec = None
+        if started_at:
+            st = _parse_dt(started_at)
+            if st:
+                elapsed = max(0.0, (datetime.now(timezone.utc) - st).total_seconds())
+                if elapsed > 0:
+                    throughput = processed / elapsed
+                    remaining = max(0, total - processed)
+                    eta_sec = int(remaining / throughput) if throughput > 0 else None
+        return {
+            "id": row[0],
+            "status": row[1],
+            "phase": row[2],
+            "processed": processed,
+            "total": total,
+            "message": row[5],
+            "started_at": started_at,
+            "finished_at": row[7],
+            "throughput_fps": round(throughput, 2) if throughput is not None else None,
+            "eta_sec": eta_sec,
+        }
 
     def _evaluate_alerts(conn, pid):
         rules = conn.execute(
@@ -197,7 +228,29 @@ def run_server(project_root: str, port: int = 4310) -> None:
 
                 try:
                     from .analyzer import analyze
-                    summary = analyze(root)
+
+                    def _on_progress(phase, processed, total_local, message):
+                        conn_p = connect(root)
+                        init_schema(conn_p)
+                        conn_p.execute(
+                            "UPDATE analysis_jobs SET phase=?, processed=?, total=?, message=? WHERE id=?",
+                            (phase, int(processed or 0), int(total_local or 0), str(message or ""), job_id),
+                        )
+                        conn_p.commit()
+                        conn_p.close()
+                        publish_event(
+                            "analyze.progress",
+                            {
+                                "job_id": job_id,
+                                "status": "running",
+                                "phase": phase,
+                                "processed": int(processed or 0),
+                                "total": int(total_local or 0),
+                                "message": str(message or ""),
+                            },
+                        )
+
+                    summary = asyncio.run(analyze(root, progress_cb=_on_progress))
                     conn_d = connect(root)
                     init_schema(conn_d)
                     conn_d.execute(
@@ -822,19 +875,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     (pid,),
                 ).fetchall()
                 self._json(with_meta({
-                    "items": [
-                        {
-                            "id": r[0],
-                            "status": r[1],
-                            "phase": r[2],
-                            "processed": r[3],
-                            "total": r[4],
-                            "message": r[5],
-                            "started_at": r[6],
-                            "finished_at": r[7],
-                        }
-                        for r in rows
-                    ]
+                    "items": [_job_payload(r) for r in rows]
                 }))
                 return
 
@@ -850,16 +891,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 if not row:
                     self._json({"error": "job_not_found"}, 404)
                     return
-                self._json(with_meta({
-                    "id": row[0],
-                    "status": row[1],
-                    "phase": row[2],
-                    "processed": row[3],
-                    "total": row[4],
-                    "message": row[5],
-                    "started_at": row[6],
-                    "finished_at": row[7],
-                }))
+                self._json(with_meta(_job_payload(row)))
                 return
 
             if parsed.path in {"/api/config", "/api/settings"}:

@@ -117,6 +117,8 @@ export function OpsPage({ onNotify }: { onNotify?: (msg: string) => void }) {
           {activeJob ? (
             <span>
               {activeJob.status} / {activeJob.phase || 'analyzing'} — {activeJob.processed}/{activeJob.total}
+              {activeJob.throughput_fps != null ? ` • ${activeJob.throughput_fps} files/s` : ''}
+              {activeJob.eta_sec != null ? ` • ETA ${activeJob.eta_sec}s` : ''}
             </span>
           ) : (
             <span className="muted">No active analyze job.</span>

@@ -147,6 +147,8 @@ export type AnalyzeJob = {
   message?: string
   started_at?: string
   finished_at?: string | null
+  throughput_fps?: number | null
+  eta_sec?: number | null
 }
 
 export type ArchNode = { name: string }
