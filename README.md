@@ -227,6 +227,8 @@ curl http://127.0.0.1:4310/api/health
 
 See full checklist: `docs/RELEASE_PREP_CHECKLIST.md`
 
+Frozen API contract for v0.3.x: `docs/API_CONTRACT_V1.md`
+
 For complete help:
 
 ```bash
