@@ -1225,8 +1225,15 @@ def run_server(project_root: str, port: int = 4310) -> None:
     def _c(text: str, code: str) -> str:
         return f"\033[{code}m{text}\033[0m" if _use_color() else text
 
+    def _link(url: str, label: str | None = None) -> str:
+        label = label or url
+        if not sys.stdout.isatty():
+            return url
+        return f"\033]8;;{url}\033\\{label}\033]8;;\033\\"
+
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    print(f"{_c('INFO', '36')} CopyClip Intelligence running at http://127.0.0.1:{port}")
+    dash_url = f"http://127.0.0.1:{port}"
+    print(f"{_c('INFO', '36')} CopyClip Intelligence running at {_link(dash_url)}")
     print(f"{_c('INFO', '36')} Press Ctrl+C to stop")
     try:
         server.serve_forever()

@@ -37,6 +37,13 @@ def _err(msg: str) -> str:
     return f"{_c('ERROR', '31')} {msg}"
 
 
+def _link(url: str, label: str | None = None) -> str:
+    label = label or url
+    if not sys.stdout.isatty():
+        return url
+    # OSC 8 hyperlink for terminal emulators that support it.
+    return f"\033]8;;{url}\033\\{label}\033]8;;\033\\"
+
 def maybe_handle(argv) -> bool:
     if len(argv) < 2 or argv[1] not in COMMANDS:
         return False
@@ -85,7 +92,8 @@ def maybe_handle(argv) -> bool:
             gs = res["git_stats"]
             print(_info(f"Git: {gs['git_size_kb']}KB, {gs['branches_count']} branches, {gs['tags_count']} tags"))
 
-        print(_info(f"Open CopyClip dashboard: http://127.0.0.1:{args.port}"))
+        dash_url = f"http://127.0.0.1:{args.port}"
+        print(_info(f"Open CopyClip dashboard: {_link(dash_url)}"))
 
         try:
             run_server(root, args.port)
