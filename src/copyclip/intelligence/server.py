@@ -600,6 +600,93 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 }))
                 return
 
+            if parsed.path == "/api/export/weekly":
+                if not pid:
+                    self._json(with_meta({"markdown": "# Weekly Brief\n\nNo data available.", "summary": {}}))
+                    return
+                q = parse_qs(parsed.query or "")
+                try:
+                    days = max(1, min(int(q.get("days", ["7"])[0]), 30))
+                except Exception:
+                    days = 7
+
+                commits_count = conn.execute(
+                    "SELECT COUNT(*) FROM commits WHERE project_id=? AND datetime(date) >= datetime('now', ?)",
+                    (pid, f"-{days} days"),
+                ).fetchone()[0]
+                issues_count = conn.execute(
+                    "SELECT COUNT(*) FROM issues WHERE project_id=? AND datetime(created_at) >= datetime('now', ?)",
+                    (pid, f"-{days} days"),
+                ).fetchone()[0]
+                pulls_count = conn.execute(
+                    "SELECT COUNT(*) FROM pulls WHERE project_id=? AND datetime(created_at) >= datetime('now', ?)",
+                    (pid, f"-{days} days"),
+                ).fetchone()[0]
+                decisions_open = conn.execute(
+                    "SELECT COUNT(*) FROM decisions WHERE project_id=? AND status != 'resolved'",
+                    (pid,),
+                ).fetchone()[0]
+
+                top_risks = conn.execute(
+                    "SELECT area,severity,kind,score,rationale FROM risks WHERE project_id=? ORDER BY score DESC, id DESC LIMIT 5",
+                    (pid,),
+                ).fetchall()
+                recent_alerts = conn.execute(
+                    "SELECT title,detail,created_at FROM alert_events WHERE project_id=? ORDER BY id DESC LIMIT 5",
+                    (pid,),
+                ).fetchall()
+                recent_decisions = conn.execute(
+                    "SELECT id,title,status,created_at FROM decisions WHERE project_id=? ORDER BY id DESC LIMIT 5",
+                    (pid,),
+                ).fetchall()
+
+                md = []
+                md.append("# Weekly Executive Brief")
+                md.append("")
+                md.append(f"Period: last {days} days")
+                md.append("")
+                md.append("## Summary")
+                md.append(f"- Commits: {commits_count}")
+                md.append(f"- New Issues: {issues_count}")
+                md.append(f"- New PRs: {pulls_count}")
+                md.append(f"- Open Decisions: {decisions_open}")
+                md.append("")
+
+                md.append("## Top Risks")
+                if top_risks:
+                    for r in top_risks:
+                        md.append(f"- [{r[1]}/{r[2]}] {r[0]} (score {r[3]}): {r[4]}")
+                else:
+                    md.append("- No risks registered.")
+                md.append("")
+
+                md.append("## Recent Decisions")
+                if recent_decisions:
+                    for d in recent_decisions:
+                        md.append(f"- #{d[0]} [{d[2]}] {d[1]} ({str(d[3])[:10]})")
+                else:
+                    md.append("- No recent decisions.")
+                md.append("")
+
+                md.append("## Recent Alerts")
+                if recent_alerts:
+                    for a in recent_alerts:
+                        md.append(f"- {a[0]} ({str(a[2])[:19]}): {a[1]}")
+                else:
+                    md.append("- No alert activity.")
+
+                summary = {
+                    "days": days,
+                    "commits": commits_count,
+                    "issues": issues_count,
+                    "pulls": pulls_count,
+                    "open_decisions": decisions_open,
+                    "top_risks_count": len(top_risks),
+                    "recent_alerts_count": len(recent_alerts),
+                }
+                self._json(with_meta({"markdown": "\n".join(md), "summary": summary}))
+                return
+
             self._json({"error": "not_found"}, 404)
 
         def do_PATCH(self):

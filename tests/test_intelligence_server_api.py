@@ -275,3 +275,29 @@ def test_alert_rules_and_cooldown_evaluation():
         second = _get_json(f"http://127.0.0.1:{port}/api/alerts")
         assert len(second["fired"]) == 0
         assert second["total"] >= 1
+
+
+def test_weekly_export_endpoint_returns_markdown_and_summary():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        root_path = str(root.absolute())
+        conn = connect(root_path)
+        init_schema(conn)
+        conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root_path, "tmp"))
+        pid = conn.execute("SELECT id FROM projects WHERE root_path=?", (root_path,)).fetchone()[0]
+        conn.execute("INSERT INTO commits(project_id,sha,author,date,message) VALUES(?,?,?,?,?)", (pid, "abc123", "dev", "2026-03-04 10:00:00", "feat: x"))
+        conn.execute("INSERT INTO risks(project_id,area,severity,kind,rationale,score) VALUES(?,?,?,?,?,?)", (pid, "src/a.ts", "high", "churn", "hot", 80))
+        conn.execute("INSERT INTO decisions(project_id,title,summary,status,source_type) VALUES(?,?,?,?,?)", (pid, "Use X", "Because", "proposed", "manual"))
+        conn.execute("INSERT INTO alert_events(project_id,rule_id,title,detail) VALUES(?,?,?,?)", (pid, 1, "high-risk: src/a.ts", "detail"))
+        conn.commit()
+
+        port = _free_port()
+        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
+        th.start()
+        _wait_port(port)
+
+        res = _get_json(f"http://127.0.0.1:{port}/api/export/weekly?days=7")
+        assert "markdown" in res
+        assert "Weekly Executive Brief" in res["markdown"]
+        assert "summary" in res
+        assert "commits" in res["summary"]
