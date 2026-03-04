@@ -101,7 +101,11 @@ def _hash_file(path: Path) -> str:
 
 def _safe_git(project_root: str, args: List[str]) -> str:
     try:
-        out = subprocess.check_output(["git", "-C", project_root, *args], text=True)
+        out = subprocess.check_output(
+            ["git", "-C", project_root, *args],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
         return out.strip()
     except Exception:
         return ""

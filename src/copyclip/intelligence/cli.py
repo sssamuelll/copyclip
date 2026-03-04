@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import sys
 
 from .analyzer import analyze
 from .db import connect, init_schema
@@ -8,6 +9,32 @@ from .server import run_server
 
 
 COMMANDS = {"analyze", "serve", "start", "decision", "report", "issue"}
+
+
+def _use_color() -> bool:
+    return sys.stdout.isatty() and os.getenv("NO_COLOR") is None
+
+
+def _c(text: str, code: str) -> str:
+    if not _use_color():
+        return text
+    return f"\033[{code}m{text}\033[0m"
+
+
+def _info(msg: str) -> str:
+    return f"{_c('INFO', '36')} {msg}"
+
+
+def _ok(msg: str) -> str:
+    return f"{_c('OK', '32')} {msg}"
+
+
+def _warn(msg: str) -> str:
+    return f"{_c('WARN', '33')} {msg}"
+
+
+def _err(msg: str) -> str:
+    return f"{_c('ERROR', '31')} {msg}"
 
 
 def maybe_handle(argv) -> bool:
@@ -25,10 +52,10 @@ def maybe_handle(argv) -> bool:
         if args.as_json:
             print(json.dumps(res))
         else:
-            print(f"[INFO] Indexed {res['files']} files, {res['commits']} commits, {res['issues']} issues")
+            print(_ok(f"Indexed {res['files']} files, {res['commits']} commits, {res['issues']} issues"))
             if res.get("git_stats"):
                 gs = res["git_stats"]
-                print(f"[INFO] Git: {gs['git_size_kb']}KB, {gs['branches_count']} branches, {gs['tags_count']} tags")
+                print(_info(f"Git: {gs['git_size_kb']}KB, {gs['branches_count']} branches, {gs['tags_count']} tags"))
         return True
 
     if cmd == "serve":
@@ -39,9 +66,9 @@ def maybe_handle(argv) -> bool:
         try:
             run_server(args.path, args.port)
         except KeyboardInterrupt:
-            print("\n[INFO] Stopped.")
+            print("\n" + _info("Stopped."))
         except OSError as e:
-            print(f"[ERROR] Could not start server on port {args.port}: {e}")
+            print(_err(f"Could not start server on port {args.port}: {e}"))
         return True
 
     if cmd == "start":
@@ -53,19 +80,19 @@ def maybe_handle(argv) -> bool:
 
         root = os.path.abspath(args.path)
         res = asyncio.run(analyze(root))
-        print(f"[INFO] Indexed {res['files']} files, {res['commits']} commits, {res['issues']} issues")
+        print(_ok(f"Indexed {res['files']} files, {res['commits']} commits, {res['issues']} issues"))
         if res.get("git_stats"):
             gs = res["git_stats"]
-            print(f"[INFO] Git: {gs['git_size_kb']}KB, {gs['branches_count']} branches, {gs['tags_count']} tags")
-        
-        print(f"[INFO] Open CopyClip dashboard: http://127.0.0.1:{args.port}")
+            print(_info(f"Git: {gs['git_size_kb']}KB, {gs['branches_count']} branches, {gs['tags_count']} tags"))
+
+        print(_info(f"Open CopyClip dashboard: http://127.0.0.1:{args.port}"))
 
         try:
             run_server(root, args.port)
         except KeyboardInterrupt:
-            print("\n[INFO] Stopped.")
+            print("\n" + _info("Stopped."))
         except OSError as e:
-            print(f"[ERROR] Could not start server on port {args.port}: {e}")
+            print(_err(f"Could not start server on port {args.port}: {e}"))
         return True
 
     if cmd == "decision":

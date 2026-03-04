@@ -3,6 +3,7 @@ import json
 import os
 import re
 import sqlite3
+import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -1218,17 +1219,23 @@ def run_server(project_root: str, port: int = 4310) -> None:
     scheduler_thread = threading.Thread(target=_scheduler_loop, daemon=True)
     scheduler_thread.start()
 
+    def _use_color() -> bool:
+        return sys.stdout.isatty() and os.getenv("NO_COLOR") is None
+
+    def _c(text: str, code: str) -> str:
+        return f"\033[{code}m{text}\033[0m" if _use_color() else text
+
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    print(f"[INFO] CopyClip Intelligence running at http://127.0.0.1:{port}")
-    print("[INFO] Press Ctrl+C to stop")
+    print(f"{_c('INFO', '36')} CopyClip Intelligence running at http://127.0.0.1:{port}")
+    print(f"{_c('INFO', '36')} Press Ctrl+C to stop")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\n[INFO] Shutting down CopyClip Intelligence...")
+        print(f"\n{_c('INFO', '36')} Shutting down CopyClip Intelligence...")
     finally:
         try:
             server.shutdown()
         except Exception:
             pass
         server.server_close()
-        print("[INFO] Bye.")
+        print(f"{_c('OK', '32')} Bye.")
