@@ -106,9 +106,13 @@ def maybe_handle(argv) -> bool:
         files = conn.execute("SELECT COUNT(*) FROM files WHERE project_id=?", (pid,)).fetchone()[0]
         commits = conn.execute("SELECT COUNT(*) FROM commits WHERE project_id=?", (pid,)).fetchone()[0]
         decisions = conn.execute("SELECT COUNT(*) FROM decisions WHERE project_id=?", (pid,)).fetchone()[0]
+        modules = conn.execute("SELECT COUNT(*) FROM modules WHERE project_id=?", (pid,)).fetchone()[0]
+        risks = conn.execute("SELECT COUNT(*) FROM risks WHERE project_id=?", (pid,)).fetchone()[0]
         print("# CopyClip Project Report")
         print(f"- Files indexed: {files}")
         print(f"- Commits indexed: {commits}")
+        print(f"- Modules mapped: {modules}")
+        print(f"- Risks detected: {risks}")
         print(f"- Decisions tracked: {decisions}")
         return True
 

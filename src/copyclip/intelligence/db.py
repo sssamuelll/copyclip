@@ -1,7 +1,8 @@
-import os
 import sqlite3
 from pathlib import Path
 
+
+# Brief: db_path
 
 def db_path(project_root: str) -> str:
     root = Path(project_root)
@@ -10,11 +11,15 @@ def db_path(project_root: str) -> str:
     return str(data_dir / "intelligence.db")
 
 
+# Brief: connect
+
 def connect(project_root: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path(project_root))
     conn.row_factory = sqlite3.Row
     return conn
 
+
+# Brief: init_schema
 
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(
@@ -55,6 +60,23 @@ def init_schema(conn: sqlite3.Connection) -> None:
             deletions INTEGER
         );
 
+        CREATE TABLE IF NOT EXISTS modules (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            path_prefix TEXT,
+            UNIQUE(project_id, name)
+        );
+
+        CREATE TABLE IF NOT EXISTS dependencies (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            from_module TEXT NOT NULL,
+            to_module TEXT NOT NULL,
+            edge_type TEXT DEFAULT 'import',
+            UNIQUE(project_id, from_module, to_module, edge_type)
+        );
+
         CREATE TABLE IF NOT EXISTS decisions (
             id INTEGER PRIMARY KEY,
             project_id INTEGER NOT NULL,
@@ -65,6 +87,31 @@ def init_schema(conn: sqlite3.Connection) -> None:
             source_type TEXT DEFAULT 'manual',
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             resolved_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS decision_refs (
+            id INTEGER PRIMARY KEY,
+            decision_id INTEGER NOT NULL,
+            ref_type TEXT NOT NULL,
+            ref_value TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS risks (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            area TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            rationale TEXT,
+            score INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS snapshots (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            generated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            summary_json TEXT
         );
         """
     )
