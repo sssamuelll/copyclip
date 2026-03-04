@@ -704,7 +704,98 @@ class DeepSeekClient:
         )
         raise last_exc
 
+
+# --------------------------- Gemini (Google) ---------------------------
+
+class GeminiClient:
+    """LLM client for Google Gemini API."""
+    def __init__(self, api_key: Optional[str], model: str, endpoint: Optional[str], timeout: int, extra_headers: Dict[str, Any] | None = None):
+        self.api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        _ensure_api_key(self.api_key, "Gemini")
+        self.model = model or "gemini-1.5-flash"
+        # Endpoint structure for Gemini: https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
+        self.base = (endpoint or "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
+        self.timeout = timeout
+        self.extra_headers = dict(extra_headers or {})
+
+    async def _post(self, sess, url: str, payload: dict) -> dict:
+        url_with_key = f"{url}?key={self.api_key}"
+        async with sess.post(url_with_key, json=payload, headers=self.extra_headers) as resp:
+            text = await resp.text()
+            if resp.ok:
+                return _json.loads(text)
+            raise HttpLLMError(status=resp.status, headers=dict(resp.headers), body=text)
+
+    async def describe_functions(self, snippets: List[str], lang: str, system_prompt: Optional[str] = None) -> List[str]:
+        aiohttp = _need("aiohttp", "Install aiohttp")
+        url = f"{self.base}/models/{self.model}:generateContent"
         
+        default_system = (
+            "For each {language} code snippet, reply with ONE short line (≤10 words) "
+            "describing its purpose. Return as newline-separated lines, one per snippet. "
+            "Do not add extra commentary."
+        )
+        system_template = _resolve_system_prompt(system_prompt)[0] if system_prompt else default_system
+        system_content = _safe_format_prompt(system_template, lang, code_context="")
+        
+        user_content = _join_snippets(snippets)
+        
+        payload = {
+            "contents": [{
+                "parts": [{"text": f"{system_content}\n\n{user_content}"}]
+            }],
+            "generationConfig": {"temperature": 0.0}
+        }
+
+        start_time = time.time()
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout)) as sess:
+                data = await self._post(sess, url, payload)
+            
+            content = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+            lines = _normalize_lines(content, len(snippets))
+            return lines
+        except Exception as e:
+            raise e
+
+    async def minimize_code_contextually(self, code: str, file_ext: str, language: str = "en", system_prompt: Optional[str] = None) -> str:
+        aiohttp = _need("aiohttp", "Install aiohttp")
+        url = f"{self.base}/models/{self.model}:generateContent"
+        
+        resolved = _resolve_system_prompt(system_prompt)
+        system_content = _safe_format_prompt(resolved[0] if resolved else "Summarize code.", language, code_context=code)
+        
+        payload = {
+            "contents": [{
+                "parts": [{"text": f"{system_content}\n\nMinimize this {file_ext} code contextually:\n\n{code}"}]
+            }],
+            "generationConfig": {"temperature": 0.3}
+        }
+
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout)) as sess:
+            data = await self._post(sess, url, payload)
+        
+        return data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
+
+    async def select_relevant_files(self, files: List[str], intent: str) -> List[str]:
+        aiohttp = _need("aiohttp", "Install aiohttp")
+        url = f"{self.base}/models/{self.model}:generateContent"
+        
+        prompt = f"Given these files:\n{chr(10).join(files)}\n\nIntent: {intent}\n\nReturn ONLY a JSON list of relevant file paths."
+        
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.0, "responseMimeType": "application/json"}
+        }
+
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout)) as sess:
+            data = await self._post(sess, url, payload)
+        
+        content = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+        try:
+            return _json.loads(content)
+        except:
+            return files[:5]
 
 
 # --------------------------- Factory ---------------------------
@@ -715,9 +806,14 @@ class LLMClientFactory:
     def create(provider: str, *, api_key: Optional[str], model: Optional[str], endpoint: Optional[str], timeout: int, extra_headers: Dict[str, Any] | None = None) -> LLMClient:
         p = provider.lower()
         if p == "openai":
-            return OpenAIClient(api_key, model or "gpt-4o-mini", endpoint, timeout, extra_headers or {})
+            return OpenAIClient(api_key, model, endpoint, timeout, extra_headers or {})
         if p == "anthropic":
-            return AnthropicClient(api_key, model or "claude-3-5-sonnet-20240620", endpoint, timeout, extra_headers or {})
+            return AnthropicClient(api_key, model, endpoint, timeout, extra_headers or {})
         if p == "deepseek":
-            return DeepSeekClient(api_key, model or "deepseek-chat", endpoint, timeout, extra_headers or {})
-        raise ValueError(f"Unsupported LLM provider: {provider}")
+            return DeepSeekClient(api_key, model, endpoint, timeout, extra_headers or {})
+        if p in ("gemini", "google"):
+            return GeminiClient(api_key, model, endpoint, timeout, extra_headers or {})
+        
+        # Fallback to OpenAIClient for generic/compatible providers (OpenRouter, OpenClaw, Codex, etc.)
+        logging.info(f"Provider '{provider}' unknown, falling back to OpenAI-compatible client.")
+        return OpenAIClient(api_key, model, endpoint, timeout, extra_headers or {})
