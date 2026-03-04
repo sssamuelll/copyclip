@@ -15,6 +15,9 @@
 
 ## 2. Performance & Reliability
 
+- [x] Project Intelligence Dashboard (Core)
+- [x] Isolated project data (.copyclip folder)
+- [x] GitHub Issues & Git stats integration
 - [ ] File scan cache (hash + mtime) → instant re-scans
 - [ ] Metrics: log timings (scan, read, minimize, assemble)
 - [ ] Token cost report in contextual mode (🔥 AI-workflow differentiator)

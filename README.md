@@ -128,16 +128,18 @@ copyclip . --preset code --output -
 
 ---
 
-## Project Intelligence (New)
+## Project Intelligence
 
-CopyClip now includes a local dashboard for humans to stay in control as AI code volume grows.
+CopyClip includes a local dashboard for humans to stay in control as AI code volume grows. Every project now maintains its own isolated state in a `.copyclip/` folder.
 
 Current dashboard covers:
-- high-level project KPIs (files, commits, modules, risks, decisions)
-- architecture edges (module dependency map)
-- recent change timeline
-- explicit decision tracking
-- risk cards with severity + rationale
+- **Isolated Operations:** Each project uses its own `.copyclip/intelligence.db`.
+- **High-level KPIs:** Files, commits, modules, risks, decisions, and **GitHub issues**.
+- **Architecture Edges:** Module dependency map.
+- **Git Stats:** Analysis of `.git` folder size, branches, and tags.
+- **Recent Change Timeline:** Deep-dive into commit history.
+- **Explicit Decision Tracking:** Manual and automated decision log.
+- **Risk Cards:** Severity + rationale for churn, complexity, and test gaps.
 
 Fast start (recommended):
 
