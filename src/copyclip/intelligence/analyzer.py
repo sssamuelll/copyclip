@@ -199,7 +199,7 @@ def _fetch_github_issues(project_root: str, project_id: int, conn) -> int:
             "issue",
             "list",
             "--limit",
-            "100",
+            "200",
             "--json",
             "number,title,state,author,labels,url,createdAt,updatedAt,body",
             "--state",
@@ -213,19 +213,60 @@ def _fetch_github_issues(project_root: str, project_id: int, conn) -> int:
                 "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     project_id,
-                    str(issue["number"]),
-                    issue["title"],
+                    str(issue.get("number")),
+                    issue.get("title", ""),
                     issue.get("body", ""),
-                    issue["state"],
-                    ",".join([l["name"] for l in issue.get("labels", [])]),
-                    issue["author"].get("login", "unknown") if issue.get("author") else "unknown",
-                    issue["url"],
-                    issue["createdAt"],
-                    issue["updatedAt"],
+                    issue.get("state", ""),
+                    ",".join([l.get("name", "") for l in issue.get("labels", []) if l.get("name")]),
+                    issue.get("author", {}).get("login", "unknown") if issue.get("author") else "unknown",
+                    issue.get("url", ""),
+                    issue.get("createdAt", ""),
+                    issue.get("updatedAt", ""),
                     "github",
                 ),
             )
         return len(issues)
+    except Exception:
+        return 0
+
+
+# Brief: _fetch_github_pull_requests
+
+def _fetch_github_pull_requests(project_root: str, project_id: int, conn) -> int:
+    try:
+        cmd = [
+            "gh",
+            "pr",
+            "list",
+            "--limit",
+            "200",
+            "--json",
+            "number,title,state,author,labels,url,createdAt,updatedAt,body,mergedAt",
+            "--state",
+            "all",
+        ]
+        out = subprocess.check_output(cmd, cwd=project_root, text=True, stderr=subprocess.DEVNULL)
+        pulls = json.loads(out)
+        for pr in pulls:
+            conn.execute(
+                "INSERT INTO pulls(project_id, external_id, title, body, status, merged, labels, author, url, created_at, updated_at, source) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    project_id,
+                    str(pr.get("number")),
+                    pr.get("title", ""),
+                    pr.get("body", ""),
+                    pr.get("state", ""),
+                    1 if pr.get("mergedAt") else 0,
+                    ",".join([l.get("name", "") for l in pr.get("labels", []) if l.get("name")]),
+                    pr.get("author", {}).get("login", "unknown") if pr.get("author") else "unknown",
+                    pr.get("url", ""),
+                    pr.get("createdAt", ""),
+                    pr.get("updatedAt", ""),
+                    "github",
+                ),
+            )
+        return len(pulls)
     except Exception:
         return 0
 
@@ -273,11 +314,12 @@ async def analyze(project_root: str) -> Dict[str, int]:
     )
     project_id = conn.execute("SELECT id FROM projects WHERE root_path=?", (root,)).fetchone()[0]
 
-    for table in ("files", "commits", "file_changes", "modules", "dependencies", "risks", "issues"):
+    for table in ("files", "commits", "file_changes", "modules", "dependencies", "risks", "issues", "pulls"):
         conn.execute(f"DELETE FROM {table} WHERE project_id=?", (project_id,))
 
-    # GitHub Issues
+    # GitHub Issues + PRs
     issue_count = _fetch_github_issues(root, project_id, conn)
+    pull_count = _fetch_github_pull_requests(root, project_id, conn)
 
     # Git stats
     git_stats = _analyze_git_folder(root, project_id, conn)
@@ -424,6 +466,7 @@ async def analyze(project_root: str) -> Dict[str, int]:
         "dependencies": len(dep_edges),
         "risks": risk_count,
         "issues": issue_count,
+        "pulls": pull_count,
         "git_stats": git_stats,
     }
 

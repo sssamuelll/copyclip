@@ -138,7 +138,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
 
             if parsed.path == "/api/overview":
                 if not pid:
-                    self._json(with_meta({"files": 0, "commits": 0, "decisions": 0, "modules": 0, "risks": 0, "issues": 0, "story": ""}))
+                    self._json(with_meta({"files": 0, "commits": 0, "decisions": 0, "modules": 0, "risks": 0, "issues": 0, "pulls": 0, "story": ""}))
                     return
                 files = conn.execute("SELECT COUNT(*) FROM files WHERE project_id=?", (pid,)).fetchone()[0]
                 commits = conn.execute("SELECT COUNT(*) FROM commits WHERE project_id=?", (pid,)).fetchone()[0]
@@ -146,6 +146,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 modules = conn.execute("SELECT COUNT(*) FROM modules WHERE project_id=?", (pid,)).fetchone()[0]
                 risks = conn.execute("SELECT COUNT(*) FROM risks WHERE project_id=?", (pid,)).fetchone()[0]
                 issues = conn.execute("SELECT COUNT(*) FROM issues WHERE project_id=?", (pid,)).fetchone()[0]
+                pulls = conn.execute("SELECT COUNT(*) FROM pulls WHERE project_id=?", (pid,)).fetchone()[0]
                 story = conn.execute("SELECT story FROM projects WHERE id=?", (pid,)).fetchone()[0]
                 self._json(with_meta({
                     "files": files,
@@ -154,6 +155,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     "modules": modules,
                     "risks": risks,
                     "issues": issues,
+                    "pulls": pulls,
                     "story": story or "",
                 }))
                 return
@@ -435,6 +437,38 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 )
                 return
 
+            if parsed.path == "/api/pulls":
+                if not pid:
+                    self._json(with_meta({"items": [], "total": 0, "limit": 0, "offset": 0}))
+                    return
+                limit, offset = _pagination(parsed)
+                total = conn.execute("SELECT COUNT(*) FROM pulls WHERE project_id=?", (pid,)).fetchone()[0]
+                rows = conn.execute(
+                    "SELECT external_id,title,status,merged,labels,author,url,source,created_at,updated_at FROM pulls WHERE project_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                    (pid, limit, offset),
+                ).fetchall()
+                self._json(with_meta({
+                    "items": [
+                        {
+                            "id": r[0],
+                            "title": r[1],
+                            "status": r[2],
+                            "merged": bool(r[3]),
+                            "labels": r[4].split(",") if r[4] else [],
+                            "author": r[5],
+                            "url": r[6],
+                            "source": r[7],
+                            "created_at": r[8],
+                            "updated_at": r[9],
+                        }
+                        for r in rows
+                    ],
+                    "total": total,
+                    "limit": limit,
+                    "offset": offset,
+                }))
+                return
+
             if parsed.path == "/api/risks/trends":
                 if not pid:
                     self._json(with_meta({"latest": {}, "previous": {}, "delta": {}, "has_previous": False}))
@@ -531,6 +565,16 @@ def run_server(project_root: str, port: int = 4310) -> None:
             pid = _project_id(conn, root)
             if not pid:
                 self._json({"error": "run_analyze_first"}, 400)
+                return
+
+            if parsed.path == "/api/github/sync":
+                from .analyzer import analyze
+                try:
+                    summary = asyncio.run(analyze(root))
+                    publish_event("github.sync.completed", {"issues": summary.get("issues", 0), "pulls": summary.get("pulls", 0)})
+                    self._json(with_meta({"ok": True, "summary": summary}))
+                except Exception as e:
+                    self._json({"error": "github_sync_failed", "message": str(e)}, 500)
                 return
 
             if parsed.path == "/api/ask":
@@ -650,7 +694,6 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 return
 
             if parsed.path == "/api/assemble-context":
-                import asyncio
                 from ..reader import read_files_concurrently
                 from ..minimizer import minimize_content
                 from .db import get_active_decisions

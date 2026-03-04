@@ -217,3 +217,30 @@ def test_quality_gate_allows_resolve_with_ref_or_note():
         ok = _patch_json(f"http://127.0.0.1:{port}/api/decisions/{decision_id}", {"status": "resolved"})
         assert ok["ok"] is True
         assert ok["status"] == "resolved"
+
+
+def test_pulls_endpoint_pagination():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        root_path = str(root.absolute())
+        conn = connect(root_path)
+        init_schema(conn)
+        conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root_path, "tmp"))
+        pid = conn.execute("SELECT id FROM projects WHERE root_path=?", (root_path,)).fetchone()[0]
+        for i in range(3):
+            conn.execute(
+                "INSERT INTO pulls(project_id,external_id,title,body,status,merged,labels,author,url,source,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (pid, str(i+1), f"PR {i+1}", "", "OPEN", 0, "", "dev", f"https://x/pr/{i+1}", "github", "2026-01-01", "2026-01-01"),
+            )
+        conn.commit()
+
+        port = _free_port()
+        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
+        th.start()
+        _wait_port(port)
+
+        res = _get_json(f"http://127.0.0.1:{port}/api/pulls?limit=2&offset=1")
+        assert res["total"] == 3
+        assert res["limit"] == 2
+        assert res["offset"] == 1
+        assert len(res["items"]) == 2
