@@ -21,6 +21,22 @@ export const api = {
   changes: () => getJSON<{ items: ChangeItem[] }>('/api/changes'),
   decisions: () => getJSON<{ items: DecisionItem[]; total?: number; limit?: number; offset?: number }>('/api/decisions'),
   decisionHistory: (id: number) => getJSON<{ items: DecisionHistoryItem[]; total?: number; limit?: number; offset?: number }>(`/api/decisions/${id}/history`),
+  updateDecisionStatus: (id: number, status: string, note?: string) =>
+    fetch(`/api/decisions/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, note: note || '' })
+    }).then(async (r) => {
+      const data = await r.json()
+      if (!r.ok) {
+        const err = new Error(data?.message || data?.error || `Request failed: ${r.status}`)
+        ;(err as any).payload = data
+        throw err
+      }
+      return data
+    }),
+  addDecisionRef: (id: number, ref_type: 'file' | 'commit' | 'doc', ref_value: string) =>
+    postJSON(`/api/decisions/${id}/refs`, { ref_type, ref_value }),
   risks: () => getJSON<{ items: RiskItem[]; total?: number; limit?: number; offset?: number }>('/api/risks'),
   riskTrends: () => getJSON<RiskTrends>('/api/risks/trends'),
   issues: () => getJSON<{ items: IssueItem[] }>('/api/issues'),

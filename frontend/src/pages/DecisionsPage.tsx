@@ -5,6 +5,19 @@ import type { DecisionHistoryItem, DecisionItem } from '../types/api'
 export function DecisionsPage({ items }: { items: DecisionItem[] }) {
   const [selectedId, setSelectedId] = useState<number | null>(items[0]?.id ?? null)
   const [history, setHistory] = useState<DecisionHistoryItem[]>([])
+  const [error, setError] = useState('')
+  const [note, setNote] = useState('')
+
+  const selected = items.find((d) => d.id === selectedId) || null
+
+  const loadHistory = async (id: number) => {
+    try {
+      const res = await api.decisionHistory(id)
+      setHistory(res.items || [])
+    } catch {
+      setHistory([])
+    }
+  }
 
   useEffect(() => {
     if (!items.length) {
@@ -19,17 +32,33 @@ export function DecisionsPage({ items }: { items: DecisionItem[] }) {
 
   useEffect(() => {
     if (!selectedId) return
-    ;(async () => {
-      try {
-        const res = await api.decisionHistory(selectedId)
-        setHistory(res.items || [])
-      } catch {
-        setHistory([])
-      }
-    })()
+    loadHistory(selectedId)
   }, [selectedId])
 
-  const selected = items.find((d) => d.id === selectedId) || null
+  const onTransition = async (status: string) => {
+    if (!selected) return
+    setError('')
+    try {
+      await api.updateDecisionStatus(selected.id, status, note)
+      await loadHistory(selected.id)
+    } catch (e: any) {
+      setError(e?.message || 'Status update failed')
+    }
+  }
+
+  const onAddRef = async () => {
+    if (!selected) return
+    setError('')
+    const refType = (prompt('Ref type (file|commit|doc)', 'file') || 'file') as 'file' | 'commit' | 'doc'
+    const refValue = (prompt('Ref value') || '').trim()
+    if (!refValue) return
+    try {
+      await api.addDecisionRef(selected.id, refType, refValue)
+      await loadHistory(selected.id)
+    } catch (e: any) {
+      setError(e?.message || 'Add ref failed')
+    }
+  }
 
   return (
     <section>
@@ -57,6 +86,22 @@ export function DecisionsPage({ items }: { items: DecisionItem[] }) {
               <div><strong>#{selected.id}</strong> — {selected.title}</div>
               <div className="muted">status: {selected.status} | source: {selected.source_type || 'manual'}</div>
               <p>{selected.summary || 'No summary.'}</p>
+
+              <div style={{ display: 'grid', gap: 8, marginBottom: 10 }}>
+                <textarea
+                  rows={2}
+                  placeholder="Optional evidence note (required if resolving without refs)"
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                />
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button onClick={() => onTransition('accepted')}>Accept</button>
+                  <button onClick={() => onTransition('resolved')}>Resolve</button>
+                  <button onClick={() => onTransition('superseded')}>Supersede</button>
+                  <button onClick={onAddRef}>Add Ref</button>
+                </div>
+                {error && <div className="error">{error}</div>}
+              </div>
 
               <h4 style={{ marginBottom: 8 }}>timeline</h4>
               <ul>

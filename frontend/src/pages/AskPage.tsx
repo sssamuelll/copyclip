@@ -40,7 +40,11 @@ export function AskPage() {
               <strong>Citations</strong>
               <ul>
                 {result.citations.map((c, i) => (
-                  <li key={`${c.type}-${c.id}-${i}`}>[{c.type}] {c.label}</li>
+                  <li key={`${c.type}-${c.id}-${i}`}>
+                    <a href="#" onClick={(e) => e.preventDefault()}>
+                      [{c.type}] {c.label}
+                    </a>
+                  </li>
                 ))}
               </ul>
             </div>
