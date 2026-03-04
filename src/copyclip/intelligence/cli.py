@@ -41,8 +41,8 @@ def _link(url: str, label: str | None = None) -> str:
     label = label or url
     if not sys.stdout.isatty():
         return url
-    # OSC 8 hyperlink for terminal emulators that support it.
-    return f"\033]8;;{url}\033\\{label}\033]8;;\033\\"
+    # OSC 8 hyperlink (BEL-terminated; better compatibility across macOS terminals)
+    return f"\033]8;;{url}\a{label}\033]8;;\a"
 
 def maybe_handle(argv) -> bool:
     if len(argv) < 2 or argv[1] not in COMMANDS:

@@ -1229,7 +1229,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
         label = label or url
         if not sys.stdout.isatty():
             return url
-        return f"\033]8;;{url}\033\\{label}\033]8;;\033\\"
+        return f"\033]8;;{url}\a{label}\033]8;;\a"
 
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     dash_url = f"http://127.0.0.1:{port}"
