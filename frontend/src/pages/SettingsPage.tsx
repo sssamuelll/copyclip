@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 
-export function SettingsPage() {
+export function SettingsPage({ onNotify }: { onNotify?: (msg: string) => void }) {
   const [config, setConfig] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -20,6 +20,7 @@ export function SettingsPage() {
     try {
       await api.setConfig(config)
       setSaved(true)
+      onNotify?.('Settings saved')
       setTimeout(() => setSaved(false), 3000)
     } finally {
       setLoading(false)

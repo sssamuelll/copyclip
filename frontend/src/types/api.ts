@@ -5,7 +5,12 @@ export type Overview = {
   modules: number
   risks: number
   issues: number
+  pulls?: number
   story: string
+  meta?: {
+    project?: string
+    generated_at?: string
+  }
 }
 
 export type FileItem = {

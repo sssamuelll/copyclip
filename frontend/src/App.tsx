@@ -27,6 +27,7 @@ export function App() {
   const [nodes, setNodes] = useState<ArchNode[]>([])
   const [edges, setEdges] = useState<ArchEdge[]>([])
   const [error, setError] = useState<string>('')
+  const [toast, setToast] = useState<string>('')
   const [focusDecisionId, setFocusDecisionId] = useState<number | null>(null)
   const [focusRiskArea, setFocusRiskArea] = useState<string | null>(null)
   const [focusCommitId, setFocusCommitId] = useState<string | null>(null)
@@ -78,6 +79,11 @@ export function App() {
     }
   }, [loadAll])
 
+  const notify = (msg: string) => {
+    setToast(msg)
+    window.setTimeout(() => setToast(''), 2200)
+  }
+
   const handleOpenCitation = (c: AskCitation) => {
     if (c.type === 'decision') {
       setPage('decisions')
@@ -106,18 +112,26 @@ export function App() {
       <Sidebar page={page} setPage={(v) => setPage(v as Page)} />
       <main className="main">
         {error && <div className="error">API error: {error}. Make sure `copyclip start` is running.</div>}
+        <div className="muted" style={{ fontSize: '0.75rem' }}>
+          last analyzed: {overview?.meta?.generated_at ? overview.meta.generated_at.replace('T', ' ').slice(0, 19) : 'n/a'}
+        </div>
         {page === 'atlas' && <AtlasPage overview={overview} changes={changes} risks={risks} decisions={decisions} />}
         {page === 'architecture' && <ArchitecturePage nodes={nodes} edges={edges} />}
         {page === 'impact' && <ImpactSimulatorPage />}
         {page === 'context-builder' && <ContextBuilderPage />}
-        {page === 'ask' && <AskPage onOpenCitation={handleOpenCitation} />}
+        {page === 'ask' && <AskPage onOpenCitation={handleOpenCitation} onNotify={notify} />}
         {page === 'changes' && <ChangesPage items={changes} focusCommitId={focusCommitId} />}
         {page === 'decisions' && <DecisionsPage items={decisions} focusDecisionId={focusDecisionId} />}
         {page === 'risks' && <RisksPage items={risks} focusRiskArea={focusRiskArea} />}
         {page === 'issues' && <IssuesPage items={issues} />}
-        {page === 'ops' && <OpsPage />}
-        {page === 'settings' && <SettingsPage />}
+        {page === 'ops' && <OpsPage onNotify={notify} />}
+        {page === 'settings' && <SettingsPage onNotify={notify} />}
       </main>
+      {toast && (
+        <div style={{ position: 'fixed', right: 16, bottom: 16, background: '#111827', color: '#e5e7eb', border: '1px solid #374151', padding: '8px 10px', zIndex: 9999 }}>
+          {toast}
+        </div>
+      )}
       <AgentTerminal />
     </div>
   )

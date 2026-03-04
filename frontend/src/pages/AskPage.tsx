@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { api } from '../api/client'
 import type { AskCitation, AskResponse } from '../types/api'
 
-export function AskPage({ onOpenCitation }: { onOpenCitation: (c: AskCitation) => void }) {
+export function AskPage({ onOpenCitation, onNotify }: { onOpenCitation: (c: AskCitation) => void; onNotify?: (msg: string) => void }) {
   const [q, setQ] = useState('What are the highest-risk areas right now?')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<AskResponse | null>(null)
@@ -15,6 +15,7 @@ export function AskPage({ onOpenCitation }: { onOpenCitation: (c: AskCitation) =
     try {
       const res = await api.ask(q.trim())
       setResult(res)
+      onNotify?.(res.grounded ? 'Grounded answer ready' : 'Answer has low grounding')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Ask failed')
       setResult(null)

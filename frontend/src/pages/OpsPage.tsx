@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import type { AlertEvent, AlertRule, WeeklyExport, SchedulerState } from '../types/api'
 
-export function OpsPage() {
+export function OpsPage({ onNotify }: { onNotify?: (msg: string) => void }) {
   const [rules, setRules] = useState<AlertRule[]>([])
   const [events, setEvents] = useState<AlertEvent[]>([])
   const [fired, setFired] = useState<string[]>([])
@@ -38,11 +38,13 @@ export function OpsPage() {
       enabled: true,
     })
     await refresh()
+    onNotify?.('Rule saved')
   }
 
   const onToggleRule = async (rule: AlertRule) => {
     await api.updateAlertRule(rule.id, { enabled: !rule.enabled })
     await refresh()
+    onNotify?.(rule.enabled ? 'Rule disabled' : 'Rule enabled')
   }
 
   const onEditRule = async (rule: AlertRule) => {
@@ -57,12 +59,14 @@ export function OpsPage() {
       severity: severity || '',
     })
     await refresh()
+    onNotify?.('Rule updated')
   }
 
   const onDeleteRule = async (rule: AlertRule) => {
     if (!confirm(`Delete rule '${rule.name}'?`)) return
     await api.deleteAlertRule(rule.id)
     await refresh()
+    onNotify?.('Rule deleted')
   }
 
   const onGenerateBrief = async () => {
@@ -74,6 +78,7 @@ export function OpsPage() {
     if (!scheduler) return
     await api.setSchedulerState({ enabled: !scheduler.enabled })
     await refresh()
+    onNotify?.(scheduler.enabled ? 'Scheduler disabled' : 'Scheduler enabled')
   }
 
   const onSetSchedulerInterval = async () => {
@@ -81,6 +86,7 @@ export function OpsPage() {
     const value = Number(prompt('Scheduler interval (seconds)', String(scheduler.interval_sec)) || scheduler.interval_sec)
     await api.setSchedulerState({ interval_sec: value })
     await refresh()
+    onNotify?.('Scheduler interval updated')
   }
 
   return (
