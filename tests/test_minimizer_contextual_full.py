@@ -150,3 +150,14 @@ class TestCLIEndToEnd(unittest.TestCase):
         self.assertNotIn("pass:", out or "")
         self.assertIn("def foo():", out or "")
         self.assertIn("class Bar:", out or "")
+
+        # Exact indentation contract: 4 spaces for Python placeholder bodies.
+        self.assertIn("def foo():\n    pass", out or "")
+        self.assertIn("class Bar:\n    pass", out or "")
+
+        # Legacy description ordering contract for extra descriptions.
+        i_desc4 = (out or "").find("# desc4")
+        i_desc3 = (out or "").find("# desc3")
+        i_desc1 = (out or "").find("# desc1")
+        i_desc2 = (out or "").find("# desc2")
+        self.assertTrue(0 <= i_desc4 < i_desc3 < i_desc1 < i_desc2)
