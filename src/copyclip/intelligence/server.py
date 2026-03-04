@@ -35,6 +35,12 @@ def run_server(project_root: str, port: int = 4310) -> None:
     events_lock = threading.Condition()
     next_event_id = {"value": 1}
 
+    scheduler_state = {
+        "enabled": False,
+        "interval_sec": 300,
+        "last_run_at": None,
+    }
+
     def publish_event(kind: str, data: dict):
         with events_lock:
             ev = {
@@ -128,6 +134,30 @@ def run_server(project_root: str, port: int = 4310) -> None:
             conn.commit()
         return fired
 
+    def _scheduler_loop():
+        while True:
+            time.sleep(1)
+            if not scheduler_state["enabled"]:
+                continue
+
+            last_run = scheduler_state.get("last_run_at")
+            if last_run:
+                last_dt = _parse_dt(last_run)
+                if last_dt and (datetime.now(timezone.utc) - last_dt).total_seconds() < int(scheduler_state["interval_sec"]):
+                    continue
+
+            try:
+                conn_s = connect(root)
+                init_schema(conn_s)
+                pid_s = _project_id(conn_s, root)
+                if pid_s:
+                    fired = _evaluate_alerts(conn_s, pid_s)
+                    scheduler_state["last_run_at"] = datetime.now(timezone.utc).isoformat()
+                    if fired:
+                        publish_event("alerts.fired", {"count": len(fired), "items": fired[:5]})
+                conn_s.close()
+            except Exception:
+                pass
     class Handler(BaseHTTPRequestHandler):
         def _json(self, payload, code=200):
             body = json.dumps(payload).encode("utf-8")
@@ -608,6 +638,14 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 }))
                 return
 
+            if parsed.path == "/api/alerts/scheduler":
+                self._json(with_meta({
+                    "enabled": bool(scheduler_state.get("enabled")),
+                    "interval_sec": int(scheduler_state.get("interval_sec") or 300),
+                    "last_run_at": scheduler_state.get("last_run_at"),
+                }))
+                return
+
             if parsed.path == "/api/export/weekly":
                 if not pid:
                     self._json(with_meta({"markdown": "# Weekly Brief\n\nNo data available.", "summary": {}}))
@@ -830,6 +868,20 @@ def run_server(project_root: str, port: int = 4310) -> None:
             pid = _project_id(conn, root)
             if not pid:
                 self._json({"error": "run_analyze_first"}, 400)
+                return
+
+            if parsed.path == "/api/alerts/scheduler":
+                length = int(self.headers.get("Content-Length", "0"))
+                raw = self.rfile.read(length) if length else b"{}"
+                data = json.loads(raw.decode("utf-8"))
+                if "enabled" in data:
+                    scheduler_state["enabled"] = bool(data.get("enabled"))
+                if "interval_sec" in data:
+                    try:
+                        scheduler_state["interval_sec"] = max(15, min(int(data.get("interval_sec")), 86400))
+                    except Exception:
+                        pass
+                self._json({"ok": True, "scheduler": scheduler_state})
                 return
 
             if parsed.path == "/api/alerts/rules":
@@ -1144,6 +1196,9 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 return
 
             self._json({"error": "not_found"}, 404)
+
+    scheduler_thread = threading.Thread(target=_scheduler_loop, daemon=True)
+    scheduler_thread.start()
 
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     print(f"[INFO] CopyClip Intelligence running at http://127.0.0.1:{port}")

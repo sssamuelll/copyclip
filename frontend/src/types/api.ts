@@ -127,5 +127,11 @@ export type WeeklyExport = {
   summary: Record<string, number>
 }
 
+export type SchedulerState = {
+  enabled: boolean
+  interval_sec: number
+  last_run_at?: string | null
+}
+
 export type ArchNode = { name: string }
 export type ArchEdge = { from: string; to: string; type: string }

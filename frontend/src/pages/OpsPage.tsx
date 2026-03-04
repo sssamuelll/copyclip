@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
-import type { AlertEvent, AlertRule, WeeklyExport } from '../types/api'
+import type { AlertEvent, AlertRule, WeeklyExport, SchedulerState } from '../types/api'
 
 export function OpsPage() {
   const [rules, setRules] = useState<AlertRule[]>([])
@@ -8,6 +8,7 @@ export function OpsPage() {
   const [fired, setFired] = useState<string[]>([])
   const [brief, setBrief] = useState<WeeklyExport | null>(null)
   const [days, setDays] = useState(7)
+  const [scheduler, setScheduler] = useState<SchedulerState | null>(null)
 
   const [newRule, setNewRule] = useState({
     name: 'custom-risk-rule',
@@ -18,10 +19,11 @@ export function OpsPage() {
   })
 
   const refresh = async () => {
-    const [alertsRes, rulesRes] = await Promise.all([api.alerts(), api.alertRules()])
+    const [alertsRes, rulesRes, schedulerRes] = await Promise.all([api.alerts(), api.alertRules(), api.schedulerState()])
     setRules(rulesRes.items || [])
     setEvents(alertsRes.events || [])
     setFired((alertsRes.fired || []).map((f) => f.title))
+    setScheduler(schedulerRes)
   }
 
   useEffect(() => {
@@ -68,9 +70,35 @@ export function OpsPage() {
     setBrief(res)
   }
 
+  const onToggleScheduler = async () => {
+    if (!scheduler) return
+    await api.setSchedulerState({ enabled: !scheduler.enabled })
+    await refresh()
+  }
+
+  const onSetSchedulerInterval = async () => {
+    if (!scheduler) return
+    const value = Number(prompt('Scheduler interval (seconds)', String(scheduler.interval_sec)) || scheduler.interval_sec)
+    await api.setSchedulerState({ interval_sec: value })
+    await refresh()
+  }
+
   return (
     <section>
       <h2>ops center</h2>
+
+      <div className="panel" style={{ marginBottom: 12 }}>
+        <h3 style={{ marginTop: 0 }}>alert scheduler</h3>
+        {scheduler ? (
+          <div style={{ display: 'grid', gap: 8 }}>
+            <div>Status: {scheduler.enabled ? 'enabled' : 'disabled'} | interval: {scheduler.interval_sec}s | last run: {scheduler.last_run_at ? scheduler.last_run_at.slice(0, 19) : 'never'}</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={onToggleScheduler}>{scheduler.enabled ? 'Disable scheduler' : 'Enable scheduler'}</button>
+              <button onClick={onSetSchedulerInterval}>Set interval</button>
+            </div>
+          </div>
+        ) : <div className="muted">Scheduler state unavailable.</div>}
+      </div>
 
       <div className="panel" style={{ marginBottom: 12 }}>
         <h3 style={{ marginTop: 0 }}>alert rules</h3>

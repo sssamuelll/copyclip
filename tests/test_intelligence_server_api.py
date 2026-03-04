@@ -361,3 +361,26 @@ def test_alert_rule_patch_and_delete():
 
         rules2 = _get_json(f"http://127.0.0.1:{port}/api/alerts/rules")
         assert not any(r["id"] == rid for r in rules2["items"])
+
+
+def test_alert_scheduler_state_get_and_set():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        root_path = str(root.absolute())
+        conn = connect(root_path)
+        init_schema(conn)
+        conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root_path, "tmp"))
+        conn.commit()
+
+        port = _free_port()
+        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
+        th.start()
+        _wait_port(port)
+
+        s1 = _get_json(f"http://127.0.0.1:{port}/api/alerts/scheduler")
+        assert s1["enabled"] is False
+
+        _post_json(f"http://127.0.0.1:{port}/api/alerts/scheduler", {"enabled": True, "interval_sec": 30})
+        s2 = _get_json(f"http://127.0.0.1:{port}/api/alerts/scheduler")
+        assert s2["enabled"] is True
+        assert int(s2["interval_sec"]) >= 15
