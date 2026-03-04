@@ -40,6 +40,16 @@ export type DecisionItem = {
   title: string
   summary?: string
   status: string
+  source_type?: string
+  created_at: string
+}
+
+export type DecisionHistoryItem = {
+  id: number
+  action: string
+  from_status?: string | null
+  to_status?: string | null
+  note?: string | null
   created_at: string
 }
 export type IssueItem = {

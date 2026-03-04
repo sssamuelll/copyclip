@@ -1,4 +1,4 @@
-import type { ArchEdge, ArchNode, ChangeItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, AgentResponse } from '../types/api'
+import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, AgentResponse } from '../types/api'
 
 async function getJSON<T>(url: string): Promise<T> {
   const r = await fetch(url)
@@ -19,7 +19,8 @@ async function postJSON<T>(url: string, data: any): Promise<T> {
 export const api = {
   overview: () => getJSON<Overview>('/api/overview'),
   changes: () => getJSON<{ items: ChangeItem[] }>('/api/changes'),
-  decisions: () => getJSON<{ items: DecisionItem[] }>('/api/decisions'),
+  decisions: () => getJSON<{ items: DecisionItem[]; total?: number; limit?: number; offset?: number }>('/api/decisions'),
+  decisionHistory: (id: number) => getJSON<{ items: DecisionHistoryItem[]; total?: number; limit?: number; offset?: number }>(`/api/decisions/${id}/history`),
   risks: () => getJSON<{ items: RiskItem[] }>('/api/risks'),
   issues: () => getJSON<{ items: IssueItem[] }>('/api/issues'),
   files: () => getJSON<{ items: FileItem[] }>('/api/files'),
