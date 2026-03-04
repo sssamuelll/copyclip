@@ -774,8 +774,8 @@ _JS_FUNC_START = re.compile(
     r"""
     ^\s*(?:
         (?P<export>export\s+)?(?P<async>async\s+)?function\s+(?P<fname>[A-Za-z_$][A-Za-z0-9_$]*)\s*\(|   # function foo(
-        (?P<cls>class\s+(?P<cname>[A-Za-z_$][A-Za-z0-9_$]*))\b                                       |   # class Foo
-        (?P<var>(?:const|let|var)\s+(?P<aname>[A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?P<arrow>async\s*)?\([^)]*\)\s*=>)  # const foo = (...) => 
+        (?P<cls>(?P<cls_export>export\s+)?class\s+(?P<cname>[A-Za-z_$][A-Za-z0-9_$]*))\b                 |   # class Foo / export class Foo
+        (?P<var>(?P<var_export>export\s+)?(?:const|let|var)\s+(?P<aname>[A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?P<arrow>async\s*)?\([^)]*\)\s*=>)  # (export) const foo = (...) =>
     )
     """,
     re.VERBOSE,
@@ -990,8 +990,12 @@ def _jsts_render_intelligent(content: str, ext: str, docstrings_mode: str, doc_l
         while brace_line < len(lines) and "{" not in lines[brace_line]:
             # si es arrow sin llaves en la MISMA línea (=> expr;)
             if "=>" in lines[brace_line] and "{" not in lines[brace_line]:
-                # reescribe la línea ya emitida para forzar bloque
-                out[-1] = out[-1].rstrip().rstrip(";") + " { /* ... logic omitted ... */ }"
+                # Reescribe arrow one-liner a forma bloque, evitando sintaxis inválida.
+                line = out[-1].rstrip()
+                line2 = re.sub(r"=>\s*[^;]+;?$", "=> { /* ... logic omitted ... */ }", line)
+                if line2 == line:
+                    line2 = line.rstrip(";") + " { /* ... logic omitted ... */ }"
+                out[-1] = line2
                 out.append("")
                 i = brace_line + 1
                 break
@@ -1349,15 +1353,29 @@ def minimize_content(
         llm_result: Optional[str] = None
         llm_err: Optional[Exception] = None
         settings: Dict[str, Any] = {}
+        legacy_descs: Optional[List[str]] = None
 
         with _Spinner(f"LLM minimize ({file_extension})") as sp:
             try:
                 sp.stage("contacting LLM")
                 model_hint = os.getenv("COPYCLIP_LLM_MODEL")
-                llm_result, llm_err, settings = _run_coro_sync(
-                    lambda: contextual_minimize(content, file_extension, doc_lang, model_hint, provider, file_path), # <-- pass file_path
+                llm_payload = _run_coro_sync(
+                    lambda: contextual_minimize(content, file_extension, doc_lang, model_hint, provider, file_path),
                     timeout_s=float(os.getenv("COPYCLIP_LLM_TIMEOUT", str(60)))
                 )
+
+                # Backward compatibility with old tests/mocks:
+                # - new flow returns (result, err, settings)
+                # - old flow/mocks may return list[str] descriptions or a plain string
+                if isinstance(llm_payload, tuple) and len(llm_payload) == 3:
+                    llm_result, llm_err, settings = llm_payload
+                    if not isinstance(settings, dict):
+                        settings = {}
+                elif isinstance(llm_payload, list):
+                    legacy_descs = [str(x) for x in llm_payload]
+                elif isinstance(llm_payload, str):
+                    llm_result = llm_payload
+
                 sp.stage("post-processing")
             except Exception as e:
                 llm_err = e
@@ -1368,6 +1386,10 @@ def minimize_content(
             else:
                 sp.success("done")
 
+        if legacy_descs is not None:
+            funcs = extract_functions(content, "python" if language == "python" else "javascript")
+            return _build_contextual_skeleton(funcs, legacy_descs, language, doc_mode=docstrings_mode)
+
         if llm_result and len(llm_result.strip()) > 100:
             _ctx_dbg("contextual: LLM minimization successful")
             return llm_result
@@ -1375,7 +1397,12 @@ def minimize_content(
         if llm_err:
             # ---> THIS IS THE NEW LOGGING LOGIC <---
             logger = logging.getLogger(__name__)
-            provider_name = settings.get("provider", "unknown")
+            provider_name = "unknown"
+            if isinstance(settings, dict):
+                provider_name = settings.get("provider") or provider_name
+            provider_name = provider_name if provider_name != "unknown" else (
+                provider or os.getenv("COPYCLIP_LLM_PROVIDER") or "deepseek"
+            )
             # NOTE: elapsed_ms is now correctly calculated and passed.
             elapsed_ms = int((time.time() - sp.start_time) * 1000) if hasattr(sp, 'start_time') else 0
             log_data = map_exception_to_log_data(
@@ -1388,6 +1415,15 @@ def minimize_content(
             message = f"minimization_failed: {log_data['cause']}"
             log_entry = {"message": message, **log_data}
             logger.error(json.dumps(log_entry))
+
+            # User-facing actionable hint (single line) when possible.
+            err_text = str(llm_err)
+            if "api key not provided" in err_text.lower() or "missing api key" in err_text.lower():
+                _ctx_log(f"LLM auth failed ({provider_name}): missing API key. Set provider key in .env")
+            elif log_data.get("cause") == "timeout":
+                _ctx_log(f"LLM timeout ({provider_name}). Try COPYCLIP_LLM_TIMEOUT=120")
+            elif err_text:
+                _ctx_log(f"LLM fallback reason ({provider_name}): {err_text}")
             # ---> END OF NEW LOGIC <---
         
         # Fallback: more detailed structural rendering (keeps imports, signatures, and optionally docstrings)

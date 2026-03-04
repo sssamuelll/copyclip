@@ -164,6 +164,10 @@ def map_exception_to_log_data(
     # 3. If no specific cause yet, classify by other common exception types.
     if cause is None:
         for e_chain in _iter_exc_chain(exc):
+            msg = str(e_chain).lower()
+            if "api key not provided" in msg or "missing api key" in msg:
+                cause = "unauthorized"
+                break
             if isinstance(e_chain, (asyncio.TimeoutError, TimeoutError)) or \
                (aiohttp and isinstance(e_chain, aiohttp.ServerTimeoutError)):
                 cause = "timeout"
