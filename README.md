@@ -152,6 +152,15 @@ copyclip serve --path . --port 4310
 # then open http://127.0.0.1:4310
 ```
 
+Frontend scaffold (React + Vite) is available under `frontend/` and proxies to the local API:
+
+```bash
+cd frontend
+npm install
+npm run dev
+# open http://127.0.0.1:5173
+```
+
 Track explicit decisions:
 
 ```bash
