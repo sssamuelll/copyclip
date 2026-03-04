@@ -73,9 +73,9 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     self._json({"items": []})
                     return
                 rows = conn.execute(
-                    "SELECT sha, message, date FROM commits WHERE project_id=? ORDER BY date DESC LIMIT 50", (pid,)
+                    "SELECT sha, author, message, date FROM commits WHERE project_id=? ORDER BY date DESC LIMIT 200", (pid,)
                 ).fetchall()
-                self._json({"items": [{"sha": r[0], "message": r[1], "date": r[2]} for r in rows]})
+                self._json({"items": [{"sha": r[0], "author": r[1], "message": r[2], "date": r[3]} for r in rows]})
                 return
 
             if parsed.path == "/api/decisions":
@@ -83,7 +83,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     self._json({"items": []})
                     return
                 rows = conn.execute(
-                    "SELECT id,title,summary,status,created_at FROM decisions WHERE project_id=? ORDER BY id DESC LIMIT 100",
+                    "SELECT id,title,summary,status,source_type,created_at FROM decisions WHERE project_id=? ORDER BY id DESC LIMIT 200",
                     (pid,),
                 ).fetchall()
                 self._json(
@@ -94,7 +94,8 @@ def run_server(project_root: str, port: int = 4310) -> None:
                                 "title": r[1],
                                 "summary": r[2],
                                 "status": r[3],
-                                "created_at": r[4],
+                                "source_type": r[4],
+                                "created_at": r[5],
                             }
                             for r in rows
                         ]
@@ -147,6 +148,41 @@ def run_server(project_root: str, port: int = 4310) -> None:
 
             self._json({"error": "not_found"}, 404)
 
+        def do_PATCH(self):
+            parsed = urlparse(self.path)
+            conn = connect(root)
+            init_schema(conn)
+            pid = _project_id(conn, root)
+            if not pid:
+                self._json({"error": "run_analyze_first"}, 400)
+                return
+
+            if parsed.path.startswith("/api/decisions/"):
+                try:
+                    decision_id = int(parsed.path.rsplit("/", 1)[-1])
+                except Exception:
+                    self._json({"error": "invalid_decision_id"}, 400)
+                    return
+
+                length = int(self.headers.get("Content-Length", "0"))
+                raw = self.rfile.read(length) if length else b"{}"
+                data = json.loads(raw.decode("utf-8"))
+                status = (data.get("status") or "").strip()
+                allowed = {"proposed", "accepted", "unresolved", "resolved", "superseded"}
+                if status not in allowed:
+                    self._json({"error": "invalid_status", "allowed": sorted(allowed)}, 400)
+                    return
+
+                conn.execute(
+                    "UPDATE decisions SET status=?, resolved_at=CASE WHEN ?='resolved' THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=? AND project_id=?",
+                    (status, status, decision_id, pid),
+                )
+                conn.commit()
+                self._json({"ok": True, "id": decision_id, "status": status})
+                return
+
+            self._json({"error": "not_found"}, 404)
+
         def do_POST(self):
             parsed = urlparse(self.path)
             conn = connect(root)
@@ -156,7 +192,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 self._json({"error": "run_analyze_first"}, 400)
                 return
 
-            if parsed.path == "/api/decisions":
+            if parsed.path == "/api/decisions": 
                 length = int(self.headers.get("Content-Length", "0"))
                 raw = self.rfile.read(length) if length else b"{}"
                 data = json.loads(raw.decode("utf-8"))

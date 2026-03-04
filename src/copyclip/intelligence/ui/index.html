@@ -600,177 +600,271 @@
 </div>
 
 <script>
+const state = { overview:null, changes:[], decisions:[], risks:[], arch:{nodes:[],edges:[]}, selectedDecision:null, selectedModule:null, decisionFilter:'all' };
+
+const qs = (s, root=document) => root.querySelector(s);
+const qsa = (s, root=document) => Array.from(root.querySelectorAll(s));
+
 function switchPage(pageName) {
-  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  document.getElementById('page-' + pageName).classList.add('active');
-  document.querySelector('[data-page="' + pageName + '"]').classList.add('active');
+  qsa('.page').forEach(p => p.classList.remove('active'));
+  qsa('.nav-item').forEach(n => n.classList.remove('active'));
+  qs('#page-' + pageName)?.classList.add('active');
+  qs('[data-page="' + pageName + '"]')?.classList.add('active');
 }
 
-document.querySelectorAll('.nav-item').forEach(item => {
-  item.addEventListener('click', () => switchPage(item.dataset.page));
-});
+qsa('.nav-item').forEach(item => item.addEventListener('click', () => switchPage(item.dataset.page)));
+qsa('.time-switcher').forEach(sw => sw.addEventListener('click', (e) => {
+  if (!e.target.classList.contains('time-btn')) return;
+  qsa('.time-btn', sw).forEach(b => b.classList.remove('active'));
+  e.target.classList.add('active');
+}));
+qsa('.filters-row').forEach(row => row.addEventListener('click', (e) => {
+  if (!e.target.classList.contains('filter-opt')) return;
+  qsa('.filter-opt', row).forEach(o => o.classList.remove('active'));
+  e.target.classList.add('active');
+}));
 
-// Time switcher toggle
-document.querySelectorAll('.time-switcher').forEach(sw => {
-  sw.querySelectorAll('.time-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      sw.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-    });
-  });
-});
-
-// Filter toggle
-document.querySelectorAll('.filters-row').forEach(row => {
-  row.querySelectorAll('.filter-opt').forEach(opt => {
-    opt.addEventListener('click', () => {
-      row.querySelectorAll('.filter-opt').forEach(o => o.classList.remove('active'));
-      opt.classList.add('active');
-    });
-  });
-});
-
-// Status tabs toggle
-document.querySelectorAll('.status-tabs').forEach(tabs => {
-  tabs.querySelectorAll('.status-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      tabs.querySelectorAll('.status-tab').forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-    });
-  });
-});
-
-// Table row selection
-document.querySelectorAll('.dec-list-panel .table-row').forEach(row => {
-  row.addEventListener('click', () => {
-    document.querySelectorAll('.dec-list-panel .table-row').forEach(r => r.classList.remove('selected'));
-    row.classList.add('selected');
-  });
-});
-
-async function getJSON(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed ${url}: ${res.status}`);
-  return res.json();
-}
+async function getJSON(url){ const r=await fetch(url); if(!r.ok) throw new Error(`${url} -> ${r.status}`); return r.json(); }
+async function patchJSON(url, body){ const r=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(!r.ok) throw new Error(`${url} -> ${r.status}`); return r.json(); }
+async function postJSON(url, body){ const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(!r.ok) throw new Error(`${url} -> ${r.status}`); return r.json(); }
 
 function sevClass(sev){ return sev === 'high' ? 'severity-high' : (sev === 'med' ? 'severity-med' : 'severity-low'); }
 function scoreColor(score){ return score >= 75 ? 'var(--accent-red)' : (score >= 45 ? 'var(--accent-amber)' : 'var(--accent-green)'); }
 
-function renderOverview(overview, changes, risks, decisions){
-  const kpis = document.querySelectorAll('#page-overview .kpi-card .kpi-value');
-  if (kpis.length >= 5) {
-    kpis[0].textContent = overview.files ?? 0;
-    kpis[1].textContent = overview.commits ?? 0;
-    kpis[2].textContent = overview.modules ?? 0;
-    kpis[3].textContent = overview.risks ?? 0;
-    kpis[4].textContent = decisions.items?.filter(d => d.status !== 'resolved').length ?? 0;
+function renderOverview(){
+  const o = state.overview || {files:0,commits:0,modules:0,risks:0};
+  const kpis = qsa('#page-overview .kpi-card .kpi-value');
+  if (kpis.length >= 5){
+    kpis[0].textContent = o.files || 0;
+    kpis[1].textContent = o.commits || 0;
+    kpis[2].textContent = o.modules || 0;
+    kpis[3].textContent = o.risks || 0;
+    kpis[4].textContent = state.decisions.filter(d => d.status !== 'resolved').length;
   }
 
-  const topChanges = document.querySelector('#page-overview .left-column .section-panel:nth-child(1)');
-  if (topChanges) {
-    topChanges.querySelectorAll('.commit-row').forEach(n => n.remove());
-    (changes.items || []).slice(0, 6).forEach(c => {
-      topChanges.insertAdjacentHTML('beforeend', `<div class="commit-row"><span class="commit-sha">${(c.sha||'').slice(0,7)}</span><span class="commit-msg">${c.message||''}</span><div class="commit-meta"><span class="commit-author">${c.author||'git'}</span><span class="commit-time">${(c.date||'').slice(0,10)}</span></div></div>`);
-    });
+  const topChanges = qs('#page-overview .left-column .section-panel:nth-child(1)');
+  if (topChanges){
+    qsa('.commit-row', topChanges).forEach(n => n.remove());
+    state.changes.slice(0, 6).forEach(c => topChanges.insertAdjacentHTML('beforeend', `<div class="commit-row"><span class="commit-sha">${(c.sha||'').slice(0,7)}</span><span class="commit-msg">${c.message||''}</span><div class="commit-meta"><span class="commit-author">${c.author||'git'}</span><span class="commit-time">${(c.date||'').slice(0,10)}</span></div></div>`));
   }
 
-  const topRisks = document.querySelector('#page-overview .left-column .section-panel:nth-child(2)');
-  if (topRisks) {
-    topRisks.querySelectorAll('.risk-row').forEach(n => n.remove());
-    (risks.items || []).slice(0, 5).forEach(r => {
-      topRisks.insertAdjacentHTML('beforeend', `<div class="risk-row"><span class="severity-badge ${sevClass(r.severity)}">${r.severity}</span><div class="risk-info"><span class="risk-area">${r.area}</span><span class="risk-rationale">${r.rationale||''}</span></div><span class="risk-score" style="color:${scoreColor(r.score||0)}">${r.score||0}</span></div>`);
-    });
+  const topRisks = qs('#page-overview .left-column .section-panel:nth-child(2)');
+  if (topRisks){
+    qsa('.risk-row', topRisks).forEach(n => n.remove());
+    state.risks.slice(0, 5).forEach(r => topRisks.insertAdjacentHTML('beforeend', `<div class="risk-row"><span class="severity-badge ${sevClass(r.severity)}">${r.severity}</span><div class="risk-info"><span class="risk-area">${r.area}</span><span class="risk-rationale">${r.rationale||''}</span></div><span class="risk-score" style="color:${scoreColor(r.score||0)}">${r.score||0}</span></div>`));
   }
 
-  const decQueue = document.querySelector('#page-overview .right-column .section-panel');
-  if (decQueue) {
-    decQueue.querySelectorAll('.decision-row').forEach(n => n.remove());
-    const openDecisions = (decisions.items || []).filter(d => d.status !== 'resolved').slice(0, 8);
-    openDecisions.forEach(d => {
-      decQueue.insertAdjacentHTML('beforeend', `<div class="decision-row"><div class="decision-top"><span class="status-badge status-proposed">${d.status||'proposed'}</span><span class="decision-id">#dec-${d.id}</span></div><span class="decision-title">${d.title||''}</span><span class="decision-source">source: ${d.source_type||'manual'}</span></div>`);
-    });
-    const badge = decQueue.querySelector('.count-badge');
-    if (badge) badge.textContent = String(openDecisions.length);
+  const decQueue = qs('#page-overview .right-column .section-panel');
+  if (decQueue){
+    qsa('.decision-row', decQueue).forEach(n => n.remove());
+    const open = state.decisions.filter(d => d.status !== 'resolved').slice(0,8);
+    open.forEach(d => decQueue.insertAdjacentHTML('beforeend', `<div class="decision-row"><div class="decision-top"><span class="status-badge status-proposed">${d.status||'proposed'}</span><span class="decision-id">#dec-${d.id}</span></div><span class="decision-title">${d.title||''}</span><span class="decision-source">source: ${d.source_type||'manual'}</span></div>`));
+    const badge = qs('.count-badge', decQueue); if (badge) badge.textContent = String(open.length);
   }
 }
 
-function renderChanges(changes){
-  const timelinePanel = document.querySelector('#page-changes .section-panel:nth-child(3)');
-  if (!timelinePanel) return;
-  timelinePanel.querySelectorAll('.commit-row').forEach(n => n.remove());
-  (changes.items || []).slice(0, 30).forEach(c => {
-    timelinePanel.insertAdjacentHTML('beforeend', `<div class="commit-row"><span class="commit-sha">${(c.sha||'').slice(0,7)}</span><span class="commit-msg">${c.message||''}</span><div class="commit-meta"><span class="commit-author">${c.author||'git'}</span><span class="commit-time">${(c.date||'').slice(0,10)}</span></div></div>`);
+function renderChanges(){
+  const panel = qs('#page-changes .section-panel:nth-child(3)');
+  if (!panel) return;
+  qsa('.commit-row', panel).forEach(n => n.remove());
+  state.changes.slice(0, 50).forEach(c => panel.insertAdjacentHTML('beforeend', `<div class="commit-row"><span class="commit-sha">${(c.sha||'').slice(0,7)}</span><span class="commit-msg">${c.message||''}</span><div class="commit-meta"><span class="commit-author">${c.author||'git'}</span><span class="commit-time">${(c.date||'').slice(0,10)}</span></div></div>`));
+}
+
+function filteredDecisions(){
+  if (state.decisionFilter === 'all') return state.decisions;
+  return state.decisions.filter(d => d.status === state.decisionFilter);
+}
+
+function selectDecision(dec){
+  state.selectedDecision = dec;
+  const container = qs('#page-decisions .dec-list-panel');
+  qsa('.table-row', container).forEach(r => r.classList.remove('selected'));
+  const row = qs(`.table-row[data-decision-id="${dec.id}"]`, container); if (row) row.classList.add('selected');
+
+  const detail = qs('#page-decisions .dec-detail');
+  if (!detail) return;
+  qs('.detail-id', detail).textContent = `#dec-${dec.id}`;
+  const st = qs('.detail-id-row .status-badge', detail); if (st) st.textContent = dec.status || 'proposed';
+  qs('.detail-title', detail).textContent = dec.title || '';
+  qs('.detail-meta', detail).textContent = `created: ${(dec.created_at||'').slice(0,10)} | source: ${dec.source_type||'manual'}`;
+  qs('.detail-text', detail).textContent = dec.summary || 'No summary provided.';
+
+  const refsWrap = qsa('div[style*="margin-top:4px"]', detail)[0];
+  if (refsWrap){
+    refsWrap.innerHTML = `<div class="ref-link"><span class="ref-arrow">→</span><span class="ref-text">decision #${dec.id}</span></div>`;
+  }
+}
+
+function renderDecisions(){
+  const list = qs('#page-decisions .dec-list-panel');
+  if (!list) return;
+  qsa('.table-row', list).forEach(n => n.remove());
+  const items = filteredDecisions();
+  items.forEach((d, idx) => {
+    list.insertAdjacentHTML('beforeend', `<div class="table-row ${idx===0?'selected':''}" data-decision-id="${d.id}"><span class="col-id">#dec-${d.id}</span><span class="col-title">${d.title||''}</span><span class="col-status"><span class="status-badge status-proposed">${d.status||'proposed'}</span></span><span class="col-source">${d.source_type||'manual'}</span></div>`);
+  });
+  qsa('.table-row', list).forEach(r => r.addEventListener('click', () => {
+    const id = Number(r.getAttribute('data-decision-id'));
+    const dec = state.decisions.find(d => d.id === id);
+    if (dec) selectDecision(dec);
+  }));
+
+  if (items.length) selectDecision(items[0]);
+}
+
+function layoutNodes(nodes){
+  const w = 760, h = 560, cx = w/2, cy = h/2, r = Math.min(w,h)*0.35;
+  return nodes.map((n,i)=>{
+    const a = (Math.PI*2*(i/Math.max(nodes.length,1))) - Math.PI/2;
+    return { ...n, x: cx + r*Math.cos(a), y: cy + r*Math.sin(a) };
   });
 }
 
-function renderDecisions(decisions){
-  const table = document.querySelector('#page-decisions .dec-list-panel');
+function selectModule(name){
+  state.selectedModule = name;
+  const edges = state.arch.edges;
+  const out = edges.filter(e => e.from === name);
+  const inbound = edges.filter(e => e.to === name);
+  const side = qs('#page-architecture .side-panel');
+  if (!side) return;
+  qs('.panel-name', side).textContent = name;
+  qs('.panel-desc', side).textContent = 'module dependency view';
+  const vals = qsa('.stat-value', side);
+  if (vals.length >= 4){
+    vals[0].textContent = String((state.arch.nodes.find(n=>n.name===name)?.files_count) || 0);
+    vals[1].textContent = String(Math.min((inbound.length+out.length)*10,100));
+    vals[2].textContent = String(inbound.length);
+    vals[3].textContent = String(out.length);
+  }
+  const depsWrap = qs('#page-architecture .panel-section:nth-child(3) div[style*="flex-direction:column"]');
+  if (depsWrap){
+    depsWrap.innerHTML = '';
+    out.slice(0,6).forEach(e => depsWrap.insertAdjacentHTML('beforeend', `<div class="dep-row"><span class="dep-arrow" style="color:var(--accent-green)">→</span><span class="dep-name">${e.to}</span></div>`));
+    inbound.slice(0,6).forEach(e => depsWrap.insertAdjacentHTML('beforeend', `<div class="dep-row"><span class="dep-arrow" style="color:var(--accent-cyan)">←</span><span class="dep-name">${e.from}</span></div>`));
+  }
+}
+
+function renderArchitecture(){
+  const area = qs('#page-architecture .graph-area');
+  if (!area) return;
+  qsa('.graph-node', area).forEach(n => n.remove());
+  qsa('.graph-lines', area).forEach(n => n.remove());
+
+  const nodes = layoutNodes(state.arch.nodes || []);
+  const byName = Object.fromEntries(nodes.map(n => [n.name, n]));
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'graph-lines');
+  (state.arch.edges || []).forEach(e => {
+    const a = byName[e.from], b = byName[e.to];
+    if (!a || !b) return;
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', String(a.x)); line.setAttribute('y1', String(a.y));
+    line.setAttribute('x2', String(b.x)); line.setAttribute('y2', String(b.y));
+    svg.appendChild(line);
+  });
+  area.appendChild(svg);
+
+  nodes.forEach(n => {
+    const div = document.createElement('div');
+    div.className = 'graph-node';
+    div.style.left = `${n.x-40}px`; div.style.top = `${n.y-20}px`;
+    div.style.borderColor = 'var(--accent-cyan)'; div.style.background = 'rgba(6,182,212,0.08)';
+    div.innerHTML = `<span class="graph-node-name" style="color:var(--accent-cyan)">${n.name}</span><span class="graph-node-files">module</span>`;
+    div.addEventListener('click', () => selectModule(n.name));
+    area.appendChild(div);
+  });
+
+  if (nodes.length) selectModule(nodes[0].name);
+}
+
+function renderRisks(){
+  const table = qs('#page-risks .risk-table');
   if (!table) return;
-  table.querySelectorAll('.table-row').forEach(n => n.remove());
-  (decisions.items || []).forEach((d, idx) => {
-    table.insertAdjacentHTML('beforeend', `<div class="table-row ${idx===0?'selected':''}"><span class="col-id">#dec-${d.id}</span><span class="col-title">${d.title||''}</span><span class="col-status"><span class="status-badge status-proposed">${d.status||'proposed'}</span></span><span class="col-source">${d.source_type||'manual'}</span></div>`);
-  });
-}
-
-function renderRisks(risks){
-  const table = document.querySelector('#page-risks .risk-table');
-  if (!table) return;
-  table.querySelectorAll('.risk-table-row').forEach(n => n.remove());
-  (risks.items || []).forEach(r => {
-    table.insertAdjacentHTML('beforeend', `<div class="risk-table-row"><span class="rt-col-sev"><span class="severity-badge ${sevClass(r.severity)}">${r.severity}</span></span><span class="rt-col-area">${r.area||''}</span><span class="rt-col-kind">${r.kind||''}</span><span class="rt-col-score" style="color:${scoreColor(r.score||0)}">${r.score||0}</span><span class="rt-col-rationale">${r.rationale||''}</span></div>`);
-  });
+  qsa('.risk-table-row', table).forEach(n => n.remove());
+  state.risks.forEach(r => table.insertAdjacentHTML('beforeend', `<div class="risk-table-row"><span class="rt-col-sev"><span class="severity-badge ${sevClass(r.severity)}">${r.severity}</span></span><span class="rt-col-area">${r.area||''}</span><span class="rt-col-kind">${r.kind||''}</span><span class="rt-col-score" style="color:${scoreColor(r.score||0)}">${r.score||0}</span><span class="rt-col-rationale">${r.rationale||''}</span></div>`));
 
   const counts = {high:0, med:0, low:0};
-  (risks.items||[]).forEach(r => { if (counts[r.severity] !== undefined) counts[r.severity]++; });
-  const rows = document.querySelectorAll('#page-risks .sev-bar-row');
-  const total = Math.max((risks.items||[]).length, 1);
+  state.risks.forEach(r => { if (counts[r.severity] !== undefined) counts[r.severity]++; });
+  const rows = qsa('#page-risks .sev-bar-row');
+  const total = Math.max(state.risks.length, 1);
   [['high',0],['med',1],['low',2]].forEach(([k,i]) => {
     const row = rows[i]; if (!row) return;
-    const fill = row.querySelector('.sev-bar-fill');
-    const count = row.querySelector('.sev-bar-count');
+    const fill = qs('.sev-bar-fill', row); const count = qs('.sev-bar-count', row);
     const c = counts[k] || 0;
     if (fill) fill.style.width = `${Math.round((c/total)*100)}%`;
     if (count) count.textContent = String(c);
   });
 }
 
-function renderArchitecture(arch){
-  const panel = document.querySelector('#page-architecture .panel-section:nth-child(3) div[style*="flex-direction:column"]');
-  if (!panel) return;
-  panel.innerHTML = '';
-  (arch.edges || []).slice(0, 8).forEach(e => {
-    panel.insertAdjacentHTML('beforeend', `<div class="dep-row"><span class="dep-arrow" style="color:var(--accent-green)">&rarr;</span><span class="dep-name">${e.from} → ${e.to}</span></div>`);
-  });
+function attachDecisionActions(){
+  const detail = qs('#page-decisions .dec-detail');
+  if (!detail) return;
+  const btns = qsa('.action-btn', detail);
+  const map = { '$ accept':'accepted', '$ resolve':'resolved', '$ supersede':'superseded' };
+  btns.forEach(btn => btn.addEventListener('click', async () => {
+    if (!state.selectedDecision) return;
+    const status = map[btn.textContent.trim()];
+    if (!status) return;
+    await patchJSON(`/api/decisions/${state.selectedDecision.id}`, { status });
+    await refresh();
+  }));
+
+  const addBtn = qs('#page-decisions .add-btn');
+  if (addBtn){
+    addBtn.addEventListener('click', async () => {
+      const title = prompt('Decision title');
+      if (!title) return;
+      const summary = prompt('Decision summary') || '';
+      await postJSON('/api/decisions', { title, summary });
+      await refresh();
+    });
+  }
+
+  qsa('.status-tab').forEach(tab => tab.addEventListener('click', () => {
+    qsa('.status-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    const label = tab.textContent.toLowerCase();
+    const key = ['all','proposed','accepted','resolved','superseded'].find(k => label.includes(k)) || 'all';
+    state.decisionFilter = key;
+    renderDecisions();
+  }));
 }
 
-async function hydrateFromAPI(){
-  try {
-    const [overview, changes, decisions, risks, arch] = await Promise.all([
-      getJSON('/api/overview'),
-      getJSON('/api/changes'),
-      getJSON('/api/decisions'),
-      getJSON('/api/risks'),
-      getJSON('/api/architecture/graph'),
-    ]);
+async function refresh(){
+  const [overview, changes, decisions, risks, arch] = await Promise.all([
+    getJSON('/api/overview'),
+    getJSON('/api/changes'),
+    getJSON('/api/decisions'),
+    getJSON('/api/risks'),
+    getJSON('/api/architecture/graph'),
+  ]);
+  state.overview = overview;
+  state.changes = changes.items || [];
+  state.decisions = decisions.items || [];
+  state.risks = risks.items || [];
+  state.arch = arch || {nodes:[],edges:[]};
 
-    renderOverview(overview, changes, risks, decisions);
-    renderChanges(changes);
-    renderDecisions(decisions);
-    renderRisks(risks);
-    renderArchitecture(arch);
+  renderOverview();
+  renderChanges();
+  renderDecisions();
+  renderRisks();
+  renderArchitecture();
 
-    const idxText = document.querySelector('.index-text');
-    if (idxText) idxText.textContent = 'live project data';
-  } catch (err) {
+  const idxText = qs('.index-text');
+  if (idxText) idxText.textContent = `last indexed ${new Date().toLocaleTimeString()}`;
+}
+
+(async function init(){
+  attachDecisionActions();
+  qs('.refresh-btn')?.addEventListener('click', refresh);
+  try { await refresh(); }
+  catch (err) {
     console.error(err);
-    const idxText = document.querySelector('.index-text');
+    const idxText = qs('.index-text');
     if (idxText) idxText.textContent = 'API unavailable';
   }
-}
-
-hydrateFromAPI();
+})();
 </script>
 </body>
 </html>
