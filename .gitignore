@@ -128,3 +128,10 @@ docs/_build/
 
 # local intelligence runtime data
 .copyclip/
+
+# frontend artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
