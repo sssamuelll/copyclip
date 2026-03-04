@@ -126,6 +126,35 @@ copyclip . --preset code --output -
 
 ---
 
+## Project Intelligence (New)
+
+Analyze repository intelligence data:
+
+```bash
+copyclip analyze --path .
+```
+
+Start local dashboard service:
+
+```bash
+copyclip serve --path . --port 4310
+# then open http://127.0.0.1:4310
+```
+
+Track explicit decisions:
+
+```bash
+copyclip decision add --title "Adopt WebGPU first for sim" --summary "CPU fallback remains required"
+copyclip decision list
+copyclip decision resolve 1
+```
+
+Generate a quick human-readable report:
+
+```bash
+copyclip report --path .
+```
+
 ## Typical Workflows
 
 ### 1) Debug handoff to an LLM

@@ -20,6 +20,7 @@ from copyclip.minimizer import minimize_content
 from copyclip.tokens import count_raw_tokens
 from copyclip.flow_diagram import extract_flow_diagram
 from copyclip.ast_extractor import build_dependency_mermaid
+from copyclip.intelligence.cli import maybe_handle as maybe_handle_intelligence
 
 DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
@@ -55,6 +56,10 @@ def _get_copyclip_ignore_file() -> Optional[str]:
 
 # Brief: main
 def main():
+    # Intelligence commands are handled first and remain additive.
+    if maybe_handle_intelligence(sys.argv):
+        return
+
     load_dotenv(override=True)
     parser = argparse.ArgumentParser(
         description=(

@@ -125,3 +125,6 @@ docs/_build/
 # Kilocode
 # ------------------------------
 .kilocode/
+
+# local intelligence runtime data
+.copyclip/
