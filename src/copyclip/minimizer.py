@@ -1223,10 +1223,13 @@ def _build_contextual_skeleton(funcs: List[Dict], descs: List[str], lang: str, *
         header = "# " + desc if lang == "python" else "// " + desc
         sig = (f["code"].splitlines() or [""])[0].strip()
         if lang == "python":
-            # normalize line ending to have a colon
+            # Keep only declaration header (avoid invalid one-liners like `def f(): return 1:`)
             sig = sig.rstrip()
-            if not sig.endswith(":"):
+            if ":" in sig:
+                sig = sig.split(":", 1)[0].rstrip() + ":"
+            elif not sig.endswith(":"):
                 sig = sig + ":"
+
             parts.append(header)
             parts.append(sig)
             if doc_mode != "off" and desc:

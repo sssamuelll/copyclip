@@ -144,3 +144,9 @@ class TestCLIEndToEnd(unittest.TestCase):
 
         self.assertIn("# desc1", out or "")
         self.assertIn("// desc3", out or "")
+
+        # Python fallback skeleton must remain syntactically valid/declarative
+        self.assertNotIn("return 42:", out or "")
+        self.assertNotIn("pass:", out or "")
+        self.assertIn("def foo():", out or "")
+        self.assertIn("class Bar:", out or "")
