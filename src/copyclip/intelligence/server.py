@@ -13,6 +13,16 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .db import connect, init_schema
+from .phases import (
+    PHASE_COMPLETED,
+    PHASE_DISCOVERY,
+    PHASE_ERROR,
+    PHASE_GIT_HISTORY,
+    PHASE_IMPORT_GRAPH,
+    PHASE_METADATA_HASH,
+    PHASE_RISK_SIGNALS,
+    PHASE_SNAPSHOTS,
+)
 
 
 def _load_ui_html() -> str:
@@ -52,6 +62,39 @@ def run_server(project_root: str, port: int = 4310) -> None:
             dirs[:] = [d for d in dirs if d not in ignored_dirs]
             total += len(files)
         return total
+
+    PHASE_ORDER = {
+        PHASE_DISCOVERY: 10,
+        PHASE_METADATA_HASH: 20,
+        PHASE_IMPORT_GRAPH: 30,
+        PHASE_GIT_HISTORY: 40,
+        PHASE_RISK_SIGNALS: 50,
+        PHASE_SNAPSHOTS: 60,
+        PHASE_COMPLETED: 100,
+        PHASE_ERROR: 999,
+    }
+
+    def _set_job_phase(job_id: str, phase: str, processed: int, total_local: int, message: str):
+        conn_p = connect(root)
+        init_schema(conn_p)
+        row = conn_p.execute("SELECT phase FROM analysis_jobs WHERE id=?", (job_id,)).fetchone()
+        current_phase = row[0] if row else None
+
+        # Keep monotonic progression (except explicit error/completed handling).
+        if (
+            current_phase in PHASE_ORDER
+            and phase in PHASE_ORDER
+            and PHASE_ORDER[phase] < PHASE_ORDER[current_phase]
+        ):
+            conn_p.close()
+            return
+
+        conn_p.execute(
+            "UPDATE analysis_jobs SET phase=?, processed=?, total=?, message=? WHERE id=?",
+            (phase, int(processed or 0), int(total_local or 0), str(message or ""), job_id),
+        )
+        conn_p.commit()
+        conn_p.close()
 
     def publish_event(kind: str, data: dict):
         with events_lock:
@@ -219,8 +262,8 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 conn_r = connect(root)
                 init_schema(conn_r)
                 conn_r.execute(
-                    "UPDATE analysis_jobs SET status='running', phase='analyzing', message=? WHERE id=?",
-                    ("analyzing project", job_id),
+                    "UPDATE analysis_jobs SET status='running', phase=?, message=? WHERE id=?",
+                    (PHASE_DISCOVERY, "analyzing project", job_id),
                 )
                 conn_r.commit()
                 conn_r.close()
@@ -230,14 +273,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     from .analyzer import analyze
 
                     def _on_progress(phase, processed, total_local, message):
-                        conn_p = connect(root)
-                        init_schema(conn_p)
-                        conn_p.execute(
-                            "UPDATE analysis_jobs SET phase=?, processed=?, total=?, message=? WHERE id=?",
-                            (phase, int(processed or 0), int(total_local or 0), str(message or ""), job_id),
-                        )
-                        conn_p.commit()
-                        conn_p.close()
+                        _set_job_phase(job_id, phase, int(processed or 0), int(total_local or 0), str(message or ""))
                         publish_event(
                             "analyze.progress",
                             {
@@ -254,8 +290,8 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     conn_d = connect(root)
                     init_schema(conn_d)
                     conn_d.execute(
-                        "UPDATE analysis_jobs SET status='completed', phase='done', processed=?, total=?, message=?, finished_at=CURRENT_TIMESTAMP WHERE id=?",
-                        (total, total, "analysis completed", job_id),
+                        "UPDATE analysis_jobs SET status='completed', phase=?, processed=?, total=?, message=?, finished_at=CURRENT_TIMESTAMP WHERE id=?",
+                        (PHASE_COMPLETED, total, total, "analysis completed", job_id),
                     )
                     conn_d.commit()
                     conn_d.close()
@@ -264,8 +300,8 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     conn_e = connect(root)
                     init_schema(conn_e)
                     conn_e.execute(
-                        "UPDATE analysis_jobs SET status='failed', phase='error', message=?, finished_at=CURRENT_TIMESTAMP WHERE id=?",
-                        (str(e), job_id),
+                        "UPDATE analysis_jobs SET status='failed', phase=?, message=?, finished_at=CURRENT_TIMESTAMP WHERE id=?",
+                        (PHASE_ERROR, str(e), job_id),
                     )
                     conn_e.commit()
                     conn_e.close()
