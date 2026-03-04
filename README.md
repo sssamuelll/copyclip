@@ -139,15 +139,23 @@ Current dashboard covers:
 - explicit decision tracking
 - risk cards with severity + rationale
 
-Analyze repository intelligence data:
+Fast start (recommended):
+
+```bash
+# from your project folder
+copyclip start
+```
+
+This will:
+- analyze the project
+- start backend intelligence service
+- auto-start `frontend/` dev server if present
+- print links for frontend and backend
+
+Manual mode (if you want separate control):
 
 ```bash
 copyclip analyze --path .
-```
-
-Start local dashboard service:
-
-```bash
 copyclip serve --path . --port 4310
 # then open http://127.0.0.1:4310
 ```

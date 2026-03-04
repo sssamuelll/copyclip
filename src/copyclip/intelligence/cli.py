@@ -1,13 +1,14 @@
 import argparse
 import json
 import os
+import subprocess
 
 from .analyzer import analyze
 from .db import connect, init_schema
 from .server import run_server
 
 
-COMMANDS = {"analyze", "serve", "decision", "report"}
+COMMANDS = {"analyze", "serve", "start", "decision", "report"}
 
 
 def maybe_handle(argv) -> bool:
@@ -33,6 +34,43 @@ def maybe_handle(argv) -> bool:
         p.add_argument("--port", type=int, default=4310)
         args = p.parse_args(argv[2:])
         run_server(args.path, args.port)
+        return True
+
+    if cmd == "start":
+        p = argparse.ArgumentParser("copyclip start")
+        p.add_argument("--path", default=".")
+        p.add_argument("--port", type=int, default=4310, help="Backend intelligence API/dashboard port")
+        p.add_argument("--frontend-port", type=int, default=5173, help="Frontend dev server port")
+        p.add_argument("--no-frontend", action="store_true", help="Do not auto-start frontend dev server")
+        args = p.parse_args(argv[2:])
+
+        root = os.path.abspath(args.path)
+        res = analyze(root)
+        print(f"[INFO] Indexed {res['files']} files and {res['commits']} commits")
+
+        frontend_url = f"http://127.0.0.1:{args.frontend_port}"
+        backend_url = f"http://127.0.0.1:{args.port}"
+
+        if not args.no_frontend:
+            frontend_dir = os.path.join(root, "frontend")
+            if os.path.isdir(frontend_dir):
+                try:
+                    subprocess.Popen(
+                        ["npm", "run", "dev", "--", "--port", str(args.frontend_port)],
+                        cwd=frontend_dir,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    print(f"[INFO] Frontend dev server starting at {frontend_url}")
+                except Exception as e:
+                    print(f"[WARN] Could not start frontend dev server: {e}")
+                    print(f"[INFO] Start it manually: cd frontend && npm run dev -- --port {args.frontend_port}")
+            else:
+                print("[WARN] No frontend/ directory found in this project.")
+
+        print(f"[INFO] Open frontend: {frontend_url}")
+        print(f"[INFO] Backend dashboard/API: {backend_url}")
+        run_server(root, args.port)
         return True
 
     if cmd == "decision":
