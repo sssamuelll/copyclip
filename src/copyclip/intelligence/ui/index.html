@@ -255,6 +255,10 @@
   .main .page.active > *:nth-child(2) { animation-delay: 0.05s; }
   .main .page.active > *:nth-child(3) { animation-delay: 0.1s; }
   .main .page.active > *:nth-child(4) { animation-delay: 0.15s; }
+
+  .toast{position:fixed;right:20px;bottom:20px;background:#111827;color:#e5e7eb;border:1px solid #374151;padding:10px 12px;font-size:12px;z-index:9999;opacity:0;transform:translateY(8px);transition:all .2s;}
+  .toast.show{opacity:1;transform:translateY(0);}
+  .graph-canvas{position:absolute;inset:0;transform-origin:0 0;}
 </style>
 </head>
 <body>
@@ -598,6 +602,7 @@
 
   </main>
 </div>
+<div id="toast" class="toast"></div>
 
 <script>
 const state = { overview:null, changes:[], decisions:[], risks:[], arch:{nodes:[],edges:[]}, selectedDecision:null, selectedModule:null, decisionFilter:'all' };
@@ -630,6 +635,7 @@ async function postJSON(url, body){ const r=await fetch(url,{method:'POST',heade
 
 function sevClass(sev){ return sev === 'high' ? 'severity-high' : (sev === 'med' ? 'severity-med' : 'severity-low'); }
 function scoreColor(score){ return score >= 75 ? 'var(--accent-red)' : (score >= 45 ? 'var(--accent-amber)' : 'var(--accent-green)'); }
+function showToast(msg){ const t=qs('#toast'); if(!t) return; t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), 1800); }
 
 function renderOverview(){
   const o = state.overview || {files:0,commits:0,modules:0,risks:0};
@@ -667,6 +673,10 @@ function renderChanges(){
   const panel = qs('#page-changes .section-panel:nth-child(3)');
   if (!panel) return;
   qsa('.commit-row', panel).forEach(n => n.remove());
+  if (!state.changes.length){
+    panel.insertAdjacentHTML('beforeend', `<div class="commit-row"><span class="commit-msg">no commits indexed yet</span></div>`);
+    return;
+  }
   state.changes.slice(0, 50).forEach(c => panel.insertAdjacentHTML('beforeend', `<div class="commit-row"><span class="commit-sha">${(c.sha||'').slice(0,7)}</span><span class="commit-msg">${c.message||''}</span><div class="commit-meta"><span class="commit-author">${c.author||'git'}</span><span class="commit-time">${(c.date||'').slice(0,10)}</span></div></div>`));
 }
 
@@ -700,6 +710,10 @@ function renderDecisions(){
   if (!list) return;
   qsa('.table-row', list).forEach(n => n.remove());
   const items = filteredDecisions();
+  if (!items.length){
+    list.insertAdjacentHTML('beforeend', `<div class="table-row"><span class="col-title">No decisions yet. Use + add decision.</span></div>`);
+    return;
+  }
   items.forEach((d, idx) => {
     list.insertAdjacentHTML('beforeend', `<div class="table-row ${idx===0?'selected':''}" data-decision-id="${d.id}"><span class="col-id">#dec-${d.id}</span><span class="col-title">${d.title||''}</span><span class="col-status"><span class="status-badge status-proposed">${d.status||'proposed'}</span></span><span class="col-source">${d.source_type||'manual'}</span></div>`);
   });
@@ -708,7 +722,6 @@ function renderDecisions(){
     const dec = state.decisions.find(d => d.id === id);
     if (dec) selectDecision(dec);
   }));
-
   if (items.length) selectDecision(items[0]);
 }
 
@@ -747,8 +760,11 @@ function selectModule(name){
 function renderArchitecture(){
   const area = qs('#page-architecture .graph-area');
   if (!area) return;
-  qsa('.graph-node', area).forEach(n => n.remove());
-  qsa('.graph-lines', area).forEach(n => n.remove());
+  qsa('.graph-canvas', area).forEach(n => n.remove());
+
+  const canvas = document.createElement('div');
+  canvas.className = 'graph-canvas';
+  area.appendChild(canvas);
 
   const nodes = layoutNodes(state.arch.nodes || []);
   const byName = Object.fromEntries(nodes.map(n => [n.name, n]));
@@ -763,7 +779,7 @@ function renderArchitecture(){
     line.setAttribute('x2', String(b.x)); line.setAttribute('y2', String(b.y));
     svg.appendChild(line);
   });
-  area.appendChild(svg);
+  canvas.appendChild(svg);
 
   nodes.forEach(n => {
     const div = document.createElement('div');
@@ -772,8 +788,15 @@ function renderArchitecture(){
     div.style.borderColor = 'var(--accent-cyan)'; div.style.background = 'rgba(6,182,212,0.08)';
     div.innerHTML = `<span class="graph-node-name" style="color:var(--accent-cyan)">${n.name}</span><span class="graph-node-files">module</span>`;
     div.addEventListener('click', () => selectModule(n.name));
-    area.appendChild(div);
+    canvas.appendChild(div);
   });
+
+  let scale = 1, x = 0, y = 0, drag = false, sx = 0, sy = 0;
+  const apply = () => { canvas.style.transform = `translate(${x}px, ${y}px) scale(${scale})`; };
+  area.onwheel = (e) => { e.preventDefault(); const d = e.deltaY > 0 ? -0.08 : 0.08; scale = Math.max(0.5, Math.min(2.5, scale + d)); apply(); };
+  area.onmousedown = (e) => { drag = true; sx = e.clientX - x; sy = e.clientY - y; };
+  window.onmouseup = () => { drag = false; };
+  area.onmousemove = (e) => { if (!drag) return; x = e.clientX - sx; y = e.clientY - sy; apply(); };
 
   if (nodes.length) selectModule(nodes[0].name);
 }
@@ -782,7 +805,11 @@ function renderRisks(){
   const table = qs('#page-risks .risk-table');
   if (!table) return;
   qsa('.risk-table-row', table).forEach(n => n.remove());
-  state.risks.forEach(r => table.insertAdjacentHTML('beforeend', `<div class="risk-table-row"><span class="rt-col-sev"><span class="severity-badge ${sevClass(r.severity)}">${r.severity}</span></span><span class="rt-col-area">${r.area||''}</span><span class="rt-col-kind">${r.kind||''}</span><span class="rt-col-score" style="color:${scoreColor(r.score||0)}">${r.score||0}</span><span class="rt-col-rationale">${r.rationale||''}</span></div>`));
+  if (!state.risks.length){
+    table.insertAdjacentHTML('beforeend', `<div class="risk-table-row"><span class="rt-col-area">No risks detected yet</span></div>`);
+  } else {
+    state.risks.forEach(r => table.insertAdjacentHTML('beforeend', `<div class="risk-table-row"><span class="rt-col-sev"><span class="severity-badge ${sevClass(r.severity)}">${r.severity}</span></span><span class="rt-col-area">${r.area||''}</span><span class="rt-col-kind">${r.kind||''}</span><span class="rt-col-score" style="color:${scoreColor(r.score||0)}">${r.score||0}</span><span class="rt-col-rationale">${r.rationale||''}</span></div>`));
+  }
 
   const counts = {high:0, med:0, low:0};
   state.risks.forEach(r => { if (counts[r.severity] !== undefined) counts[r.severity]++; });
@@ -807,6 +834,7 @@ function attachDecisionActions(){
     const status = map[btn.textContent.trim()];
     if (!status) return;
     await patchJSON(`/api/decisions/${state.selectedDecision.id}`, { status });
+    showToast(`Decision ${status}`);
     await refresh();
   }));
 
@@ -817,6 +845,7 @@ function attachDecisionActions(){
       if (!title) return;
       const summary = prompt('Decision summary') || '';
       await postJSON('/api/decisions', { title, summary });
+      showToast('Decision created');
       await refresh();
     });
   }
@@ -863,6 +892,7 @@ async function refresh(){
     console.error(err);
     const idxText = qs('.index-text');
     if (idxText) idxText.textContent = 'API unavailable';
+    showToast('API unavailable');
   }
 })();
 </script>
