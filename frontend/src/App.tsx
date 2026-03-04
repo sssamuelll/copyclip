@@ -9,6 +9,7 @@ import { RisksPage } from './pages/RisksPage'
 import { IssuesPage } from './pages/IssuesPage'
 import { ContextBuilderPage } from './pages/ContextBuilderPage'
 import { ImpactSimulatorPage } from './pages/ImpactSimulatorPage'
+import { AgentTerminal } from './components/AgentTerminal'
 import type { ArchEdge, ArchNode, ChangeItem, DecisionItem, IssueItem, Overview, RiskItem } from './types/api'
 
 type Page = 'atlas' | 'architecture' | 'impact' | 'context-builder' | 'changes' | 'decisions' | 'risks' | 'issues'
@@ -62,6 +63,7 @@ export function App() {
         {page === 'risks' && <RisksPage items={risks} />}
         {page === 'issues' && <IssuesPage items={issues} />}
       </main>
+      <AgentTerminal />
     </div>
   )
 }

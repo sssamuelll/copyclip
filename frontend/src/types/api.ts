@@ -61,5 +61,10 @@ export type RiskItem = {
   score: number
   created_at: string
 }
+export type AgentResponse = {
+  response: string
+  agent: string
+}
+
 export type ArchNode = { name: string }
 export type ArchEdge = { from: string; to: string; type: string }
