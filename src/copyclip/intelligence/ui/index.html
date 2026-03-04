@@ -547,6 +547,7 @@
                 <button class="action-btn primary">$ accept</button>
                 <button class="action-btn secondary">$ resolve</button>
                 <button class="action-btn secondary">$ supersede</button>
+                <button class="action-btn secondary add-ref-btn">$ add_ref</button>
               </div>
             </div>
           </div>
@@ -605,7 +606,7 @@
 <div id="toast" class="toast"></div>
 
 <script>
-const state = { overview:null, changes:[], decisions:[], risks:[], arch:{nodes:[],edges:[]}, selectedDecision:null, selectedModule:null, decisionFilter:'all' };
+const state = { overview:null, changes:[], decisions:[], risks:[], arch:{nodes:[],edges:[]}, decisionRefs:{}, selectedDecision:null, selectedModule:null, decisionFilter:'all' };
 
 const qs = (s, root=document) => root.querySelector(s);
 const qsa = (s, root=document) => Array.from(root.querySelectorAll(s));
@@ -632,6 +633,12 @@ qsa('.filters-row').forEach(row => row.addEventListener('click', (e) => {
 async function getJSON(url){ const r=await fetch(url); if(!r.ok) throw new Error(`${url} -> ${r.status}`); return r.json(); }
 async function patchJSON(url, body){ const r=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(!r.ok) throw new Error(`${url} -> ${r.status}`); return r.json(); }
 async function postJSON(url, body){ const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(!r.ok) throw new Error(`${url} -> ${r.status}`); return r.json(); }
+async function ensureDecisionRefs(id){
+  if (state.decisionRefs[id]) return state.decisionRefs[id];
+  const data = await getJSON(`/api/decisions/${id}/refs`);
+  state.decisionRefs[id] = data.items || [];
+  return state.decisionRefs[id];
+}
 
 function sevClass(sev){ return sev === 'high' ? 'severity-high' : (sev === 'med' ? 'severity-med' : 'severity-low'); }
 function scoreColor(score){ return score >= 75 ? 'var(--accent-red)' : (score >= 45 ? 'var(--accent-amber)' : 'var(--accent-green)'); }
@@ -685,7 +692,7 @@ function filteredDecisions(){
   return state.decisions.filter(d => d.status === state.decisionFilter);
 }
 
-function selectDecision(dec){
+async function selectDecision(dec){
   state.selectedDecision = dec;
   const container = qs('#page-decisions .dec-list-panel');
   qsa('.table-row', container).forEach(r => r.classList.remove('selected'));
@@ -701,7 +708,13 @@ function selectDecision(dec){
 
   const refsWrap = qsa('div[style*="margin-top:4px"]', detail)[0];
   if (refsWrap){
-    refsWrap.innerHTML = `<div class="ref-link"><span class="ref-arrow">→</span><span class="ref-text">decision #${dec.id}</span></div>`;
+    refsWrap.innerHTML = '';
+    const refs = await ensureDecisionRefs(dec.id);
+    if (!refs.length) {
+      refsWrap.innerHTML = `<div class="ref-link"><span class="ref-arrow">→</span><span class="ref-text">No refs yet</span></div>`;
+    } else {
+      refs.forEach(r => refsWrap.insertAdjacentHTML('beforeend', `<div class="ref-link"><span class="ref-arrow">→</span><span class="ref-text">${r.ref_type}: ${r.ref_value}</span></div>`));
+    }
   }
 }
 
@@ -831,6 +844,18 @@ function attachDecisionActions(){
   const map = { '$ accept':'accepted', '$ resolve':'resolved', '$ supersede':'superseded' };
   btns.forEach(btn => btn.addEventListener('click', async () => {
     if (!state.selectedDecision) return;
+
+    if (btn.classList.contains('add-ref-btn')) {
+      const refType = (prompt('Ref type (file|commit|doc)', 'file') || 'file').trim();
+      const refValue = (prompt('Ref value (e.g. src/api.ts, 1a2b3c4, docs/adr-01.md)') || '').trim();
+      if (!refValue) return;
+      await postJSON(`/api/decisions/${state.selectedDecision.id}/refs`, { ref_type: refType, ref_value: refValue });
+      state.decisionRefs[state.selectedDecision.id] = null;
+      await selectDecision(state.selectedDecision);
+      showToast('Reference added');
+      return;
+    }
+
     const status = map[btn.textContent.trim()];
     if (!status) return;
     await patchJSON(`/api/decisions/${state.selectedDecision.id}`, { status });
@@ -873,6 +898,7 @@ async function refresh(){
   state.decisions = decisions.items || [];
   state.risks = risks.items || [];
   state.arch = arch || {nodes:[],edges:[]};
+  state.decisionRefs = {};
 
   renderOverview();
   renderChanges();

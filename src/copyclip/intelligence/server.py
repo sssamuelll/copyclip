@@ -108,6 +108,26 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 )
                 return
 
+            if parsed.path.startswith("/api/decisions/") and parsed.path.endswith("/refs"):
+                if not pid:
+                    self._json(with_meta({"items": []}))
+                    return
+                parts = parsed.path.strip("/").split("/")
+                if len(parts) != 4:
+                    self._json({"error": "invalid_path"}, 400)
+                    return
+                try:
+                    decision_id = int(parts[2])
+                except Exception:
+                    self._json({"error": "invalid_decision_id"}, 400)
+                    return
+                rows = conn.execute(
+                    "SELECT ref_type, ref_value FROM decision_refs WHERE decision_id=? ORDER BY id DESC",
+                    (decision_id,),
+                ).fetchall()
+                self._json(with_meta({"items": [{"ref_type": r[0], "ref_value": r[1]} for r in rows]}))
+                return
+
             if parsed.path == "/api/architecture/graph":
                 if not pid:
                     self._json(with_meta({"nodes": [], "edges": []}))
@@ -197,7 +217,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 self._json({"error": "run_analyze_first"}, 400)
                 return
 
-            if parsed.path == "/api/decisions": 
+            if parsed.path == "/api/decisions":
                 length = int(self.headers.get("Content-Length", "0"))
                 raw = self.rfile.read(length) if length else b"{}"
                 data = json.loads(raw.decode("utf-8"))
@@ -212,6 +232,38 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 )
                 conn.commit()
                 self._json({"id": cur.lastrowid, "ok": True})
+                return
+
+            if parsed.path.startswith("/api/decisions/") and parsed.path.endswith("/refs"):
+                parts = parsed.path.strip("/").split("/")
+                if len(parts) != 4:
+                    self._json({"error": "invalid_path"}, 400)
+                    return
+                try:
+                    decision_id = int(parts[2])
+                except Exception:
+                    self._json({"error": "invalid_decision_id"}, 400)
+                    return
+
+                length = int(self.headers.get("Content-Length", "0"))
+                raw = self.rfile.read(length) if length else b"{}"
+                data = json.loads(raw.decode("utf-8"))
+                ref_type = (data.get("ref_type") or "file").strip()
+                ref_value = (data.get("ref_value") or "").strip()
+                allowed = {"file", "commit", "doc"}
+                if ref_type not in allowed:
+                    self._json({"error": "invalid_ref_type", "allowed": sorted(allowed)}, 400)
+                    return
+                if not ref_value:
+                    self._json({"error": "ref_value_required"}, 400)
+                    return
+
+                conn.execute(
+                    "INSERT INTO decision_refs(decision_id,ref_type,ref_value) VALUES(?,?,?)",
+                    (decision_id, ref_type, ref_value),
+                )
+                conn.commit()
+                self._json({"ok": True, "decision_id": decision_id, "ref_type": ref_type, "ref_value": ref_value})
                 return
 
             self._json({"error": "not_found"}, 404)
