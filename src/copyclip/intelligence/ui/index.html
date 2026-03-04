@@ -648,6 +648,129 @@ document.querySelectorAll('.dec-list-panel .table-row').forEach(row => {
     row.classList.add('selected');
   });
 });
+
+async function getJSON(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed ${url}: ${res.status}`);
+  return res.json();
+}
+
+function sevClass(sev){ return sev === 'high' ? 'severity-high' : (sev === 'med' ? 'severity-med' : 'severity-low'); }
+function scoreColor(score){ return score >= 75 ? 'var(--accent-red)' : (score >= 45 ? 'var(--accent-amber)' : 'var(--accent-green)'); }
+
+function renderOverview(overview, changes, risks, decisions){
+  const kpis = document.querySelectorAll('#page-overview .kpi-card .kpi-value');
+  if (kpis.length >= 5) {
+    kpis[0].textContent = overview.files ?? 0;
+    kpis[1].textContent = overview.commits ?? 0;
+    kpis[2].textContent = overview.modules ?? 0;
+    kpis[3].textContent = overview.risks ?? 0;
+    kpis[4].textContent = decisions.items?.filter(d => d.status !== 'resolved').length ?? 0;
+  }
+
+  const topChanges = document.querySelector('#page-overview .left-column .section-panel:nth-child(1)');
+  if (topChanges) {
+    topChanges.querySelectorAll('.commit-row').forEach(n => n.remove());
+    (changes.items || []).slice(0, 6).forEach(c => {
+      topChanges.insertAdjacentHTML('beforeend', `<div class="commit-row"><span class="commit-sha">${(c.sha||'').slice(0,7)}</span><span class="commit-msg">${c.message||''}</span><div class="commit-meta"><span class="commit-author">${c.author||'git'}</span><span class="commit-time">${(c.date||'').slice(0,10)}</span></div></div>`);
+    });
+  }
+
+  const topRisks = document.querySelector('#page-overview .left-column .section-panel:nth-child(2)');
+  if (topRisks) {
+    topRisks.querySelectorAll('.risk-row').forEach(n => n.remove());
+    (risks.items || []).slice(0, 5).forEach(r => {
+      topRisks.insertAdjacentHTML('beforeend', `<div class="risk-row"><span class="severity-badge ${sevClass(r.severity)}">${r.severity}</span><div class="risk-info"><span class="risk-area">${r.area}</span><span class="risk-rationale">${r.rationale||''}</span></div><span class="risk-score" style="color:${scoreColor(r.score||0)}">${r.score||0}</span></div>`);
+    });
+  }
+
+  const decQueue = document.querySelector('#page-overview .right-column .section-panel');
+  if (decQueue) {
+    decQueue.querySelectorAll('.decision-row').forEach(n => n.remove());
+    const openDecisions = (decisions.items || []).filter(d => d.status !== 'resolved').slice(0, 8);
+    openDecisions.forEach(d => {
+      decQueue.insertAdjacentHTML('beforeend', `<div class="decision-row"><div class="decision-top"><span class="status-badge status-proposed">${d.status||'proposed'}</span><span class="decision-id">#dec-${d.id}</span></div><span class="decision-title">${d.title||''}</span><span class="decision-source">source: ${d.source_type||'manual'}</span></div>`);
+    });
+    const badge = decQueue.querySelector('.count-badge');
+    if (badge) badge.textContent = String(openDecisions.length);
+  }
+}
+
+function renderChanges(changes){
+  const timelinePanel = document.querySelector('#page-changes .section-panel:nth-child(3)');
+  if (!timelinePanel) return;
+  timelinePanel.querySelectorAll('.commit-row').forEach(n => n.remove());
+  (changes.items || []).slice(0, 30).forEach(c => {
+    timelinePanel.insertAdjacentHTML('beforeend', `<div class="commit-row"><span class="commit-sha">${(c.sha||'').slice(0,7)}</span><span class="commit-msg">${c.message||''}</span><div class="commit-meta"><span class="commit-author">${c.author||'git'}</span><span class="commit-time">${(c.date||'').slice(0,10)}</span></div></div>`);
+  });
+}
+
+function renderDecisions(decisions){
+  const table = document.querySelector('#page-decisions .dec-list-panel');
+  if (!table) return;
+  table.querySelectorAll('.table-row').forEach(n => n.remove());
+  (decisions.items || []).forEach((d, idx) => {
+    table.insertAdjacentHTML('beforeend', `<div class="table-row ${idx===0?'selected':''}"><span class="col-id">#dec-${d.id}</span><span class="col-title">${d.title||''}</span><span class="col-status"><span class="status-badge status-proposed">${d.status||'proposed'}</span></span><span class="col-source">${d.source_type||'manual'}</span></div>`);
+  });
+}
+
+function renderRisks(risks){
+  const table = document.querySelector('#page-risks .risk-table');
+  if (!table) return;
+  table.querySelectorAll('.risk-table-row').forEach(n => n.remove());
+  (risks.items || []).forEach(r => {
+    table.insertAdjacentHTML('beforeend', `<div class="risk-table-row"><span class="rt-col-sev"><span class="severity-badge ${sevClass(r.severity)}">${r.severity}</span></span><span class="rt-col-area">${r.area||''}</span><span class="rt-col-kind">${r.kind||''}</span><span class="rt-col-score" style="color:${scoreColor(r.score||0)}">${r.score||0}</span><span class="rt-col-rationale">${r.rationale||''}</span></div>`);
+  });
+
+  const counts = {high:0, med:0, low:0};
+  (risks.items||[]).forEach(r => { if (counts[r.severity] !== undefined) counts[r.severity]++; });
+  const rows = document.querySelectorAll('#page-risks .sev-bar-row');
+  const total = Math.max((risks.items||[]).length, 1);
+  [['high',0],['med',1],['low',2]].forEach(([k,i]) => {
+    const row = rows[i]; if (!row) return;
+    const fill = row.querySelector('.sev-bar-fill');
+    const count = row.querySelector('.sev-bar-count');
+    const c = counts[k] || 0;
+    if (fill) fill.style.width = `${Math.round((c/total)*100)}%`;
+    if (count) count.textContent = String(c);
+  });
+}
+
+function renderArchitecture(arch){
+  const panel = document.querySelector('#page-architecture .panel-section:nth-child(3) div[style*="flex-direction:column"]');
+  if (!panel) return;
+  panel.innerHTML = '';
+  (arch.edges || []).slice(0, 8).forEach(e => {
+    panel.insertAdjacentHTML('beforeend', `<div class="dep-row"><span class="dep-arrow" style="color:var(--accent-green)">&rarr;</span><span class="dep-name">${e.from} → ${e.to}</span></div>`);
+  });
+}
+
+async function hydrateFromAPI(){
+  try {
+    const [overview, changes, decisions, risks, arch] = await Promise.all([
+      getJSON('/api/overview'),
+      getJSON('/api/changes'),
+      getJSON('/api/decisions'),
+      getJSON('/api/risks'),
+      getJSON('/api/architecture/graph'),
+    ]);
+
+    renderOverview(overview, changes, risks, decisions);
+    renderChanges(changes);
+    renderDecisions(decisions);
+    renderRisks(risks);
+    renderArchitecture(arch);
+
+    const idxText = document.querySelector('.index-text');
+    if (idxText) idxText.textContent = 'live project data';
+  } catch (err) {
+    console.error(err);
+    const idxText = document.querySelector('.index-text');
+    if (idxText) idxText.textContent = 'API unavailable';
+  }
+}
+
+hydrateFromAPI();
 </script>
 </body>
 </html>
