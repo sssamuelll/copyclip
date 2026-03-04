@@ -711,7 +711,41 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 self._json({"error": "run_analyze_first"}, 400)
                 return
 
-            if parsed.path.startswith("/api/decisions/"):
+            if parsed.path.startswith("/api/alerts/rules/"):
+                try:
+                    rule_id = int(parsed.path.rsplit("/", 1)[-1])
+                except Exception:
+                    self._json({"error": "invalid_rule_id"}, 400)
+                    return
+
+                length = int(self.headers.get("Content-Length", "0"))
+                raw = self.rfile.read(length) if length else b"{}"
+                data = json.loads(raw.decode("utf-8"))
+
+                row = conn.execute(
+                    "SELECT id,name,kind,severity,min_score,cooldown_min,enabled FROM alert_rules WHERE id=? AND project_id=?",
+                    (rule_id, pid),
+                ).fetchone()
+                if not row:
+                    self._json({"error": "rule_not_found"}, 404)
+                    return
+
+                name = (data.get("name") if "name" in data else row[1])
+                kind = (data.get("kind") if "kind" in data else row[2])
+                severity = (data.get("severity") if "severity" in data else row[3])
+                min_score = int(data.get("min_score") if "min_score" in data else row[4])
+                cooldown_min = int(data.get("cooldown_min") if "cooldown_min" in data else row[5])
+                enabled = 1 if bool(data.get("enabled") if "enabled" in data else row[6]) else 0
+
+                conn.execute(
+                    "UPDATE alert_rules SET name=?, kind=?, severity=?, min_score=?, cooldown_min=?, enabled=? WHERE id=? AND project_id=?",
+                    (name, kind, severity, min_score, cooldown_min, enabled, rule_id, pid),
+                )
+                conn.commit()
+                self._json({"ok": True, "id": rule_id})
+                return
+
+            if parsed.path.startswith("/api/decisions/"): 
                 try:
                     decision_id = int(parsed.path.rsplit("/", 1)[-1])
                 except Exception:
@@ -763,6 +797,28 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 conn.commit()
                 publish_event("decision.status_changed", {"decision_id": decision_id, "from": prev_status, "to": status})
                 self._json({"ok": True, "id": decision_id, "status": status})
+                return
+
+            self._json({"error": "not_found"}, 404)
+
+        def do_DELETE(self):
+            parsed = urlparse(self.path)
+            conn = connect(root)
+            init_schema(conn)
+            pid = _project_id(conn, root)
+            if not pid:
+                self._json({"error": "run_analyze_first"}, 400)
+                return
+
+            if parsed.path.startswith("/api/alerts/rules/"):
+                try:
+                    rule_id = int(parsed.path.rsplit("/", 1)[-1])
+                except Exception:
+                    self._json({"error": "invalid_rule_id"}, 400)
+                    return
+                conn.execute("DELETE FROM alert_rules WHERE id=? AND project_id=?", (rule_id, pid))
+                conn.commit()
+                self._json({"ok": True, "id": rule_id})
                 return
 
             self._json({"error": "not_found"}, 404)

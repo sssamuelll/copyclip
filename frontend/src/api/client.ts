@@ -16,6 +16,22 @@ async function postJSON<T>(url: string, data: any): Promise<T> {
   return r.json() as Promise<T>
 }
 
+async function patchJSON<T>(url: string, data: any): Promise<T> {
+  const r = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  })
+  if (!r.ok) throw new Error(`Request failed: ${r.status}`)
+  return r.json() as Promise<T>
+}
+
+async function deleteJSON<T>(url: string): Promise<T> {
+  const r = await fetch(url, { method: 'DELETE' })
+  if (!r.ok) throw new Error(`Request failed: ${r.status}`)
+  return r.json() as Promise<T>
+}
+
 export const api = {
   overview: () => getJSON<Overview>('/api/overview'),
   changes: () => getJSON<{ items: ChangeItem[] }>('/api/changes'),
@@ -42,6 +58,9 @@ export const api = {
   alerts: () => getJSON<AlertsResponse>('/api/alerts'),
   alertRules: () => getJSON<{ items: AlertRule[] }>('/api/alerts/rules'),
   upsertAlertRule: (rule: { name: string; kind?: string; severity?: string; min_score?: number; cooldown_min?: number; enabled?: boolean }) => postJSON<{ ok: boolean; name: string }>('/api/alerts/rules', rule),
+  updateAlertRule: (id: number, patch: Partial<{ name: string; kind: string; severity: string; min_score: number; cooldown_min: number; enabled: boolean }>) =>
+    patchJSON<{ ok: boolean; id: number }>(`/api/alerts/rules/${id}`, patch),
+  deleteAlertRule: (id: number) => deleteJSON<{ ok: boolean; id: number }>(`/api/alerts/rules/${id}`),
   weeklyExport: (days = 7) => getJSON<WeeklyExport>(`/api/export/weekly?days=${days}`),
   issues: () => getJSON<{ items: IssueItem[] }>('/api/issues'),
   files: () => getJSON<{ items: FileItem[] }>('/api/files'),

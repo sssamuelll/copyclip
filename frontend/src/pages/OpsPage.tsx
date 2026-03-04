@@ -38,6 +38,31 @@ export function OpsPage() {
     await refresh()
   }
 
+  const onToggleRule = async (rule: AlertRule) => {
+    await api.updateAlertRule(rule.id, { enabled: !rule.enabled })
+    await refresh()
+  }
+
+  const onEditRule = async (rule: AlertRule) => {
+    const minScore = Number(prompt('min_score', String(rule.min_score)) || rule.min_score)
+    const cooldown = Number(prompt('cooldown_min', String(rule.cooldown_min)) || rule.cooldown_min)
+    const kind = prompt('kind (blank for any)', rule.kind || '') ?? rule.kind ?? ''
+    const severity = prompt('severity (blank for any)', rule.severity || '') ?? rule.severity ?? ''
+    await api.updateAlertRule(rule.id, {
+      min_score: minScore,
+      cooldown_min: cooldown,
+      kind: kind || '',
+      severity: severity || '',
+    })
+    await refresh()
+  }
+
+  const onDeleteRule = async (rule: AlertRule) => {
+    if (!confirm(`Delete rule '${rule.name}'?`)) return
+    await api.deleteAlertRule(rule.id)
+    await refresh()
+  }
+
   const onGenerateBrief = async () => {
     const res = await api.weeklyExport(days)
     setBrief(res)
@@ -60,7 +85,12 @@ export function OpsPage() {
         <ul>
           {rules.map((r) => (
             <li key={r.id}>
-              {r.name} — kind:{r.kind || '*'} severity:{r.severity || '*'} score≥{r.min_score} cooldown:{r.cooldown_min}m
+              {r.name} — kind:{r.kind || '*'} severity:{r.severity || '*'} score≥{r.min_score} cooldown:{r.cooldown_min}m [{r.enabled ? 'enabled' : 'disabled'}]
+              <span style={{ marginLeft: 8, display: 'inline-flex', gap: 6 }}>
+                <button onClick={() => onToggleRule(r)}>{r.enabled ? 'Disable' : 'Enable'}</button>
+                <button onClick={() => onEditRule(r)}>Edit</button>
+                <button onClick={() => onDeleteRule(r)}>Delete</button>
+              </span>
             </li>
           ))}
         </ul>

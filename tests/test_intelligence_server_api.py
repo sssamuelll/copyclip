@@ -52,6 +52,12 @@ def _patch_json_expect_error(url: str, payload: dict):
         return e.code, json.loads(e.read().decode("utf-8"))
 
 
+def _delete_json(url: str):
+    req = request.Request(url, method="DELETE")
+    with request.urlopen(req, timeout=3) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
 def _post_json(url: str, payload: dict):
     data = json.dumps(payload).encode("utf-8")
     req = request.Request(url, method="POST", data=data, headers={"Content-Type": "application/json"})
@@ -320,3 +326,38 @@ def test_settings_alias_get_and_post():
         _post_json(f"http://127.0.0.1:{port}/api/settings", {"COPYCLIP_LLM_PROVIDER": "gemini"})
         res = _get_json(f"http://127.0.0.1:{port}/api/settings")
         assert res.get("COPYCLIP_LLM_PROVIDER") == "gemini"
+
+
+def test_alert_rule_patch_and_delete():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        root_path = str(root.absolute())
+        conn = connect(root_path)
+        init_schema(conn)
+        conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root_path, "tmp"))
+        pid = conn.execute("SELECT id FROM projects WHERE root_path=?", (root_path,)).fetchone()[0]
+        cur = conn.execute(
+            "INSERT INTO alert_rules(project_id,name,kind,severity,min_score,cooldown_min,enabled) VALUES(?,?,?,?,?,?,1)",
+            (pid, "r1", "churn", "high", 70, 60),
+        )
+        rid = cur.lastrowid
+        conn.commit()
+
+        port = _free_port()
+        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
+        th.start()
+        _wait_port(port)
+
+        patched = _patch_json(f"http://127.0.0.1:{port}/api/alerts/rules/{rid}", {"enabled": False, "min_score": 80})
+        assert patched["ok"] is True
+
+        rules = _get_json(f"http://127.0.0.1:{port}/api/alerts/rules")
+        row = [r for r in rules["items"] if r["id"] == rid][0]
+        assert row["enabled"] is False
+        assert row["min_score"] == 80
+
+        deleted = _delete_json(f"http://127.0.0.1:{port}/api/alerts/rules/{rid}")
+        assert deleted["ok"] is True
+
+        rules2 = _get_json(f"http://127.0.0.1:{port}/api/alerts/rules")
+        assert not any(r["id"] == rid for r in rules2["items"])
