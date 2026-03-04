@@ -8,6 +8,15 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Set, Tuple
 
 from .db import connect, init_schema
+from .phases import (
+    PHASE_COMPLETED,
+    PHASE_DISCOVERY,
+    PHASE_GIT_HISTORY,
+    PHASE_IMPORT_GRAPH,
+    PHASE_METADATA_HASH,
+    PHASE_RISK_SIGNALS,
+    PHASE_SNAPSHOTS,
+)
 
 
 # Brief: _generate_project_story
@@ -347,14 +356,14 @@ async def analyze(project_root: str, progress_cb=None) -> Dict[str, int]:
     complexity_by_file: Dict[str, int] = {}
 
     if progress_cb:
-        progress_cb("discovery", 0, 0, "discovering project files")
+        progress_cb(PHASE_DISCOVERY, 0, 0, "discovering project files")
 
     total_files = 0
     for _p, _rel in _iter_repo_files(root):
         total_files += 1
 
     if progress_cb:
-        progress_cb("metadata_hash", 0, total_files, "computing file metadata and hashes")
+        progress_cb(PHASE_METADATA_HASH, 0, total_files, "computing file metadata and hashes")
 
     for p, rel in _iter_repo_files(root):
         try:
@@ -369,7 +378,7 @@ async def analyze(project_root: str, progress_cb=None) -> Dict[str, int]:
             indexed += 1
             repo_files.add(rel)
             if progress_cb and indexed % 200 == 0:
-                progress_cb("metadata_hash", indexed, total_files, f"processed {indexed} files")
+                progress_cb(PHASE_METADATA_HASH, indexed, total_files, f"processed {indexed} files")
 
             mod = _module_from_relpath(rel)
             modules_seen[mod] += 1
@@ -386,7 +395,7 @@ async def analyze(project_root: str, progress_cb=None) -> Dict[str, int]:
             continue
 
     if progress_cb:
-        progress_cb("import_graph", indexed, total_files, "building module and dependency graph")
+        progress_cb(PHASE_IMPORT_GRAPH, indexed, total_files, "building module and dependency graph")
 
     for module in modules_seen:
         conn.execute(
@@ -403,7 +412,7 @@ async def analyze(project_root: str, progress_cb=None) -> Dict[str, int]:
         )
 
     if progress_cb:
-        progress_cb("git_history", indexed, total_files, "collecting git history")
+        progress_cb(PHASE_GIT_HISTORY, indexed, total_files, "collecting git history")
 
     log = _safe_git(root, ["log", "--pretty=format:%H|%an|%ad|%s", "--date=iso", "-n", "300"])
     commits = 0
@@ -437,7 +446,7 @@ async def analyze(project_root: str, progress_cb=None) -> Dict[str, int]:
             )
 
     if progress_cb:
-        progress_cb("risk_signals", indexed, total_files, "computing risk signals")
+        progress_cb(PHASE_RISK_SIGNALS, indexed, total_files, "computing risk signals")
 
     risk_count = 0
 
@@ -514,7 +523,7 @@ async def analyze(project_root: str, progress_cb=None) -> Dict[str, int]:
     risk_breakdown = {r[0]: r[1] for r in risk_breakdown_rows}
 
     if progress_cb:
-        progress_cb("snapshots", indexed, total_files, "writing snapshots and finalizing")
+        progress_cb(PHASE_SNAPSHOTS, indexed, total_files, "writing snapshots and finalizing")
 
     conn.execute(
         "INSERT INTO snapshots(project_id, summary_json) VALUES(?,?)",
@@ -529,6 +538,6 @@ async def analyze(project_root: str, progress_cb=None) -> Dict[str, int]:
     conn.close()
 
     if progress_cb:
-        progress_cb("completed", total_files, total_files, "analysis completed")
+        progress_cb(PHASE_COMPLETED, total_files, total_files, "analysis completed")
 
     return summary

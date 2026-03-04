@@ -1,0 +1,10 @@
+"""Shared phase constants for analyze pipeline."""
+
+PHASE_DISCOVERY = "discovery"
+PHASE_METADATA_HASH = "metadata_hash"
+PHASE_IMPORT_GRAPH = "import_graph"
+PHASE_GIT_HISTORY = "git_history"
+PHASE_RISK_SIGNALS = "risk_signals"
+PHASE_SNAPSHOTS = "snapshots"
+PHASE_COMPLETED = "completed"
+PHASE_ERROR = "error"
