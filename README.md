@@ -147,26 +147,19 @@ copyclip start
 ```
 
 This will:
-- analyze the project
-- start backend intelligence service
-- auto-start `frontend/` dev server if present
-- print links for frontend and backend
+- analyze the current project
+- start the CopyClip service on one port
+- serve the CopyClip dashboard UI + API together
+- print the URL to open in browser
 
-Manual mode (if you want separate control):
+Default URL:
+- `http://127.0.0.1:4310`
+
+Manual mode (advanced):
 
 ```bash
 copyclip analyze --path .
 copyclip serve --path . --port 4310
-# then open http://127.0.0.1:4310
-```
-
-Frontend scaffold (React + Vite) is available under `frontend/` and proxies to the local API:
-
-```bash
-cd frontend
-npm install
-npm run dev
-# open http://127.0.0.1:5173
 ```
 
 Track explicit decisions:

@@ -2,97 +2,20 @@ import json
 import os
 import sqlite3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import urlparse
 
 from .db import connect, init_schema
 
 
-_HTML = """<!doctype html>
-<html>
-<head>
-  <meta charset='utf-8'>
-  <title>CopyClip Intelligence</title>
-  <style>
-    body { font-family: Inter, system-ui, sans-serif; margin: 24px; background:#0b0f14; color:#e6edf3; }
-    .grid { display:grid; grid-template-columns: repeat(4, minmax(180px,1fr)); gap:16px; }
-    .card { background:#161b22; border:1px solid #30363d; border-radius:12px; padding:16px; }
-    h1,h2 { margin:0 0 12px 0; }
-    .muted { color:#8b949e; }
-    ul { margin:8px 0 0 18px; }
-    .two { display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin-top:16px; }
-    .sev-high { color:#ff7b72; }
-    .sev-med { color:#d29922; }
-    .sev-low { color:#3fb950; }
-  </style>
-</head>
-<body>
-  <h1>CopyClip Project Intelligence</h1>
-  <p class='muted'>Human control plane — architecture, decisions, and risk awareness.</p>
+def _load_ui_html() -> str:
+    ui_path = Path(__file__).resolve().parent / "ui" / "index.html"
+    if ui_path.exists():
+        return ui_path.read_text(encoding="utf-8")
+    return "<html><body><h1>CopyClip UI not found</h1></body></html>"
 
-  <div class='grid'>
-    <div class='card'><h2>Files</h2><div id='files'>-</div></div>
-    <div class='card'><h2>Commits</h2><div id='commits'>-</div></div>
-    <div class='card'><h2>Modules</h2><div id='modules'>-</div></div>
-    <div class='card'><h2>Risks</h2><div id='riskCount'>-</div></div>
-  </div>
 
-  <div class='two'>
-    <div class='card'>
-      <h2>Recent Changes</h2>
-      <ul id='changes'></ul>
-    </div>
-    <div class='card'>
-      <h2>Decisions</h2>
-      <ul id='decisions'></ul>
-    </div>
-  </div>
-
-  <div class='two'>
-    <div class='card'>
-      <h2>Architecture Edges</h2>
-      <ul id='arch'></ul>
-    </div>
-    <div class='card'>
-      <h2>Top Risks</h2>
-      <ul id='risks'></ul>
-    </div>
-  </div>
-
-<script>
-function li(text, cls=''){ const x=document.createElement('li'); x.textContent=text; if(cls)x.className=cls; return x; }
-
-async function load(){
-  const o = await fetch('/api/overview').then(r=>r.json());
-  document.getElementById('files').textContent = o.files;
-  document.getElementById('commits').textContent = o.commits;
-  document.getElementById('modules').textContent = o.modules;
-  document.getElementById('riskCount').textContent = o.risks;
-
-  const changes = await fetch('/api/changes').then(r=>r.json());
-  const ch = document.getElementById('changes'); ch.innerHTML='';
-  changes.items.slice(0,12).forEach(it=> ch.appendChild(li(`${it.sha.slice(0,7)} — ${it.message}`)) );
-
-  const dec = await fetch('/api/decisions').then(r=>r.json());
-  const dl = document.getElementById('decisions'); dl.innerHTML='';
-  if(!dec.items.length) dl.appendChild(li('No decisions yet (use copyclip decision add)', 'muted'));
-  dec.items.forEach(it=> dl.appendChild(li(`#${it.id} [${it.status}] ${it.title}`)) );
-
-  const arch = await fetch('/api/architecture/graph').then(r=>r.json());
-  const al = document.getElementById('arch'); al.innerHTML='';
-  arch.edges.slice(0,20).forEach(e=> al.appendChild(li(`${e.from} → ${e.to}`)) );
-
-  const risks = await fetch('/api/risks').then(r=>r.json());
-  const rl = document.getElementById('risks'); rl.innerHTML='';
-  risks.items.slice(0,15).forEach(r => {
-    const cls = r.severity === 'high' ? 'sev-high' : (r.severity === 'med' ? 'sev-med' : 'sev-low');
-    rl.appendChild(li(`[${r.severity}] ${r.area} — ${r.rationale}`, cls));
-  });
-}
-load();
-</script>
-</body>
-</html>
-"""
+_HTML = _load_ui_html()
 
 
 def _project_id(conn: sqlite3.Connection, root: str):

@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CopyClip Intelligence Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0A0A0A;
+    --bg-elevated: #0F0F0F;
+    --bg-active: #1F1F1F;
+    --border: #2a2a2a;
+    --text-primary: #FAFAFA;
+    --text-emphasis: #FFFFFF;
+    --text-secondary: #6B7280;
+    --text-tertiary: #4B5563;
+    --accent-green: #10B981;
+    --accent-amber: #F59E0B;
+    --accent-cyan: #06B6D4;
+    --accent-red: #EF4444;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { height:100%; background:var(--bg); color:var(--text-primary); }
+  .font-ui { font-family: 'JetBrains Mono', monospace; }
+  .font-body { font-family: 'IBM Plex Mono', monospace; }
+  body { font-family: 'IBM Plex Mono', monospace; }
+
+  /* Layout */
+  .app { display:flex; height:100vh; overflow:hidden; }
+  .sidebar { width:240px; min-width:240px; background:var(--bg); border-right:1px solid var(--border); display:flex; flex-direction:column; justify-content:space-between; padding:32px 24px; }
+  .sidebar-top { display:flex; flex-direction:column; gap:32px; }
+  .sidebar-bottom { display:flex; flex-direction:column; gap:16px; }
+  .main { flex:1; overflow-y:auto; padding:40px; display:flex; flex-direction:column; gap:40px; }
+
+  /* Logo */
+  .logo { display:flex; align-items:center; gap:8px; }
+  .logo-prompt { color:var(--accent-green); font-family:'JetBrains Mono',monospace; font-size:20px; font-weight:700; }
+  .logo-text { color:var(--text-primary); font-family:'JetBrains Mono',monospace; font-size:18px; font-weight:500; }
+
+  /* Nav */
+  .nav { display:flex; flex-direction:column; gap:4px; }
+  .nav-item { display:flex; align-items:center; gap:12px; height:36px; padding:0 12px; cursor:pointer; transition: background 0.15s; }
+  .nav-item:hover { background:var(--bg-active); }
+  .nav-item.active { background:var(--bg-active); }
+  .nav-dot { width:6px; height:6px; border-radius:50%; background:var(--text-tertiary); flex-shrink:0; }
+  .nav-item.active .nav-dot { background:var(--accent-green); }
+  .nav-label { font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--text-secondary); }
+  .nav-item.active .nav-label { color:var(--text-primary); }
+
+  /* Search */
+  .search-box { display:flex; align-items:center; gap:8px; height:36px; padding:0 12px; border:1px solid var(--border); }
+  .search-slash { font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--text-secondary); }
+  .search-text { font-size:12px; color:var(--text-tertiary); }
+  .index-info { display:flex; align-items:center; gap:6px; }
+  .index-dot { width:6px; height:6px; border-radius:50%; background:var(--accent-green); }
+  .index-text { font-size:11px; color:var(--text-secondary); }
+
+  /* Page Header */
+  .page-header { display:flex; justify-content:space-between; align-items:center; width:100%; }
+  .header-left { display:flex; align-items:center; gap:12px; }
+  .prompt-char { color:var(--accent-green); font-family:'JetBrains Mono',monospace; font-size:32px; font-weight:700; }
+  .page-title { font-family:'JetBrains Mono',monospace; font-size:28px; font-weight:700; color:var(--text-primary); }
+  .header-right { display:flex; align-items:center; gap:12px; }
+
+  /* Time Switcher */
+  .time-switcher { display:flex; border:1px solid var(--border); }
+  .time-btn { padding:8px 16px; font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--text-secondary); cursor:pointer; transition:background 0.15s, color 0.15s; background:transparent; border:none; }
+  .time-btn.active { background:var(--bg-active); color:var(--text-primary); font-weight:500; }
+  .time-btn:hover:not(.active) { background:var(--bg-elevated); }
+  .refresh-btn { padding:8px 16px; border:1px solid var(--border); font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--text-secondary); cursor:pointer; background:transparent; transition:background 0.15s; }
+  .refresh-btn:hover { background:var(--bg-active); }
+
+  /* KPI Cards */
+  .kpi-row { display:flex; gap:24px; width:100%; }
+  .kpi-card { flex:1; padding:24px; border:1px solid var(--border); display:flex; flex-direction:column; gap:12px; transition:border-color 0.2s; }
+  .kpi-card:hover { border-color:var(--text-tertiary); }
+  .kpi-label { font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--text-secondary); }
+  .kpi-value { font-family:'JetBrains Mono',monospace; font-size:28px; font-weight:700; }
+  .kpi-change { font-size:11px; }
+
+  /* Section Panels */
+  .section-panel { border:1px solid var(--border); display:flex; flex-direction:column; }
+  .section-header { display:flex; justify-content:space-between; align-items:center; padding:20px 20px 16px 20px; }
+  .section-title { font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:500; color:var(--text-secondary); }
+  .section-link { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--accent-green); cursor:pointer; text-decoration:none; }
+  .section-link:hover { text-decoration:underline; }
+
+  /* Content Columns */
+  .content-columns { display:flex; gap:24px; width:100%; }
+  .left-column { flex:1; display:flex; flex-direction:column; gap:24px; }
+  .right-column { width:400px; min-width:400px; display:flex; flex-direction:column; gap:24px; }
+
+  /* Commit Rows */
+  .commit-row { display:flex; align-items:center; gap:16px; padding:16px 20px; border-top:1px solid var(--border); transition:background 0.15s; cursor:pointer; }
+  .commit-row:hover { background:var(--bg-elevated); }
+  .commit-sha { font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--accent-green); flex-shrink:0; }
+  .commit-msg { font-size:12px; color:var(--text-primary); flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .commit-meta { display:flex; gap:8px; align-items:center; flex-shrink:0; }
+  .commit-author { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text-secondary); }
+  .commit-time { font-size:11px; color:var(--text-tertiary); }
+
+  /* Risk Rows */
+  .risk-row { display:flex; align-items:center; gap:12px; padding:16px 20px; border-top:1px solid var(--border); transition:background 0.15s; cursor:pointer; }
+  .risk-row:hover { background:var(--bg-elevated); }
+  .severity-badge { padding:4px 8px; font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:500; flex-shrink:0; border:1px solid; }
+  .severity-high { color:var(--accent-red); border-color:var(--accent-red); background:rgba(239,68,68,0.12); }
+  .severity-med { color:var(--accent-amber); border-color:var(--accent-amber); background:rgba(245,158,11,0.12); }
+  .severity-low { color:var(--accent-green); border-color:var(--accent-green); background:rgba(16,185,129,0.12); }
+  .risk-info { flex:1; display:flex; flex-direction:column; gap:4px; }
+  .risk-area { font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--text-primary); }
+  .risk-rationale { font-size:11px; color:var(--text-secondary); }
+  .risk-score { font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; flex-shrink:0; }
+
+  /* Decision Rows */
+  .decision-row { display:flex; flex-direction:column; gap:8px; padding:16px 20px; border-top:1px solid var(--border); transition:background 0.15s; cursor:pointer; }
+  .decision-row:hover { background:var(--bg-elevated); }
+  .decision-top { display:flex; gap:8px; align-items:center; }
+  .status-badge { padding:3px 8px; font-family:'JetBrains Mono',monospace; font-size:10px; border:1px solid; flex-shrink:0; }
+  .status-proposed { color:var(--accent-amber); border-color:var(--accent-amber); background:rgba(245,158,11,0.12); }
+  .status-unresolved { color:var(--accent-cyan); border-color:var(--accent-cyan); background:rgba(6,182,212,0.12); }
+  .status-accepted { color:var(--accent-green); border-color:var(--accent-green); background:rgba(16,185,129,0.12); }
+  .status-resolved { color:var(--text-secondary); border-color:var(--text-secondary); background:rgba(107,114,128,0.12); }
+  .decision-id { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text-tertiary); }
+  .decision-title { font-size:12px; color:var(--text-primary); }
+  .decision-source { font-size:10px; color:var(--text-tertiary); }
+  .count-badge { padding:3px 8px; font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:700; }
+
+  /* Page containers (hidden by default) */
+  .page { display:none; flex-direction:column; gap:32px; width:100%; }
+  .page.active { display:flex; }
+
+  /* Architecture page */
+  .arch-body { display:flex; gap:0; flex:1; min-height:0; }
+  .graph-area { flex:1; background:var(--bg-elevated); border:1px solid var(--border); position:relative; min-height:650px; overflow:hidden; }
+  .graph-node { position:absolute; padding:10px 16px; display:flex; flex-direction:column; gap:4px; border:1px solid; cursor:pointer; transition:transform 0.2s, box-shadow 0.2s; }
+  .graph-node:hover { transform:scale(1.05); box-shadow:0 0 20px rgba(0,0,0,0.5); }
+  .graph-node-name { font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:500; }
+  .graph-node-files { font-size:10px; color:var(--text-tertiary); }
+  .graph-hint { position:absolute; bottom:20px; left:20px; font-size:10px; color:var(--text-tertiary); }
+  .side-panel { width:320px; min-width:320px; border:1px solid var(--border); border-left:none; display:flex; flex-direction:column; overflow-y:auto; }
+  .panel-section { padding:24px; display:flex; flex-direction:column; gap:8px; }
+  .panel-section + .panel-section { border-top:1px solid var(--border); }
+  .panel-label { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text-secondary); }
+  .panel-name { font-family:'JetBrains Mono',monospace; font-size:20px; font-weight:700; color:var(--accent-green); }
+  .panel-desc { font-size:12px; color:var(--text-secondary); }
+  .stat-row { display:flex; justify-content:space-between; align-items:center; }
+  .stat-label { font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--text-secondary); }
+  .stat-value { font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; color:var(--text-primary); }
+  .dep-row { display:flex; gap:8px; align-items:center; }
+  .dep-arrow { font-family:'JetBrains Mono',monospace; font-size:11px; }
+  .dep-name { font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--text-primary); }
+
+  /* Filter bar */
+  .filter-bar { display:flex; gap:12px; align-items:center; }
+  .filter-label { font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--text-secondary); }
+  .filter-btn { padding:6px 12px; display:flex; gap:6px; align-items:center; border:1px solid var(--border); font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text-secondary); background:transparent; cursor:pointer; transition:border-color 0.15s; }
+  .filter-btn:hover { border-color:var(--text-tertiary); }
+  .filter-chev { font-size:10px; color:var(--text-tertiary); }
+
+  /* Filters row */
+  .filters-row { display:flex; border:1px solid var(--border); }
+  .filter-opt { padding:8px 16px; font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--text-secondary); cursor:pointer; background:transparent; border:none; transition:background 0.15s, color 0.15s; }
+  .filter-opt.active { background:var(--bg-active); color:var(--text-primary); font-weight:500; }
+  .filter-opt:hover:not(.active) { background:var(--bg-elevated); }
+
+  /* High impact */
+  .hi-tag { padding:3px 8px; font-family:'JetBrains Mono',monospace; font-size:10px; border:1px solid; flex-shrink:0; }
+  .hi-tag-red { color:var(--accent-red); border-color:var(--accent-red); background:rgba(239,68,68,0.12); }
+  .hi-tag-amber { color:var(--accent-amber); border-color:var(--accent-amber); background:rgba(245,158,11,0.12); }
+
+  /* Decisions table */
+  .dec-body { display:flex; flex:1; min-height:0; }
+  .dec-list-panel { flex:1; border:1px solid var(--border); display:flex; flex-direction:column; overflow-y:auto; }
+  .dec-detail { width:420px; min-width:420px; border:1px solid var(--border); border-left:none; display:flex; flex-direction:column; overflow-y:auto; }
+  .table-header { display:flex; align-items:center; padding:12px 20px; background:var(--bg-elevated); border-bottom:1px solid var(--border); font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--text-tertiary); }
+  .table-row { display:flex; align-items:center; padding:14px 20px; border-bottom:1px solid var(--border); transition:background 0.15s; cursor:pointer; }
+  .table-row:hover { background:var(--bg-elevated); }
+  .table-row.selected { background:var(--bg-active); }
+  .col-id { width:80px; flex-shrink:0; }
+  .col-title { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .col-status { width:100px; flex-shrink:0; }
+  .col-source { width:80px; flex-shrink:0; }
+  .table-row .col-id { font-family:'JetBrains Mono',monospace; font-size:11px; }
+  .table-row .col-title { font-size:12px; color:var(--text-primary); }
+  .table-row .col-source { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text-secondary); }
+
+  /* Status tabs */
+  .status-tabs { display:flex; border-bottom:1px solid var(--border); }
+  .status-tab { padding:10px 20px; font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--text-secondary); cursor:pointer; border-bottom:2px solid transparent; background:transparent; border-top:none; border-left:none; border-right:none; transition:color 0.15s; }
+  .status-tab.active { color:var(--text-primary); font-weight:500; border-bottom-color:var(--accent-green); }
+  .status-tab:hover:not(.active) { color:var(--text-primary); }
+
+  /* Detail panel */
+  .detail-header { padding:24px; border-bottom:1px solid var(--border); display:flex; flex-direction:column; gap:12px; }
+  .detail-id-row { display:flex; gap:12px; align-items:center; }
+  .detail-id { font-family:'JetBrains Mono',monospace; font-size:16px; font-weight:700; color:var(--accent-green); }
+  .detail-title { font-size:14px; font-weight:500; color:var(--text-primary); }
+  .detail-meta { font-size:11px; color:var(--text-tertiary); }
+  .detail-body { padding:24px; display:flex; flex-direction:column; gap:24px; }
+  .detail-section-label { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text-secondary); margin-bottom:4px; }
+  .detail-text { font-size:12px; color:var(--text-primary); line-height:1.6; }
+  .ref-link { display:flex; gap:8px; align-items:center; }
+  .ref-arrow { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--accent-green); }
+  .ref-text { font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--accent-cyan); cursor:pointer; }
+  .ref-text:hover { text-decoration:underline; }
+  .action-btns { display:flex; gap:8px; }
+  .action-btn { padding:8px 16px; font-family:'JetBrains Mono',monospace; font-size:12px; cursor:pointer; transition:opacity 0.15s; border:none; }
+  .action-btn:hover { opacity:0.8; }
+  .action-btn.primary { background:var(--accent-green); color:var(--bg); font-weight:500; }
+  .action-btn.secondary { background:transparent; border:1px solid var(--border); color:var(--text-secondary); }
+
+  /* Risks page */
+  .risk-top-row { display:flex; gap:24px; }
+  .severity-dist { flex:1; padding:24px; border:1px solid var(--border); display:flex; flex-direction:column; gap:16px; }
+  .sev-bar-row { display:flex; align-items:center; gap:12px; }
+  .sev-bar-label { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text-secondary); width:40px; flex-shrink:0; }
+  .sev-bar-track { flex:1; height:24px; background:var(--bg-active); }
+  .sev-bar-fill { height:100%; }
+  .sev-bar-count { font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:700; width:20px; flex-shrink:0; }
+  .escalated-panel { width:400px; min-width:400px; padding:24px; border:1px solid var(--border); display:flex; flex-direction:column; gap:16px; }
+  .esc-card { padding:12px 16px; display:flex; flex-direction:column; gap:6px; border:1px solid; }
+  .esc-top { display:flex; justify-content:space-between; align-items:center; }
+
+  /* Risk table */
+  .risk-table { border:1px solid var(--border); }
+  .risk-table-header { display:flex; align-items:center; padding:12px 20px; background:var(--bg-elevated); border-bottom:1px solid var(--border); font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--text-tertiary); }
+  .risk-table-row { display:flex; align-items:center; padding:14px 20px; border-bottom:1px solid var(--border); transition:background 0.15s; cursor:pointer; }
+  .risk-table-row:hover { background:var(--bg-elevated); }
+  .rt-col-sev { width:80px; flex-shrink:0; }
+  .rt-col-area { flex:1; font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .rt-col-kind { width:120px; flex-shrink:0; font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text-secondary); }
+  .rt-col-score { width:60px; flex-shrink:0; font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:700; }
+  .rt-col-rationale { width:300px; flex-shrink:0; font-size:11px; color:var(--text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  /* Connection lines (SVG overlay) */
+  .graph-lines { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; }
+  .graph-lines line { stroke:var(--border); stroke-width:1; stroke-dasharray:4 4; }
+
+  /* Scroll custom */
+  ::-webkit-scrollbar { width:6px; }
+  ::-webkit-scrollbar-track { background:var(--bg); }
+  ::-webkit-scrollbar-thumb { background:var(--border); }
+  ::-webkit-scrollbar-thumb:hover { background:var(--text-tertiary); }
+
+  /* Search input */
+  .search-input { padding:8px 16px; border:1px solid var(--border); font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--text-tertiary); background:transparent; cursor:pointer; }
+  .add-btn { padding:8px 16px; background:var(--accent-green); font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:500; color:var(--bg); cursor:pointer; border:none; transition:opacity 0.15s; }
+  .add-btn:hover { opacity:0.85; }
+
+  /* Animations */
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+  .main .page.active > * { animation: fadeIn 0.3s ease-out both; }
+  .main .page.active > *:nth-child(1) { animation-delay: 0s; }
+  .main .page.active > *:nth-child(2) { animation-delay: 0.05s; }
+  .main .page.active > *:nth-child(3) { animation-delay: 0.1s; }
+  .main .page.active > *:nth-child(4) { animation-delay: 0.15s; }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-top">
+      <div class="logo">
+        <span class="logo-prompt">&gt;</span>
+        <span class="logo-text">copyclip</span>
+      </div>
+      <div class="nav" id="nav">
+        <div class="nav-item active" data-page="overview">
+          <div class="nav-dot"></div>
+          <span class="nav-label">overview</span>
+        </div>
+        <div class="nav-item" data-page="architecture">
+          <div class="nav-dot"></div>
+          <span class="nav-label">architecture</span>
+        </div>
+        <div class="nav-item" data-page="changes">
+          <div class="nav-dot"></div>
+          <span class="nav-label">changes</span>
+        </div>
+        <div class="nav-item" data-page="decisions">
+          <div class="nav-dot"></div>
+          <span class="nav-label">decisions</span>
+        </div>
+        <div class="nav-item" data-page="risks">
+          <div class="nav-dot"></div>
+          <span class="nav-label">risks</span>
+        </div>
+      </div>
+    </div>
+    <div class="sidebar-bottom">
+      <div class="search-box">
+        <span class="search-slash">/</span>
+        <span class="search-text">search...</span>
+      </div>
+      <div class="index-info">
+        <div class="index-dot"></div>
+        <span class="index-text">last indexed 2m ago</span>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <main class="main">
+
+    <!-- ===== OVERVIEW PAGE ===== -->
+    <div class="page active" id="page-overview">
+      <div class="page-header">
+        <div class="header-left">
+          <span class="prompt-char">&gt;</span>
+          <h1 class="page-title">overview</h1>
+        </div>
+        <div class="header-right">
+          <div class="time-switcher">
+            <button class="time-btn active">7d</button>
+            <button class="time-btn">30d</button>
+          </div>
+          <button class="refresh-btn">$ refresh</button>
+        </div>
+      </div>
+
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <span class="kpi-label">// files_indexed</span>
+          <span class="kpi-value" style="color:var(--text-primary)">1,247</span>
+          <span class="kpi-change" style="color:var(--accent-green)">++ 42 this week</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">// commits_indexed</span>
+          <span class="kpi-value" style="color:var(--text-primary)">389</span>
+          <span class="kpi-change" style="color:var(--accent-green)">++ 18 this week</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">// modules_mapped</span>
+          <span class="kpi-value" style="color:var(--text-primary)">24</span>
+          <span class="kpi-change" style="color:var(--accent-green)">++ 3 this week</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">// risks_detected</span>
+          <span class="kpi-value" style="color:var(--accent-red)">7</span>
+          <span class="kpi-change" style="color:var(--accent-amber)">++ 2 this week</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">// open_decisions</span>
+          <span class="kpi-value" style="color:var(--accent-amber)">5</span>
+          <span class="kpi-change" style="color:var(--text-secondary)">3 proposed / 2 unresolved</span>
+        </div>
+      </div>
+
+      <div class="content-columns">
+        <div class="left-column">
+          <!-- Top Changes -->
+          <div class="section-panel">
+            <div class="section-header">
+              <span class="section-title">// top_changes</span>
+              <a class="section-link" onclick="switchPage('changes')">view all &gt;&gt;</a>
+            </div>
+            <div class="commit-row"><span class="commit-sha">a3f7b21</span><span class="commit-msg">refactor auth middleware to use jwt validation</span><div class="commit-meta"><span class="commit-author">claude</span><span class="commit-time">2h ago</span></div></div>
+            <div class="commit-row"><span class="commit-sha">e91c4d8</span><span class="commit-msg">add rate limiting to api gateway endpoints</span><div class="commit-meta"><span class="commit-author">claude</span><span class="commit-time">5h ago</span></div></div>
+            <div class="commit-row"><span class="commit-sha">7b2f19a</span><span class="commit-msg">migrate database schema for user permissions</span><div class="commit-meta"><span class="commit-author">dev-bot</span><span class="commit-time">1d ago</span></div></div>
+            <div class="commit-row"><span class="commit-sha">c4d8e12</span><span class="commit-msg">fix session timeout handling in websocket layer</span><div class="commit-meta"><span class="commit-author">claude</span><span class="commit-time">1d ago</span></div></div>
+          </div>
+
+          <!-- Top Risks -->
+          <div class="section-panel">
+            <div class="section-header">
+              <span class="section-title">// top_risks</span>
+              <a class="section-link" onclick="switchPage('risks')">view all &gt;&gt;</a>
+            </div>
+            <div class="risk-row"><span class="severity-badge severity-high">high</span><div class="risk-info"><span class="risk-area">auth/middleware.ts</span><span class="risk-rationale">high churn + no test coverage &mdash; 14 changes in 7d</span></div><span class="risk-score" style="color:var(--accent-red)">92</span></div>
+            <div class="risk-row"><span class="severity-badge severity-high">high</span><div class="risk-info"><span class="risk-area">api/gateway/rate-limiter.ts</span><span class="risk-rationale">boundary complexity &mdash; 8 external deps, no circuit breaker</span></div><span class="risk-score" style="color:var(--accent-red)">87</span></div>
+            <div class="risk-row"><span class="severity-badge severity-med">med</span><div class="risk-info"><span class="risk-area">db/migrations/</span><span class="risk-rationale">test gap &mdash; 3 migrations without rollback tests</span></div><span class="risk-score" style="color:var(--accent-amber)">64</span></div>
+          </div>
+        </div>
+
+        <div class="right-column">
+          <!-- Decision Queue -->
+          <div class="section-panel">
+            <div class="section-header">
+              <span class="section-title">// decision_queue</span>
+              <span class="count-badge" style="background:var(--accent-amber);color:var(--bg)">5</span>
+            </div>
+            <div class="decision-row"><div class="decision-top"><span class="status-badge status-proposed">proposed</span><span class="decision-id">#dec-041</span></div><span class="decision-title">migrate from express to fastify for api layer</span><span class="decision-source">source: extracted</span></div>
+            <div class="decision-row"><div class="decision-top"><span class="status-badge status-proposed">proposed</span><span class="decision-id">#dec-040</span></div><span class="decision-title">adopt opentelemetry for distributed tracing</span><span class="decision-source">source: manual</span></div>
+            <div class="decision-row"><div class="decision-top"><span class="status-badge status-unresolved">unresolved</span><span class="decision-id">#dec-038</span></div><span class="decision-title">replace redis with valkey for session store</span><span class="decision-source">source: extracted</span></div>
+            <div class="decision-row"><div class="decision-top"><span class="status-badge status-unresolved">unresolved</span><span class="decision-id">#dec-036</span></div><span class="decision-title">consolidate user/account models into single aggregate</span><span class="decision-source">source: extracted</span></div>
+            <div class="decision-row"><div class="decision-top"><span class="status-badge status-proposed">proposed</span><span class="decision-id">#dec-042</span></div><span class="decision-title">add e2e smoke tests to ci pipeline before deploy</span><span class="decision-source">source: manual</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== ARCHITECTURE PAGE ===== -->
+    <div class="page" id="page-architecture">
+      <div class="page-header">
+        <div class="header-left">
+          <span class="prompt-char">&gt;</span>
+          <h1 class="page-title">architecture</h1>
+        </div>
+        <div class="header-right">
+          <div class="filters-row">
+            <button class="filter-opt active">all</button>
+            <button class="filter-opt">internal</button>
+            <button class="filter-opt">external</button>
+          </div>
+          <div class="search-input">/ search modules</div>
+        </div>
+      </div>
+      <div class="arch-body">
+        <div class="graph-area">
+          <svg class="graph-lines"><line x1="160" y1="115" x2="290" y2="195"/><line x1="340" y1="210" x2="470" y2="130"/><line x1="310" y1="220" x2="320" y2="320"/><line x1="350" y1="340" x2="520" y2="310"/><line x1="150" y1="115" x2="130" y2="315"/></svg>
+          <div class="graph-node" style="left:120px;top:80px;border-color:var(--accent-cyan);background:rgba(6,182,212,0.08)"><span class="graph-node-name" style="color:var(--accent-cyan)">api/</span><span class="graph-node-files">34 files</span></div>
+          <div class="graph-node" style="left:280px;top:180px;border-color:var(--accent-green);background:rgba(16,185,129,0.08)"><span class="graph-node-name" style="color:var(--accent-green)">auth/</span><span class="graph-node-files">12 files</span></div>
+          <div class="graph-node" style="left:460px;top:100px;border-color:var(--accent-amber);background:rgba(245,158,11,0.08)"><span class="graph-node-name" style="color:var(--accent-amber)">db/</span><span class="graph-node-files">18 files</span></div>
+          <div class="graph-node" style="left:300px;top:320px;border-color:var(--text-secondary);background:rgba(107,114,128,0.08)"><span class="graph-node-name" style="color:var(--text-primary)">core/</span><span class="graph-node-files">28 files</span></div>
+          <div class="graph-node" style="left:520px;top:290px;border-color:var(--accent-red);background:rgba(239,68,68,0.08)"><span class="graph-node-name" style="color:var(--accent-red)">websocket/</span><span class="graph-node-files">8 files</span></div>
+          <div class="graph-node" style="left:100px;top:320px;border-color:var(--text-secondary);background:rgba(107,114,128,0.08)"><span class="graph-node-name" style="color:var(--text-primary)">ui/</span><span class="graph-node-files">47 files</span></div>
+          <div class="graph-node" style="left:80px;top:480px;border-color:var(--text-secondary);background:rgba(107,114,128,0.08)"><span class="graph-node-name" style="color:var(--text-primary)">utils/</span><span class="graph-node-files">15 files</span></div>
+          <div class="graph-node" style="left:500px;top:470px;border-color:var(--text-secondary);background:rgba(107,114,128,0.08)"><span class="graph-node-name" style="color:var(--text-primary)">config/</span><span class="graph-node-files">6 files</span></div>
+          <span class="graph-hint">scroll to zoom &nbsp;|&nbsp; drag to pan &nbsp;|&nbsp; click node to inspect</span>
+        </div>
+        <div class="side-panel">
+          <div class="panel-section">
+            <span class="panel-label">// selected_module</span>
+            <span class="panel-name">auth/</span>
+            <span class="panel-desc">authentication &amp; authorization middleware</span>
+          </div>
+          <div class="panel-section" style="gap:20px">
+            <div class="stat-row"><span class="stat-label">files</span><span class="stat-value">12</span></div>
+            <div class="stat-row"><span class="stat-label">churn_score</span><span class="stat-value" style="color:var(--accent-red)">87</span></div>
+            <div class="stat-row"><span class="stat-label">inbound_deps</span><span class="stat-value">6</span></div>
+            <div class="stat-row"><span class="stat-label">outbound_deps</span><span class="stat-value">3</span></div>
+          </div>
+          <div class="panel-section" style="gap:12px">
+            <span class="panel-label">// dependencies</span>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <div class="dep-row"><span class="dep-arrow" style="color:var(--accent-green)">&rarr;</span><span class="dep-name">core/</span></div>
+              <div class="dep-row"><span class="dep-arrow" style="color:var(--accent-green)">&rarr;</span><span class="dep-name">db/</span></div>
+              <div class="dep-row"><span class="dep-arrow" style="color:var(--accent-green)">&rarr;</span><span class="dep-name">config/</span></div>
+              <div class="dep-row"><span class="dep-arrow" style="color:var(--accent-cyan)">&larr;</span><span class="dep-name">api/</span></div>
+              <div class="dep-row"><span class="dep-arrow" style="color:var(--accent-cyan)">&larr;</span><span class="dep-name">websocket/</span></div>
+            </div>
+          </div>
+          <div class="panel-section">
+            <div style="display:flex;align-items:center;gap:8px">
+              <div style="width:6px;height:6px;border-radius:50%;background:var(--accent-red)"></div>
+              <span style="font-size:11px;color:var(--accent-red)">2 active risks in this module</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== CHANGES PAGE ===== -->
+    <div class="page" id="page-changes">
+      <div class="page-header">
+        <div class="header-left">
+          <span class="prompt-char">&gt;</span>
+          <h1 class="page-title">changes</h1>
+        </div>
+        <div class="header-right">
+          <div class="time-switcher">
+            <button class="time-btn active">7d</button>
+            <button class="time-btn">30d</button>
+            <button class="time-btn">custom</button>
+          </div>
+        </div>
+      </div>
+      <div class="filter-bar">
+        <span class="filter-label">$ filter</span>
+        <button class="filter-btn">author: all <span class="filter-chev">v</span></button>
+        <button class="filter-btn">module: all <span class="filter-chev">v</span></button>
+      </div>
+      <div class="section-panel">
+        <div class="section-header"><span class="section-title" style="color:var(--accent-red)">// high_impact_changes</span><span class="count-badge" style="background:var(--accent-red);color:var(--bg)">3</span></div>
+        <div class="commit-row"><span class="commit-sha" style="color:var(--accent-red)">a3f7b21</span><span class="commit-msg">refactor auth middleware to use jwt validation</span><span class="hi-tag hi-tag-red">14 files</span><span class="commit-time" style="margin-left:8px">claude &nbsp;2h</span></div>
+        <div class="commit-row"><span class="commit-sha" style="color:var(--accent-red)">7b2f19a</span><span class="commit-msg">migrate database schema for user permissions</span><span class="hi-tag hi-tag-red">9 files</span><span class="commit-time" style="margin-left:8px">dev-bot &nbsp;1d</span></div>
+        <div class="commit-row"><span class="commit-sha" style="color:var(--accent-amber)">d8e12c4</span><span class="commit-msg">overhaul error handling across api layer</span><span class="hi-tag hi-tag-amber">7 files</span><span class="commit-time" style="margin-left:8px">claude &nbsp;3d</span></div>
+      </div>
+      <div class="section-panel">
+        <div class="section-header"><span class="section-title">// commit_timeline</span><span style="font-size:11px;color:var(--text-tertiary)">18 commits in 7d</span></div>
+        <div class="commit-row"><span class="commit-sha">a3f7b21</span><span class="commit-msg">refactor auth middleware to use jwt validation</span><div class="commit-meta"><span class="commit-author">claude</span><span class="commit-time">2h ago</span></div></div>
+        <div class="commit-row"><span class="commit-sha">e91c4d8</span><span class="commit-msg">add rate limiting to api gateway endpoints</span><div class="commit-meta"><span class="commit-author">claude</span><span class="commit-time">5h ago</span></div></div>
+        <div class="commit-row"><span class="commit-sha">7b2f19a</span><span class="commit-msg">migrate database schema for user permissions</span><div class="commit-meta"><span class="commit-author">dev-bot</span><span class="commit-time">1d ago</span></div></div>
+        <div class="commit-row"><span class="commit-sha">c4d8e12</span><span class="commit-msg">fix session timeout handling in websocket layer</span><div class="commit-meta"><span class="commit-author">claude</span><span class="commit-time">1d ago</span></div></div>
+        <div class="commit-row"><span class="commit-sha">d8e12c4</span><span class="commit-msg">overhaul error handling across api layer</span><div class="commit-meta"><span class="commit-author">claude</span><span class="commit-time">3d ago</span></div></div>
+        <div class="commit-row"><span class="commit-sha">f2a9b31</span><span class="commit-msg">add integration tests for payment processing flow</span><div class="commit-meta"><span class="commit-author">dev-bot</span><span class="commit-time">4d ago</span></div></div>
+      </div>
+    </div>
+
+    <!-- ===== DECISIONS PAGE ===== -->
+    <div class="page" id="page-decisions">
+      <div class="page-header">
+        <div class="header-left">
+          <span class="prompt-char">&gt;</span>
+          <h1 class="page-title">decisions</h1>
+        </div>
+        <div class="header-right">
+          <div class="search-input">/ search decisions...</div>
+          <button class="add-btn">+ add decision</button>
+        </div>
+      </div>
+      <div class="status-tabs">
+        <button class="status-tab active">all (12)</button>
+        <button class="status-tab">proposed (5)</button>
+        <button class="status-tab">accepted (3)</button>
+        <button class="status-tab">resolved (2)</button>
+        <button class="status-tab">superseded (2)</button>
+      </div>
+      <div class="dec-body">
+        <div class="dec-list-panel">
+          <div class="table-header"><span class="col-id">id</span><span class="col-title">title</span><span class="col-status">status</span><span class="col-source">source</span></div>
+          <div class="table-row selected"><span class="col-id" style="color:var(--accent-green)">#dec-042</span><span class="col-title">add e2e smoke tests to ci pipeline before deploy</span><span class="col-status"><span class="status-badge status-proposed">proposed</span></span><span class="col-source">manual</span></div>
+          <div class="table-row"><span class="col-id">#dec-041</span><span class="col-title">migrate from express to fastify for api layer</span><span class="col-status"><span class="status-badge status-proposed">proposed</span></span><span class="col-source">extracted</span></div>
+          <div class="table-row"><span class="col-id">#dec-040</span><span class="col-title">adopt opentelemetry for distributed tracing</span><span class="col-status"><span class="status-badge status-accepted">accepted</span></span><span class="col-source">manual</span></div>
+          <div class="table-row"><span class="col-id">#dec-038</span><span class="col-title">replace redis with valkey for session store</span><span class="col-status"><span class="status-badge status-unresolved">unresolved</span></span><span class="col-source">extracted</span></div>
+          <div class="table-row"><span class="col-id">#dec-036</span><span class="col-title">consolidate user/account models into single aggregate</span><span class="col-status"><span class="status-badge status-resolved">resolved</span></span><span class="col-source">extracted</span></div>
+        </div>
+        <div class="dec-detail">
+          <div class="detail-header">
+            <span class="panel-label">// decision_detail</span>
+            <div class="detail-id-row"><span class="detail-id">#dec-042</span><span class="status-badge status-proposed">proposed</span></div>
+            <span class="detail-title">add e2e smoke tests to ci pipeline before deploy</span>
+            <span class="detail-meta">created: 2d ago &nbsp;|&nbsp; source: manual</span>
+          </div>
+          <div class="detail-body">
+            <div>
+              <div class="detail-section-label">// summary</div>
+              <p class="detail-text">CI pipeline currently deploys without end-to-end verification. Adding smoke tests before deploy would catch integration failures before they reach production. Estimated effort: 2-3 days.</p>
+            </div>
+            <div>
+              <div class="detail-section-label">// linked_refs</div>
+              <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
+                <div class="ref-link"><span class="ref-arrow">&rarr;</span><span class="ref-text">ci/deploy.yml</span></div>
+                <div class="ref-link"><span class="ref-arrow">&rarr;</span><span class="ref-text">tests/e2e/smoke.spec.ts</span></div>
+                <div class="ref-link"><span class="ref-arrow">&rarr;</span><span class="ref-text">commit a3f7b21</span></div>
+              </div>
+            </div>
+            <div>
+              <div class="detail-section-label">// status_transition</div>
+              <div class="action-btns" style="margin-top:4px">
+                <button class="action-btn primary">$ accept</button>
+                <button class="action-btn secondary">$ resolve</button>
+                <button class="action-btn secondary">$ supersede</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== RISKS PAGE ===== -->
+    <div class="page" id="page-risks">
+      <div class="page-header">
+        <div class="header-left">
+          <span class="prompt-char">&gt;</span>
+          <h1 class="page-title">risks</h1>
+        </div>
+        <div class="header-right">
+          <button class="filter-btn">kind: all <span class="filter-chev">v</span></button>
+          <button class="filter-btn">module: all <span class="filter-chev">v</span></button>
+          <button class="filter-btn">sort: score <span class="filter-chev">v</span></button>
+        </div>
+      </div>
+      <div class="risk-top-row">
+        <div class="severity-dist">
+          <span class="section-title">// severity_distribution</span>
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <div class="sev-bar-row"><span class="sev-bar-label">high</span><div class="sev-bar-track"><div class="sev-bar-fill" style="width:43%;background:var(--accent-red)"></div></div><span class="sev-bar-count" style="color:var(--accent-red)">3</span></div>
+            <div class="sev-bar-row"><span class="sev-bar-label">med</span><div class="sev-bar-track"><div class="sev-bar-fill" style="width:29%;background:var(--accent-amber)"></div></div><span class="sev-bar-count" style="color:var(--accent-amber)">2</span></div>
+            <div class="sev-bar-row"><span class="sev-bar-label">low</span><div class="sev-bar-track"><div class="sev-bar-fill" style="width:29%;background:var(--accent-green)"></div></div><span class="sev-bar-count" style="color:var(--accent-green)">2</span></div>
+          </div>
+        </div>
+        <div class="escalated-panel">
+          <span class="section-title" style="color:var(--accent-red)">// recently_escalated</span>
+          <div class="esc-card" style="border-color:var(--accent-red);background:rgba(239,68,68,0.06)">
+            <div class="esc-top"><span class="risk-area">auth/middleware.ts</span><span class="risk-score" style="color:var(--accent-red)">92</span></div>
+            <span style="font-size:11px;color:var(--accent-red)">escalated: score increased 34 &rarr; 92 in 3d</span>
+          </div>
+          <div class="esc-card" style="border-color:var(--accent-amber);background:rgba(245,158,11,0.06)">
+            <div class="esc-top"><span class="risk-area">api/gateway/</span><span class="risk-score" style="color:var(--accent-red)">87</span></div>
+            <span style="font-size:11px;color:var(--accent-amber)">escalated: new boundary risk after rate-limiter refactor</span>
+          </div>
+        </div>
+      </div>
+      <div class="risk-table">
+        <div class="risk-table-header"><span class="rt-col-sev">severity</span><span class="rt-col-area">area</span><span class="rt-col-kind">kind</span><span class="rt-col-score">score</span><span class="rt-col-rationale">rationale</span></div>
+        <div class="risk-table-row"><span class="rt-col-sev"><span class="severity-badge severity-high">high</span></span><span class="rt-col-area">auth/middleware.ts</span><span class="rt-col-kind">churn</span><span class="rt-col-score" style="color:var(--accent-red)">92</span><span class="rt-col-rationale">high churn + no test coverage &mdash; 14 changes in 7d</span></div>
+        <div class="risk-table-row"><span class="rt-col-sev"><span class="severity-badge severity-high">high</span></span><span class="rt-col-area">api/gateway/rate-limiter.ts</span><span class="rt-col-kind">boundary</span><span class="rt-col-score" style="color:var(--accent-red)">87</span><span class="rt-col-rationale">8 external deps, no circuit breaker pattern</span></div>
+        <div class="risk-table-row"><span class="rt-col-sev"><span class="severity-badge severity-high">high</span></span><span class="rt-col-area">websocket/handler.ts</span><span class="rt-col-kind">complexity</span><span class="rt-col-score" style="color:var(--accent-red)">78</span><span class="rt-col-rationale">cyclomatic complexity 42, deeply nested callbacks</span></div>
+        <div class="risk-table-row"><span class="rt-col-sev"><span class="severity-badge severity-med">med</span></span><span class="rt-col-area">db/migrations/</span><span class="rt-col-kind">test_gap</span><span class="rt-col-score" style="color:var(--accent-amber)">64</span><span class="rt-col-rationale">3 migrations without rollback tests</span></div>
+        <div class="risk-table-row"><span class="rt-col-sev"><span class="severity-badge severity-med">med</span></span><span class="rt-col-area">core/events.ts</span><span class="rt-col-kind">complexity</span><span class="rt-col-score" style="color:var(--accent-amber)">52</span><span class="rt-col-rationale">event bus growing without clear domain boundaries</span></div>
+        <div class="risk-table-row"><span class="rt-col-sev"><span class="severity-badge severity-low">low</span></span><span class="rt-col-area">utils/logger.ts</span><span class="rt-col-kind">churn</span><span class="rt-col-score" style="color:var(--accent-green)">28</span><span class="rt-col-rationale">frequent format changes, low impact surface</span></div>
+        <div class="risk-table-row"><span class="rt-col-sev"><span class="severity-badge severity-low">low</span></span><span class="rt-col-area">config/env.ts</span><span class="rt-col-kind">test_gap</span><span class="rt-col-score" style="color:var(--accent-green)">18</span><span class="rt-col-rationale">env validation untested, low change frequency</span></div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+function switchPage(pageName) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + pageName).classList.add('active');
+  document.querySelector('[data-page="' + pageName + '"]').classList.add('active');
+}
+
+document.querySelectorAll('.nav-item').forEach(item => {
+  item.addEventListener('click', () => switchPage(item.dataset.page));
+});
+
+// Time switcher toggle
+document.querySelectorAll('.time-switcher').forEach(sw => {
+  sw.querySelectorAll('.time-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      sw.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+});
+
+// Filter toggle
+document.querySelectorAll('.filters-row').forEach(row => {
+  row.querySelectorAll('.filter-opt').forEach(opt => {
+    opt.addEventListener('click', () => {
+      row.querySelectorAll('.filter-opt').forEach(o => o.classList.remove('active'));
+      opt.classList.add('active');
+    });
+  });
+});
+
+// Status tabs toggle
+document.querySelectorAll('.status-tabs').forEach(tabs => {
+  tabs.querySelectorAll('.status-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      tabs.querySelectorAll('.status-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+    });
+  });
+});
+
+// Table row selection
+document.querySelectorAll('.dec-list-panel .table-row').forEach(row => {
+  row.addEventListener('click', () => {
+    document.querySelectorAll('.dec-list-panel .table-row').forEach(r => r.classList.remove('selected'));
+    row.classList.add('selected');
+  });
+});
+</script>
+</body>
+</html>
