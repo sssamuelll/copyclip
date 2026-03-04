@@ -1003,6 +1003,16 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 self._json({"context": final_context, "warnings": warnings})
                 return
 
+            if parsed.path == "/api/config":
+                length = int(self.headers.get("Content-Length", "0"))
+                raw = self.rfile.read(length) if length else b"{}"
+                data = json.loads(raw.decode("utf-8"))
+                for k, v in data.items():
+                    conn.execute("INSERT INTO config(key, value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (k, str(v)))
+                conn.commit()
+                self._json({"status": "ok"})
+                return
+
             if parsed.path == "/api/decisions":
                 length = int(self.headers.get("Content-Length", "0"))
                 raw = self.rfile.read(length) if length else b"{}"

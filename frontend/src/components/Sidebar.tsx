@@ -7,13 +7,14 @@ const GROUPS = [
       { id: 'atlas', label: 'Atlas' },
       { id: 'architecture', label: 'Architecture' },
       { id: 'impact', label: 'Impact Simulator' },
+      { id: 'ask', label: 'Ask Project' },
     ]
   },
   {
     label: 'Operate',
     pages: [
       { id: 'context-builder', label: 'Context Builder' },
-      { id: 'ask', label: 'Ask Project' },
+      { id: 'settings', label: 'Settings' },
     ]
   },
   {

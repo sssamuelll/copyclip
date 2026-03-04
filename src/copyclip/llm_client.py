@@ -13,6 +13,23 @@ from .llm.provider_config import ProviderConfigError
 
 from copyclip.llm.metrics import metrics_collector
 
+# Brief: _get_config_value
+def _get_config_value(key: str, default: Optional[str] = None) -> Optional[str]:
+    """Fetch configuration from the isolated .copyclip/intelligence.db if it exists."""
+    try:
+        from .intelligence.db import connect, db_path
+        # We need a project root context. For simplicity, we check current dir.
+        root = os.getcwd()
+        db = db_path(root)
+        if not os.path.exists(db):
+            return default
+        conn = connect(root)
+        row = conn.execute("SELECT value FROM config WHERE key=?", (key,)).fetchone()
+        conn.close()
+        return row[0] if row else default
+    except:
+        return default
+
 _RETRIES = int(os.getenv("COPYCLIP_LLM_RETRIES", "1"))
 _BACKOFF = float(os.getenv("COPYCLIP_LLM_BACKOFF", "0.75"))
 _MAX_TOKENS = int(os.getenv("COPYCLIP_LLM_MAX_TOKENS", "4000"))
@@ -201,7 +218,7 @@ def map_exception_to_log_data(
 class OpenAIClient:
     """LLM client for OpenAI and compatible APIs."""
     def __init__(self, api_key: Optional[str], model: str, endpoint: Optional[str], timeout: int, extra_headers: Dict[str, Any] | None = None):
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.api_key = api_key or _get_config_value("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
         _ensure_api_key(self.api_key, "OpenAI")
         self.model = model or "gpt-4o-mini"
         # Permitimos base como host (/v1) o endpoint completo (/v1/chat/completions)
@@ -402,7 +419,7 @@ class OpenAIClient:
 class AnthropicClient:
     """LLM client for Anthropic."""
     def __init__(self, api_key: Optional[str], model: str, endpoint: Optional[str], timeout: int, extra_headers: Dict[str, Any]):
-        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
+        self.api_key = api_key or _get_config_value("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
         _ensure_api_key(self.api_key, "Anthropic")
         self.model = model or "claude-3-5-sonnet-20240620"
         self.base = (endpoint or "https://api.anthropic.com").rstrip("/")
@@ -710,7 +727,7 @@ class DeepSeekClient:
 class GeminiClient:
     """LLM client for Google Gemini API."""
     def __init__(self, api_key: Optional[str], model: str, endpoint: Optional[str], timeout: int, extra_headers: Dict[str, Any] | None = None):
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        self.api_key = api_key or _get_config_value("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         _ensure_api_key(self.api_key, "Gemini")
         self.model = model or "gemini-1.5-flash"
         # Endpoint structure for Gemini: https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent

@@ -48,6 +48,8 @@ export const api = {
   heatmap: () => getJSON<{ items: HeatmapItem[] }>('/api/heatmap'),
   impact: (path: string) => getJSON<ImpactResult>(`/api/impact?path=${encodeURIComponent(path)}`),
   agentChat: (agent: string, message: string) => postJSON<AgentResponse>('/api/agents/chat', { agent, message }),
+  getConfig: () => getJSON<Record<string, string>>('/api/config'),
+  setConfig: (data: Record<string, string>) => postJSON<{ status: string }>('/api/config', data),
   architecture: () => getJSON<{ nodes: ArchNode[]; edges: ArchEdge[] }>('/api/architecture/graph'),
   ask: (question: string) => postJSON<AskResponse>('/api/ask', { question }),
   assembleContext: (p: ContextPayload) => postJSON<{ context: string; warnings: string[] }>('/api/assemble-context', p)

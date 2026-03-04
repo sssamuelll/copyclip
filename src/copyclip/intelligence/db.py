@@ -158,6 +158,11 @@ def init_schema(conn: sqlite3.Connection) -> None:
             summary_json TEXT
         );
 
+        CREATE TABLE IF NOT EXISTS config (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        );
+
         CREATE TABLE IF NOT EXISTS alert_rules (
             id INTEGER PRIMARY KEY,
             project_id INTEGER NOT NULL,
