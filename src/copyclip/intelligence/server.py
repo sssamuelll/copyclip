@@ -479,6 +479,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 raw = self.rfile.read(length) if length else b"{}"
                 data = json.loads(raw.decode("utf-8"))
                 status = (data.get("status") or "").strip()
+                note = (data.get("note") or "").strip()
                 allowed = {"proposed", "accepted", "unresolved", "resolved", "superseded"}
                 if status not in allowed:
                     self._json({"error": "invalid_status", "allowed": sorted(allowed)}, 400)
@@ -490,13 +491,31 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 ).fetchone()
                 prev_status = prev[0] if prev else None
 
+                # Quality gate: cannot resolve without evidence.
+                if status == "resolved":
+                    refs_count = conn.execute(
+                        "SELECT COUNT(*) FROM decision_refs WHERE decision_id=?",
+                        (decision_id,),
+                    ).fetchone()[0]
+                    has_note = len(note) >= 12
+                    if refs_count == 0 and not has_note:
+                        self._json(
+                            {
+                                "error": "quality_gate_blocked",
+                                "message": "Resolution requires evidence: at least one ref or a meaningful note.",
+                                "decision_id": decision_id,
+                            },
+                            409,
+                        )
+                        return
+
                 conn.execute(
                     "UPDATE decisions SET status=?, resolved_at=CASE WHEN ?='resolved' THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=? AND project_id=?",
                     (status, status, decision_id, pid),
                 )
                 conn.execute(
                     "INSERT INTO decision_history(decision_id,action,from_status,to_status,note) VALUES(?,?,?,?,?)",
-                    (decision_id, "status_change", prev_status, status, "status updated via API"),
+                    (decision_id, "status_change", prev_status, status, note or "status updated via API"),
                 )
                 conn.commit()
                 publish_event("decision.status_changed", {"decision_id": decision_id, "from": prev_status, "to": status})
