@@ -45,6 +45,23 @@ def _link(url: str, label: str | None = None) -> str:
     # OSC 8 hyperlink (BEL-terminated; better compatibility across macOS terminals)
     return f"\033]8;;{url}\a{label}\033]8;;\a"
 
+
+def _looks_like_project_folder(root: str) -> bool:
+    markers = [
+        ".git",
+        "pyproject.toml",
+        "package.json",
+        "requirements.txt",
+        "setup.py",
+        "Pipfile",
+        "Cargo.toml",
+        "go.mod",
+        "frontend",
+        "src",
+        "app",
+    ]
+    return any(os.path.exists(os.path.join(root, m)) for m in markers)
+
 def maybe_handle(argv) -> bool:
     if len(argv) < 2 or argv[1] not in COMMANDS:
         return False
@@ -89,6 +106,11 @@ def maybe_handle(argv) -> bool:
         args = p.parse_args(argv[2:])
 
         root = os.path.abspath(args.path)
+        if not _looks_like_project_folder(root):
+            print(_err(f"'{root}' does not look like a project folder."))
+            print(_info("Run from a repo/project directory (expected markers like .git, src, package.json, pyproject.toml)."))
+            return True
+
         res = asyncio.run(analyze(root))
         print(_ok(f"Indexed {res['files']} files, {res['commits']} commits, {res['issues']} issues"))
         if res.get("git_stats"):
