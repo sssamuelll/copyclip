@@ -2,9 +2,12 @@ import asyncio
 import json
 import os
 import sqlite3
+import threading
+import time
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from .db import connect, init_schema
 
@@ -27,10 +30,41 @@ def _project_id(conn: sqlite3.Connection, root: str):
 def run_server(project_root: str, port: int = 4310) -> None:
     root = os.path.abspath(project_root)
 
+    events = []
+    events_lock = threading.Condition()
+    next_event_id = {"value": 1}
+
+    def publish_event(kind: str, data: dict):
+        with events_lock:
+            ev = {
+                "id": next_event_id["value"],
+                "kind": kind,
+                "data": data,
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }
+            next_event_id["value"] += 1
+            events.append(ev)
+            if len(events) > 500:
+                del events[: len(events) - 500]
+            events_lock.notify_all()
+
     def with_meta(payload: dict):
         payload.setdefault("meta", {})
         payload["meta"]["project"] = os.path.basename(root)
+        payload["meta"]["generated_at"] = datetime.now(timezone.utc).isoformat()
         return payload
+
+    def _pagination(parsed):
+        q = parse_qs(parsed.query or "")
+        try:
+            limit = max(1, min(int(q.get("limit", ["100"])[0]), 500))
+        except Exception:
+            limit = 100
+        try:
+            offset = max(0, int(q.get("offset", ["0"])[0]))
+        except Exception:
+            offset = 0
+        return limit, offset
 
     class Handler(BaseHTTPRequestHandler):
         def _json(self, payload, code=200):
@@ -54,6 +88,51 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
+                return
+
+            if parsed.path == "/api/events":
+                q = parse_qs(parsed.query or "")
+                try:
+                    cursor = int(q.get("cursor", ["0"])[0])
+                except Exception:
+                    cursor = 0
+
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "keep-alive")
+                self.end_headers()
+
+                def write_event(ev):
+                    payload = json.dumps(ev)
+                    self.wfile.write(f"id: {ev['id']}\nevent: {ev['kind']}\ndata: {payload}\n\n".encode("utf-8"))
+                    self.wfile.flush()
+
+                # Initial hello event + backlog since cursor
+                write_event({
+                    "id": cursor,
+                    "kind": "connected",
+                    "data": {"cursor": cursor},
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                })
+
+                with events_lock:
+                    backlog = [e for e in events if e["id"] > cursor]
+                for ev in backlog:
+                    write_event(ev)
+                    cursor = ev["id"]
+
+                # Stream updates for up to 30s per request
+                deadline = time.time() + 30
+                while time.time() < deadline:
+                    with events_lock:
+                        updates = [e for e in events if e["id"] > cursor]
+                        if not updates:
+                            events_lock.wait(timeout=2)
+                            updates = [e for e in events if e["id"] > cursor]
+                    for ev in updates:
+                        write_event(ev)
+                        cursor = ev["id"]
                 return
 
             if parsed.path == "/api/overview":
@@ -107,10 +186,20 @@ def run_server(project_root: str, port: int = 4310) -> None:
 
             if parsed.path == "/api/files":
                 if not pid:
-                    self._json(with_meta({"items": []}))
+                    self._json(with_meta({"items": [], "total": 0, "limit": 0, "offset": 0}))
                     return
-                rows = conn.execute("SELECT path, size_bytes, language FROM files WHERE project_id=? ORDER BY path", (pid,)).fetchall()
-                self._json(with_meta({"items": [{"path": r[0], "size": r[1], "language": r[2]} for r in rows]}))
+                limit, offset = _pagination(parsed)
+                total = conn.execute("SELECT COUNT(*) FROM files WHERE project_id=?", (pid,)).fetchone()[0]
+                rows = conn.execute(
+                    "SELECT path, size_bytes, language FROM files WHERE project_id=? ORDER BY path LIMIT ? OFFSET ?",
+                    (pid, limit, offset),
+                ).fetchall()
+                self._json(with_meta({
+                    "items": [{"path": r[0], "size": r[1], "language": r[2]} for r in rows],
+                    "total": total,
+                    "limit": limit,
+                    "offset": offset,
+                }))
                 return
 
             if parsed.path == "/api/impact":
@@ -118,7 +207,6 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     self._json(with_meta({"impacted_modules": []}))
                     return
                 query = urlparse(self.path).query
-                from urllib.parse import parse_qs
                 params = parse_qs(query)
                 target_path = params.get("path", [""])[0]
                 
@@ -162,21 +250,31 @@ def run_server(project_root: str, port: int = 4310) -> None:
 
             if parsed.path == "/api/changes":
                 if not pid:
-                    self._json(with_meta({"items": []}))
+                    self._json(with_meta({"items": [], "total": 0, "limit": 0, "offset": 0}))
                     return
+                limit, offset = _pagination(parsed)
+                total = conn.execute("SELECT COUNT(*) FROM commits WHERE project_id=?", (pid,)).fetchone()[0]
                 rows = conn.execute(
-                    "SELECT sha, author, message, date FROM commits WHERE project_id=? ORDER BY date DESC LIMIT 200", (pid,)
+                    "SELECT sha, author, message, date FROM commits WHERE project_id=? ORDER BY date DESC LIMIT ? OFFSET ?",
+                    (pid, limit, offset),
                 ).fetchall()
-                self._json(with_meta({"items": [{"sha": r[0], "author": r[1], "message": r[2], "date": r[3]} for r in rows]}))
+                self._json(with_meta({
+                    "items": [{"sha": r[0], "author": r[1], "message": r[2], "date": r[3]} for r in rows],
+                    "total": total,
+                    "limit": limit,
+                    "offset": offset,
+                }))
                 return
 
             if parsed.path == "/api/decisions":
                 if not pid:
-                    self._json(with_meta({"items": []}))
+                    self._json(with_meta({"items": [], "total": 0, "limit": 0, "offset": 0}))
                     return
+                limit, offset = _pagination(parsed)
+                total = conn.execute("SELECT COUNT(*) FROM decisions WHERE project_id=?", (pid,)).fetchone()[0]
                 rows = conn.execute(
-                    "SELECT id,title,summary,status,source_type,created_at FROM decisions WHERE project_id=? ORDER BY id DESC LIMIT 200",
-                    (pid,),
+                    "SELECT id,title,summary,status,source_type,created_at FROM decisions WHERE project_id=? ORDER BY id DESC LIMIT ? OFFSET ?",
+                    (pid, limit, offset),
                 ).fetchall()
                 self._json(
                     with_meta({
@@ -190,7 +288,10 @@ def run_server(project_root: str, port: int = 4310) -> None:
                                 "created_at": r[5],
                             }
                             for r in rows
-                        ]
+                        ],
+                        "total": total,
+                        "limit": limit,
+                        "offset": offset,
                     })
                 )
                 return
@@ -215,6 +316,43 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 self._json(with_meta({"items": [{"ref_type": r[0], "ref_value": r[1]} for r in rows]}))
                 return
 
+            if parsed.path.startswith("/api/decisions/") and parsed.path.endswith("/history"):
+                if not pid:
+                    self._json(with_meta({"items": [], "total": 0, "limit": 0, "offset": 0}))
+                    return
+                parts = parsed.path.strip("/").split("/")
+                if len(parts) != 4:
+                    self._json({"error": "invalid_path"}, 400)
+                    return
+                try:
+                    decision_id = int(parts[2])
+                except Exception:
+                    self._json({"error": "invalid_decision_id"}, 400)
+                    return
+                limit, offset = _pagination(parsed)
+                total = conn.execute("SELECT COUNT(*) FROM decision_history WHERE decision_id=?", (decision_id,)).fetchone()[0]
+                rows = conn.execute(
+                    "SELECT id,action,from_status,to_status,note,created_at FROM decision_history WHERE decision_id=? ORDER BY id DESC LIMIT ? OFFSET ?",
+                    (decision_id, limit, offset),
+                ).fetchall()
+                self._json(with_meta({
+                    "items": [
+                        {
+                            "id": r[0],
+                            "action": r[1],
+                            "from_status": r[2],
+                            "to_status": r[3],
+                            "note": r[4],
+                            "created_at": r[5],
+                        }
+                        for r in rows
+                    ],
+                    "total": total,
+                    "limit": limit,
+                    "offset": offset,
+                }))
+                return
+
             if parsed.path == "/api/architecture/graph":
                 if not pid:
                     self._json(with_meta({"nodes": [], "edges": []}))
@@ -235,11 +373,13 @@ def run_server(project_root: str, port: int = 4310) -> None:
 
             if parsed.path == "/api/risks":
                 if not pid:
-                    self._json(with_meta({"items": []}))
+                    self._json(with_meta({"items": [], "total": 0, "limit": 0, "offset": 0}))
                     return
+                limit, offset = _pagination(parsed)
+                total = conn.execute("SELECT COUNT(*) FROM risks WHERE project_id=?", (pid,)).fetchone()[0]
                 rows = conn.execute(
-                    "SELECT area,severity,kind,rationale,score,created_at FROM risks WHERE project_id=? ORDER BY score DESC, id DESC LIMIT 100",
-                    (pid,),
+                    "SELECT area,severity,kind,rationale,score,created_at FROM risks WHERE project_id=? ORDER BY score DESC, id DESC LIMIT ? OFFSET ?",
+                    (pid, limit, offset),
                 ).fetchall()
                 self._json(
                     with_meta({
@@ -253,18 +393,23 @@ def run_server(project_root: str, port: int = 4310) -> None:
                                 "created_at": r[5],
                             }
                             for r in rows
-                        ]
+                        ],
+                        "total": total,
+                        "limit": limit,
+                        "offset": offset,
                     })
                 )
                 return
 
             if parsed.path == "/api/issues":
                 if not pid:
-                    self._json(with_meta({"items": []}))
+                    self._json(with_meta({"items": [], "total": 0, "limit": 0, "offset": 0}))
                     return
+                limit, offset = _pagination(parsed)
+                total = conn.execute("SELECT COUNT(*) FROM issues WHERE project_id=?", (pid,)).fetchone()[0]
                 rows = conn.execute(
-                    "SELECT external_id,title,status,labels,author,url,source,created_at,updated_at FROM issues WHERE project_id=? ORDER BY created_at DESC LIMIT 200",
-                    (pid,),
+                    "SELECT external_id,title,status,labels,author,url,source,created_at,updated_at FROM issues WHERE project_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                    (pid, limit, offset),
                 ).fetchall()
                 self._json(
                     with_meta({
@@ -281,7 +426,10 @@ def run_server(project_root: str, port: int = 4310) -> None:
                                 "updated_at": r[8],
                             }
                             for r in rows
-                        ]
+                        ],
+                        "total": total,
+                        "limit": limit,
+                        "offset": offset,
                     })
                 )
                 return
@@ -313,11 +461,22 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     self._json({"error": "invalid_status", "allowed": sorted(allowed)}, 400)
                     return
 
+                prev = conn.execute(
+                    "SELECT status FROM decisions WHERE id=? AND project_id=?",
+                    (decision_id, pid),
+                ).fetchone()
+                prev_status = prev[0] if prev else None
+
                 conn.execute(
                     "UPDATE decisions SET status=?, resolved_at=CASE WHEN ?='resolved' THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=? AND project_id=?",
                     (status, status, decision_id, pid),
                 )
+                conn.execute(
+                    "INSERT INTO decision_history(decision_id,action,from_status,to_status,note) VALUES(?,?,?,?,?)",
+                    (decision_id, "status_change", prev_status, status, "status updated via API"),
+                )
                 conn.commit()
+                publish_event("decision.status_changed", {"decision_id": decision_id, "from": prev_status, "to": status})
                 self._json({"ok": True, "id": decision_id, "status": status})
                 return
 
@@ -439,7 +598,12 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     "INSERT INTO decisions(project_id,title,summary,status,source_type) VALUES(?,?,?,?,?)",
                     (pid, title, summary, "proposed", "manual"),
                 )
+                conn.execute(
+                    "INSERT INTO decision_history(decision_id,action,from_status,to_status,note) VALUES(?,?,?,?,?)",
+                    (cur.lastrowid, "created", None, "proposed", "decision created"),
+                )
                 conn.commit()
+                publish_event("decision.created", {"decision_id": cur.lastrowid, "title": title})
                 self._json({"id": cur.lastrowid, "ok": True})
                 return
 
@@ -471,7 +635,12 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     "INSERT INTO decision_refs(decision_id,ref_type,ref_value) VALUES(?,?,?)",
                     (decision_id, ref_type, ref_value),
                 )
+                conn.execute(
+                    "INSERT INTO decision_history(decision_id,action,from_status,to_status,note) VALUES(?,?,?,?,?)",
+                    (decision_id, "ref_added", None, None, f"{ref_type}: {ref_value}"),
+                )
                 conn.commit()
+                publish_event("decision.ref_added", {"decision_id": decision_id, "ref_type": ref_type, "ref_value": ref_value})
                 self._json({"ok": True, "decision_id": decision_id, "ref_type": ref_type, "ref_value": ref_value})
                 return
 
