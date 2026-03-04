@@ -9,10 +9,11 @@ import { RisksPage } from './pages/RisksPage'
 import { IssuesPage } from './pages/IssuesPage'
 import { ContextBuilderPage } from './pages/ContextBuilderPage'
 import { ImpactSimulatorPage } from './pages/ImpactSimulatorPage'
+import { AskPage } from './pages/AskPage'
 import { AgentTerminal } from './components/AgentTerminal'
 import type { ArchEdge, ArchNode, ChangeItem, DecisionItem, IssueItem, Overview, RiskItem } from './types/api'
 
-type Page = 'atlas' | 'architecture' | 'impact' | 'context-builder' | 'changes' | 'decisions' | 'risks' | 'issues'
+type Page = 'atlas' | 'architecture' | 'impact' | 'context-builder' | 'ask' | 'changes' | 'decisions' | 'risks' | 'issues'
 
 export function App() {
   const [page, setPage] = useState<Page>('atlas')
@@ -81,6 +82,7 @@ export function App() {
         {page === 'architecture' && <ArchitecturePage nodes={nodes} edges={edges} />}
         {page === 'impact' && <ImpactSimulatorPage />}
         {page === 'context-builder' && <ContextBuilderPage />}
+        {page === 'ask' && <AskPage />}
         {page === 'changes' && <ChangesPage items={changes} />}
         {page === 'decisions' && <DecisionsPage items={decisions} />}
         {page === 'risks' && <RisksPage items={risks} />}

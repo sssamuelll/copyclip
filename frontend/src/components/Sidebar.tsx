@@ -13,6 +13,7 @@ const GROUPS = [
     label: 'Operate',
     pages: [
       { id: 'context-builder', label: 'Context Builder' },
+      { id: 'ask', label: 'Ask Project' },
     ]
   },
   {

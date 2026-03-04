@@ -76,5 +76,17 @@ export type AgentResponse = {
   agent: string
 }
 
+export type AskCitation = {
+  type: 'decision' | 'risk' | 'commit'
+  id: string | number
+  label: string
+}
+
+export type AskResponse = {
+  answer: string
+  citations: AskCitation[]
+  grounded: boolean
+}
+
 export type ArchNode = { name: string }
 export type ArchEdge = { from: string; to: string; type: string }

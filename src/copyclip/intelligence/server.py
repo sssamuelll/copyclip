@@ -554,8 +554,24 @@ def run_server(project_root: str, port: int = 4310) -> None:
                             "snippet": f"commit {r[0][:7]} on {(r[2] or '')[:10]}",
                         })
 
-                evidence.sort(key=lambda x: x["score"], reverse=True)
-                top = evidence[:5]
+                # Prefer governance artifacts over raw activity noise.
+                type_boost = {"decision": 1000, "risk": 500, "commit": 100}
+                for e in evidence:
+                    e["rank"] = type_boost.get(e["type"], 0) + e["score"]
+
+                evidence.sort(key=lambda x: x["rank"], reverse=True)
+
+                # Deduplicate by (type,id)
+                seen = set()
+                top = []
+                for e in evidence:
+                    k = (e["type"], e["id"])
+                    if k in seen:
+                        continue
+                    seen.add(k)
+                    top.append(e)
+                    if len(top) >= 5:
+                        break
 
                 if not top:
                     self._json(with_meta({
