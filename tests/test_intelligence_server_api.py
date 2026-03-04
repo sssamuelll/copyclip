@@ -301,3 +301,22 @@ def test_weekly_export_endpoint_returns_markdown_and_summary():
         assert "Weekly Executive Brief" in res["markdown"]
         assert "summary" in res
         assert "commits" in res["summary"]
+
+
+def test_settings_alias_get_and_post():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        root_path = str(root.absolute())
+        conn = connect(root_path)
+        init_schema(conn)
+        conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root_path, "tmp"))
+        conn.commit()
+
+        port = _free_port()
+        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
+        th.start()
+        _wait_port(port)
+
+        _post_json(f"http://127.0.0.1:{port}/api/settings", {"COPYCLIP_LLM_PROVIDER": "gemini"})
+        res = _get_json(f"http://127.0.0.1:{port}/api/settings")
+        assert res.get("COPYCLIP_LLM_PROVIDER") == "gemini"

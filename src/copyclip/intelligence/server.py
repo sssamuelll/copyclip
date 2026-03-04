@@ -687,6 +687,11 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 self._json(with_meta({"markdown": "\n".join(md), "summary": summary}))
                 return
 
+            if parsed.path in {"/api/config", "/api/settings"}:
+                rows = conn.execute("SELECT key,value FROM config ORDER BY key").fetchall()
+                self._json({r[0]: r[1] for r in rows})
+                return
+
             self._json({"error": "not_found"}, 404)
 
         def do_PATCH(self):
@@ -1005,7 +1010,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 self._json({"context": final_context, "warnings": warnings})
                 return
 
-            if parsed.path == "/api/config":
+            if parsed.path in {"/api/config", "/api/settings"}:
                 length = int(self.headers.get("Content-Length", "0"))
                 raw = self.rfile.read(length) if length else b"{}"
                 data = json.loads(raw.decode("utf-8"))
