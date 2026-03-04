@@ -610,6 +610,43 @@
 <script>
 const state = { overview:null, changes:[], decisions:[], risks:[], arch:{nodes:[],edges:[]}, decisionRefs:{}, selectedDecision:null, selectedModule:null, decisionFilter:'all', globalSearch:'', changesAuthor:'all', changesSearch:'', risksKind:'all', risksSeverity:'all', risksSearch:'', archSearch:'', decisionsSearch:'' };
 
+const STORAGE_KEY = 'copyclip.ui.filters.v1';
+
+function loadPersistedState(){
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    Object.assign(state, {
+      globalSearch: data.globalSearch || '',
+      changesAuthor: data.changesAuthor || 'all',
+      changesSearch: data.changesSearch || '',
+      risksKind: data.risksKind || 'all',
+      risksSeverity: data.risksSeverity || 'all',
+      risksSearch: data.risksSearch || '',
+      archSearch: data.archSearch || '',
+      decisionsSearch: data.decisionsSearch || '',
+      decisionFilter: data.decisionFilter || 'all',
+    });
+  } catch (_) {}
+}
+
+function persistState(){
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      globalSearch: state.globalSearch,
+      changesAuthor: state.changesAuthor,
+      changesSearch: state.changesSearch,
+      risksKind: state.risksKind,
+      risksSeverity: state.risksSeverity,
+      risksSearch: state.risksSearch,
+      archSearch: state.archSearch,
+      decisionsSearch: state.decisionsSearch,
+      decisionFilter: state.decisionFilter,
+    }));
+  } catch (_) {}
+}
+
 const qs = (s, root=document) => root.querySelector(s);
 const qsa = (s, root=document) => Array.from(root.querySelectorAll(s));
 
@@ -911,34 +948,35 @@ function attachDecisionActions(){
     const label = tab.textContent.toLowerCase();
     const key = ['all','proposed','accepted','resolved','superseded'].find(k => label.includes(k)) || 'all';
     state.decisionFilter = key;
+    persistState();
     renderDecisions();
   }));
 }
 
 function bindFilters(){
   const gs = qs('#global-search');
-  if (gs) gs.addEventListener('input', () => { state.globalSearch = gs.value; renderOverview(); renderChanges(); renderDecisions(); renderRisks(); renderArchitecture(); });
+  if (gs) gs.addEventListener('input', () => { state.globalSearch = gs.value; persistState(); renderOverview(); renderChanges(); renderDecisions(); renderRisks(); renderArchitecture(); });
 
   const as = qs('#arch-search');
-  if (as) as.addEventListener('input', () => { state.archSearch = as.value; renderArchitecture(); });
+  if (as) as.addEventListener('input', () => { state.archSearch = as.value; persistState(); renderArchitecture(); });
 
   const ds = qs('#decisions-search');
-  if (ds) ds.addEventListener('input', () => { state.decisionsSearch = ds.value; renderDecisions(); });
+  if (ds) ds.addEventListener('input', () => { state.decisionsSearch = ds.value; persistState(); renderDecisions(); });
 
   const cs = qs('#changes-search');
-  if (cs) cs.addEventListener('input', () => { state.changesSearch = cs.value; renderChanges(); renderOverview(); });
+  if (cs) cs.addEventListener('input', () => { state.changesSearch = cs.value; persistState(); renderChanges(); renderOverview(); });
 
   const ca = qs('#changes-author-filter');
-  if (ca) ca.addEventListener('change', () => { state.changesAuthor = ca.value; renderChanges(); renderOverview(); });
+  if (ca) ca.addEventListener('change', () => { state.changesAuthor = ca.value; persistState(); renderChanges(); renderOverview(); });
 
   const rk = qs('#risks-kind-filter');
-  if (rk) rk.addEventListener('change', () => { state.risksKind = rk.value; renderRisks(); renderOverview(); });
+  if (rk) rk.addEventListener('change', () => { state.risksKind = rk.value; persistState(); renderRisks(); renderOverview(); });
 
   const rs = qs('#risks-severity-filter');
-  if (rs) rs.addEventListener('change', () => { state.risksSeverity = rs.value; renderRisks(); renderOverview(); });
+  if (rs) rs.addEventListener('change', () => { state.risksSeverity = rs.value; persistState(); renderRisks(); renderOverview(); });
 
   const rsearch = qs('#risks-search');
-  if (rsearch) rsearch.addEventListener('input', () => { state.risksSearch = rsearch.value; renderRisks(); renderOverview(); });
+  if (rsearch) rsearch.addEventListener('input', () => { state.risksSearch = rsearch.value; persistState(); renderRisks(); renderOverview(); });
 }
 
 
@@ -984,6 +1022,12 @@ async function refresh(){
     state.risksSeverity = rs.value;
   }
 
+  const gsi = qs('#global-search'); if (gsi) gsi.value = state.globalSearch || '';
+  const asi = qs('#arch-search'); if (asi) asi.value = state.archSearch || '';
+  const dsi = qs('#decisions-search'); if (dsi) dsi.value = state.decisionsSearch || '';
+  const csi = qs('#changes-search'); if (csi) csi.value = state.changesSearch || '';
+  const rsi = qs('#risks-search'); if (rsi) rsi.value = state.risksSearch || '';
+
   renderOverview();
   renderChanges();
   renderDecisions();
@@ -995,8 +1039,14 @@ async function refresh(){
 }
 
 (async function init(){
+  loadPersistedState();
   attachDecisionActions();
   bindFilters();
+  qsa('.status-tab').forEach(tab => {
+    const label = tab.textContent.toLowerCase();
+    const key = ['all','proposed','accepted','resolved','superseded'].find(k => label.includes(k)) || 'all';
+    tab.classList.toggle('active', key === state.decisionFilter);
+  });
   qs('.refresh-btn')?.addEventListener('click', refresh);
   try { await refresh(); }
   catch (err) {
