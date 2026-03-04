@@ -93,6 +93,53 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 self._json(with_meta({"items": [{"path": r[0], "size": r[1], "language": r[2]} for r in rows]}))
                 return
 
+            if parsed.path == "/api/impact":
+                if not pid:
+                    self._json(with_meta({"impacted_modules": []}))
+                    return
+                query = urlparse(self.path).query
+                from urllib.parse import parse_qs
+                params = parse_qs(query)
+                target_path = params.get("path", [""])[0]
+                
+                if not target_path:
+                    self._json({"error": "path_required"}, 400)
+                    return
+
+                # 1. Find the module for this file
+                row = conn.execute(
+                    "SELECT name FROM modules WHERE project_id=? AND ? LIKE path_prefix || '%'",
+                    (pid, target_path)
+                ).fetchone()
+                
+                if not row:
+                    self._json({"impacted_modules": [], "target_module": "unknown"})
+                    return
+                
+                target_module = row[0]
+                
+                # 2. Find dependents (who depends on this module) - Upwards
+                dependents = set()
+                to_visit = [target_module]
+                visited = set()
+                while to_visit:
+                    curr = to_visit.pop()
+                    if curr in visited: continue
+                    visited.add(curr)
+                    rows = conn.execute(
+                        "SELECT from_module FROM dependencies WHERE project_id=? AND to_module=?",
+                        (pid, curr)
+                    ).fetchall()
+                    for r in rows:
+                        dependents.add(r[0])
+                        to_visit.append(r[0])
+
+                self._json(with_meta({
+                    "target_module": target_module,
+                    "impacted_modules": list(dependents)
+                }))
+                return
+
             if parsed.path == "/api/changes":
                 if not pid:
                     self._json(with_meta({"items": []}))
@@ -317,8 +364,46 @@ def run_server(project_root: str, port: int = 4310) -> None:
                             minimized = minimize_content(content, ext.lstrip("."), minimize_mode)
                             prompt_parts.append(f"### {path}\n```\n{minimized}\n```")
                 
+                # 4. Guardrail Check (Decision Advisor)
+                warnings = []
+                if include_decisions:
+                    decs = get_active_decisions(root)
+                    if decs and selected_files:
+                        from ..llm_client import LLMClientFactory
+                        from ..llm.config import load_config
+                        from ..llm.provider_config import resolve_provider, ProviderConfigError
+                        
+                        try:
+                            cfg = load_config(os.getenv("COPYCLIP_LLM_CONFIG"))
+                            cli_p = os.getenv("COPYCLIP_LLM_PROVIDER")
+                            prov = resolve_provider(cli_p, cfg)
+                            client = LLMClientFactory.create(
+                                prov["name"],
+                                api_key=prov.get("api_key"),
+                                model=prov.get("model"),
+                                endpoint=prov.get("base_url"),
+                                timeout=15,
+                            )
+                            
+                            advisor_prompt = f"""
+                            Check if the current task/context assembly conflicts with project decisions.
+                            
+                            Current Context Assembly (Files): {", ".join(selected_files)}
+                            Current Context Assembly (Issues): {", ".join(selected_issues)}
+                            
+                            Active Decisions:
+                            {chr(10).join([f"- {d['title']}: {d['summary']}" for d in decs])}
+                            
+                            If there is a conflict or a risk, return a 1-sentence warning. If no conflict, return "OK".
+                            """
+                            adv_res = await client.minimize_code_contextually(advisor_prompt, "text", "en")
+                            if adv_res and "OK" not in adv_res.upper():
+                                warnings.append(adv_res.strip())
+                        except:
+                            pass
+
                 final_context = "\n\n".join(prompt_parts)
-                self._json({"context": final_context})
+                self._json({"context": final_context, "warnings": warnings})
                 return
 
             if parsed.path == "/api/decisions":

@@ -1,4 +1,4 @@
-import type { ArchEdge, ArchNode, ChangeItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload } from '../types/api'
+import type { ArchEdge, ArchNode, ChangeItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult } from '../types/api'
 
 async function getJSON<T>(url: string): Promise<T> {
   const r = await fetch(url)
@@ -24,6 +24,7 @@ export const api = {
   issues: () => getJSON<{ items: IssueItem[] }>('/api/issues'),
   files: () => getJSON<{ items: FileItem[] }>('/api/files'),
   heatmap: () => getJSON<{ items: HeatmapItem[] }>('/api/heatmap'),
+  impact: (path: string) => getJSON<ImpactResult>(`/api/impact?path=${encodeURIComponent(path)}`),
   architecture: () => getJSON<{ nodes: ArchNode[]; edges: ArchEdge[] }>('/api/architecture/graph'),
-  assembleContext: (p: ContextPayload) => postJSON<{ context: string }>('/api/assemble-context', p)
+  assembleContext: (p: ContextPayload) => postJSON<{ context: string; warnings: string[] }>('/api/assemble-context', p)
 }

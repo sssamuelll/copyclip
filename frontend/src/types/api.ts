@@ -21,6 +21,11 @@ export type ContextPayload = {
   minimize: 'basic' | 'aggressive' | 'structural'
 }
 
+export type ImpactResult = {
+  target_module: string
+  impacted_modules: string[]
+}
+
 export type HeatmapItem = {
   path: string
   size: number

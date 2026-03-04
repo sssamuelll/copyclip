@@ -12,6 +12,7 @@ export function ContextBuilderPage() {
   const [minimize, setMinimize] = useState<'basic' | 'aggressive' | 'structural'>('basic')
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [warnings, setWarnings] = useState<string[]>([])
 
   useEffect(() => {
     api.files().then(res => setFiles(res.items))
@@ -25,6 +26,7 @@ export function ContextBuilderPage() {
     if (next.has(path)) next.delete(path)
     else next.add(path)
     setSelectedFiles(next)
+    setWarnings([]) // Reset warnings on change
   }
 
   const toggleIssue = (id: string) => {
@@ -32,10 +34,12 @@ export function ContextBuilderPage() {
     if (next.has(id)) next.delete(id)
     else next.add(id)
     setSelectedIssues(next)
+    setWarnings([]) // Reset warnings on change
   }
 
   const handleCopy = async () => {
     setLoading(true)
+    setWarnings([])
     try {
       const res = await api.assembleContext({
         files: Array.from(selectedFiles),
@@ -44,8 +48,12 @@ export function ContextBuilderPage() {
         minimize
       })
       await navigator.clipboard.writeText(res.context)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+      if (res.warnings && res.warnings.length > 0) {
+        setWarnings(res.warnings)
+      } else {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      }
     } catch (e) {
       alert('Failed to assemble context')
     } finally {
@@ -131,6 +139,13 @@ export function ContextBuilderPage() {
                 <option value="structural">Structural</option>
               </select>
             </div>
+
+            {warnings.length > 0 && (
+              <div className="panel" style={{ border: '1px solid #92400e', background: 'rgba(146, 64, 14, 0.2)', padding: '8px', fontSize: '0.8rem' }}>
+                <div style={{ color: '#fbbf24', fontWeight: 'bold', marginBottom: '4px' }}>Decision Advisor Warning:</div>
+                {warnings.map((w, idx) => <div key={idx}>{w}</div>)}
+              </div>
+            )}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontSize: '0.8rem', opacity: 0.7 }}>
