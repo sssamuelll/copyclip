@@ -92,9 +92,6 @@ def maybe_handle(argv) -> bool:
             gs = res["git_stats"]
             print(_info(f"Git: {gs['git_size_kb']}KB, {gs['branches_count']} branches, {gs['tags_count']} tags"))
 
-        dash_url = f"http://127.0.0.1:{args.port}"
-        print(_info(f"Open CopyClip dashboard: {_link(dash_url)}"))
-
         try:
             run_server(root, args.port)
         except KeyboardInterrupt:
