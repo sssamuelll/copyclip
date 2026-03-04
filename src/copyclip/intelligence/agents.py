@@ -80,8 +80,7 @@ class CopyClipAgent:
             timeout=60,
         )
 
-        tools_desc = "
-".join([f"- {t.name}: {t.description}" for t in self.tools.values()])
+        tools_desc = "\n".join([f"- {t.name}: {t.description}" for t in self.tools.values()])
         
         system_prompt = f"""
         You are {self.name}, the {self.role} for this software project.
