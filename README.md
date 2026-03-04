@@ -208,6 +208,21 @@ copyclip . --preset code --view both --output architecture.md
 
 ---
 
+## Release prep quick checks
+
+```bash
+PYTHONPATH=src .venv/bin/python -m pytest -q
+./scripts/smoke_e2e.sh . 4333
+```
+
+Health endpoint:
+
+```bash
+curl http://127.0.0.1:4310/api/health
+```
+
+See full checklist: `docs/RELEASE_PREP_CHECKLIST.md`
+
 For complete help:
 
 ```bash

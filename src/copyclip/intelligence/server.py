@@ -197,6 +197,14 @@ def run_server(project_root: str, port: int = 4310) -> None:
                         cursor = ev["id"]
                 return
 
+            if parsed.path == "/api/health":
+                self._json(with_meta({
+                    "ok": True,
+                    "service": "copyclip-intelligence",
+                    "version": os.getenv("COPYCLIP_VERSION", "dev"),
+                }))
+                return
+
             if parsed.path == "/api/overview":
                 if not pid:
                     self._json(with_meta({"files": 0, "commits": 0, "decisions": 0, "modules": 0, "risks": 0, "issues": 0, "pulls": 0, "story": ""}))
