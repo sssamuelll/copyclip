@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
-import type { AlertEvent, AlertRule, WeeklyExport, SchedulerState } from '../types/api'
+import type { AlertEvent, AlertRule, WeeklyExport, SchedulerState, AnalyzeJob } from '../types/api'
 
 export function OpsPage({ onNotify }: { onNotify?: (msg: string) => void }) {
   const [rules, setRules] = useState<AlertRule[]>([])
@@ -9,6 +9,7 @@ export function OpsPage({ onNotify }: { onNotify?: (msg: string) => void }) {
   const [brief, setBrief] = useState<WeeklyExport | null>(null)
   const [days, setDays] = useState(7)
   const [scheduler, setScheduler] = useState<SchedulerState | null>(null)
+  const [analysisJobs, setAnalysisJobs] = useState<AnalyzeJob[]>([])
 
   const [newRule, setNewRule] = useState({
     name: 'custom-risk-rule',
@@ -19,16 +20,30 @@ export function OpsPage({ onNotify }: { onNotify?: (msg: string) => void }) {
   })
 
   const refresh = async () => {
-    const [alertsRes, rulesRes, schedulerRes] = await Promise.all([api.alerts(), api.alertRules(), api.schedulerState()])
+    const [alertsRes, rulesRes, schedulerRes, jobsRes] = await Promise.all([api.alerts(), api.alertRules(), api.schedulerState(), api.analyzeStatus()])
     setRules(rulesRes.items || [])
     setEvents(alertsRes.events || [])
     setFired((alertsRes.fired || []).map((f) => f.title))
     setScheduler(schedulerRes)
+    setAnalysisJobs(jobsRes.items || [])
   }
 
   useEffect(() => {
     refresh().catch(() => {})
   }, [])
+
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      api.analyzeStatus().then((jobsRes) => setAnalysisJobs(jobsRes.items || [])).catch(() => {})
+    }, 1500)
+    return () => window.clearInterval(t)
+  }, [])
+
+  const onStartAnalyze = async () => {
+    const res = await api.startAnalyzeJob()
+    await refresh()
+    onNotify?.(res.already_running ? 'Analyze already running' : 'Analyze job started')
+  }
 
   const onCreateRule = async () => {
     await api.upsertAlertRule({
@@ -89,9 +104,25 @@ export function OpsPage({ onNotify }: { onNotify?: (msg: string) => void }) {
     onNotify?.('Scheduler interval updated')
   }
 
+  const activeJob = analysisJobs.find((j) => j.status === 'running' || j.status === 'queued') || null
+
   return (
     <section>
       <h2>ops center</h2>
+
+      <div className="panel" style={{ marginBottom: 12 }}>
+        <h3 style={{ marginTop: 0 }}>project analyze</h3>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button onClick={onStartAnalyze}>Start incremental analyze</button>
+          {activeJob ? (
+            <span>
+              {activeJob.status} / {activeJob.phase || 'analyzing'} — {activeJob.processed}/{activeJob.total}
+            </span>
+          ) : (
+            <span className="muted">No active analyze job.</span>
+          )}
+        </div>
+      </div>
 
       <div className="panel" style={{ marginBottom: 12 }}>
         <h3 style={{ marginTop: 0 }}>alert scheduler</h3>

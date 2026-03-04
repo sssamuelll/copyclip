@@ -1,4 +1,4 @@
-import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, AgentResponse, AskResponse, RiskTrends, AlertRule, AlertsResponse, WeeklyExport, SchedulerState } from '../types/api'
+import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, AgentResponse, AskResponse, RiskTrends, AlertRule, AlertsResponse, WeeklyExport, SchedulerState, AnalyzeJob } from '../types/api'
 
 async function getJSON<T>(url: string): Promise<T> {
   const r = await fetch(url)
@@ -59,6 +59,8 @@ export const api = {
   alertRules: () => getJSON<{ items: AlertRule[] }>('/api/alerts/rules'),
   schedulerState: () => getJSON<SchedulerState>('/api/alerts/scheduler'),
   setSchedulerState: (data: Partial<SchedulerState>) => postJSON<{ ok: boolean; scheduler: SchedulerState }>('/api/alerts/scheduler', data),
+  startAnalyzeJob: () => postJSON<{ ok: boolean; job_id: string; already_running: boolean }>('/api/analyze/start', {}),
+  analyzeStatus: () => getJSON<{ items: AnalyzeJob[] }>('/api/analyze/status'),
   upsertAlertRule: (rule: { name: string; kind?: string; severity?: string; min_score?: number; cooldown_min?: number; enabled?: boolean }) => postJSON<{ ok: boolean; name: string }>('/api/alerts/rules', rule),
   updateAlertRule: (id: number, patch: Partial<{ name: string; kind: string; severity: string; min_score: number; cooldown_min: number; enabled: boolean }>) =>
     patchJSON<{ ok: boolean; id: number }>(`/api/alerts/rules/${id}`, patch),

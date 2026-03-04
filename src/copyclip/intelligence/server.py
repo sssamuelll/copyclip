@@ -6,6 +6,7 @@ import sqlite3
 import sys
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -41,6 +42,16 @@ def run_server(project_root: str, port: int = 4310) -> None:
         "interval_sec": 300,
         "last_run_at": None,
     }
+
+    analysis_lock = threading.Lock()
+
+    def _count_project_files(base_root: str) -> int:
+        ignored_dirs = {".git", ".venv", "node_modules", ".copyclip", "dist", "build", "__pycache__"}
+        total = 0
+        for base, dirs, files in os.walk(base_root):
+            dirs[:] = [d for d in dirs if d not in ignored_dirs]
+            total += len(files)
+        return total
 
     def publish_event(kind: str, data: dict):
         with events_lock:
@@ -159,6 +170,56 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 conn_s.close()
             except Exception:
                 pass
+
+    def _start_analysis_job(pid: int):
+        job_id = str(uuid.uuid4())
+        total = _count_project_files(root)
+        conn_j = connect(root)
+        init_schema(conn_j)
+        conn_j.execute(
+            "INSERT INTO analysis_jobs(id,project_id,status,phase,processed,total,message) VALUES(?,?,?,?,?,?,?)",
+            (job_id, pid, "queued", "queued", 0, total, "queued"),
+        )
+        conn_j.commit()
+        conn_j.close()
+
+        def _runner():
+            with analysis_lock:
+                conn_r = connect(root)
+                init_schema(conn_r)
+                conn_r.execute(
+                    "UPDATE analysis_jobs SET status='running', phase='analyzing', message=? WHERE id=?",
+                    ("analyzing project", job_id),
+                )
+                conn_r.commit()
+                conn_r.close()
+                publish_event("analyze.progress", {"job_id": job_id, "status": "running", "phase": "analyzing", "processed": 0, "total": total})
+
+                try:
+                    from .analyzer import analyze
+                    summary = analyze(root)
+                    conn_d = connect(root)
+                    init_schema(conn_d)
+                    conn_d.execute(
+                        "UPDATE analysis_jobs SET status='completed', phase='done', processed=?, total=?, message=?, finished_at=CURRENT_TIMESTAMP WHERE id=?",
+                        (total, total, "analysis completed", job_id),
+                    )
+                    conn_d.commit()
+                    conn_d.close()
+                    publish_event("analyze.completed", {"job_id": job_id, "summary": summary})
+                except Exception as e:
+                    conn_e = connect(root)
+                    init_schema(conn_e)
+                    conn_e.execute(
+                        "UPDATE analysis_jobs SET status='failed', phase='error', message=?, finished_at=CURRENT_TIMESTAMP WHERE id=?",
+                        (str(e), job_id),
+                    )
+                    conn_e.commit()
+                    conn_e.close()
+                    publish_event("analyze.failed", {"job_id": job_id, "error": str(e)})
+
+        threading.Thread(target=_runner, daemon=True).start()
+        return job_id
     class Handler(BaseHTTPRequestHandler):
         def _json(self, payload, code=200):
             body = json.dumps(payload).encode("utf-8")
@@ -752,6 +813,55 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 self._json(with_meta({"markdown": "\n".join(md), "summary": summary}))
                 return
 
+            if parsed.path == "/api/analyze/status":
+                if not pid:
+                    self._json(with_meta({"items": []}))
+                    return
+                rows = conn.execute(
+                    "SELECT id,status,phase,processed,total,message,started_at,finished_at FROM analysis_jobs WHERE project_id=? ORDER BY started_at DESC LIMIT 20",
+                    (pid,),
+                ).fetchall()
+                self._json(with_meta({
+                    "items": [
+                        {
+                            "id": r[0],
+                            "status": r[1],
+                            "phase": r[2],
+                            "processed": r[3],
+                            "total": r[4],
+                            "message": r[5],
+                            "started_at": r[6],
+                            "finished_at": r[7],
+                        }
+                        for r in rows
+                    ]
+                }))
+                return
+
+            if parsed.path.startswith("/api/analyze/status/"):
+                if not pid:
+                    self._json({"error": "run_analyze_first"}, 400)
+                    return
+                job_id = parsed.path.rsplit("/", 1)[-1]
+                row = conn.execute(
+                    "SELECT id,status,phase,processed,total,message,started_at,finished_at FROM analysis_jobs WHERE id=? AND project_id=?",
+                    (job_id, pid),
+                ).fetchone()
+                if not row:
+                    self._json({"error": "job_not_found"}, 404)
+                    return
+                self._json(with_meta({
+                    "id": row[0],
+                    "status": row[1],
+                    "phase": row[2],
+                    "processed": row[3],
+                    "total": row[4],
+                    "message": row[5],
+                    "started_at": row[6],
+                    "finished_at": row[7],
+                }))
+                return
+
             if parsed.path in {"/api/config", "/api/settings"}:
                 rows = conn.execute("SELECT key,value FROM config ORDER BY key").fetchall()
                 self._json({r[0]: r[1] for r in rows})
@@ -887,6 +997,19 @@ def run_server(project_root: str, port: int = 4310) -> None:
             pid = _project_id(conn, root)
             if not pid:
                 self._json({"error": "run_analyze_first"}, 400)
+                return
+
+            if parsed.path == "/api/analyze/start":
+                # prevent concurrent analyze jobs
+                running = conn.execute(
+                    "SELECT id FROM analysis_jobs WHERE project_id=? AND status IN ('queued','running') ORDER BY started_at DESC LIMIT 1",
+                    (pid,),
+                ).fetchone()
+                if running:
+                    self._json(with_meta({"ok": True, "job_id": running[0], "already_running": True}))
+                    return
+                job_id = _start_analysis_job(pid)
+                self._json(with_meta({"ok": True, "job_id": job_id, "already_running": False}))
                 return
 
             if parsed.path == "/api/alerts/scheduler":

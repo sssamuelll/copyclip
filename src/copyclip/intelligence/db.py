@@ -184,6 +184,18 @@ def init_schema(conn: sqlite3.Connection) -> None:
             detail TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS analysis_jobs (
+            id TEXT PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            phase TEXT,
+            processed INTEGER DEFAULT 0,
+            total INTEGER DEFAULT 0,
+            message TEXT,
+            started_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            finished_at TEXT
+        );
         """
     )
     # Lightweight migration for existing DBs created before new columns existed.

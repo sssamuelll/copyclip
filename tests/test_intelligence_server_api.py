@@ -384,3 +384,29 @@ def test_alert_scheduler_state_get_and_set():
         s2 = _get_json(f"http://127.0.0.1:{port}/api/alerts/scheduler")
         assert s2["enabled"] is True
         assert int(s2["interval_sec"]) >= 15
+
+
+def test_analyze_job_start_and_status_endpoints():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        root_path = str(root.absolute())
+        (root / 'src').mkdir(parents=True, exist_ok=True)
+        (root / 'src' / 'a.py').write_text('print(1)\n')
+
+        conn = connect(root_path)
+        init_schema(conn)
+        conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root_path, "tmp"))
+        conn.commit()
+
+        port = _free_port()
+        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
+        th.start()
+        _wait_port(port)
+
+        start_res = _post_json(f"http://127.0.0.1:{port}/api/analyze/start", {})
+        assert start_res["ok"] is True
+        assert "job_id" in start_res
+
+        status = _get_json(f"http://127.0.0.1:{port}/api/analyze/status")
+        assert "items" in status
+        assert len(status["items"]) >= 1

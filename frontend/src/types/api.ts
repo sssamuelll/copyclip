@@ -138,5 +138,16 @@ export type SchedulerState = {
   last_run_at?: string | null
 }
 
+export type AnalyzeJob = {
+  id: string
+  status: 'queued' | 'running' | 'completed' | 'failed'
+  phase?: string
+  processed: number
+  total: number
+  message?: string
+  started_at?: string
+  finished_at?: string | null
+}
+
 export type ArchNode = { name: string }
 export type ArchEdge = { from: string; to: string; type: string }
