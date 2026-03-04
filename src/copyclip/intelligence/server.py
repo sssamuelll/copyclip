@@ -263,7 +263,25 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 if not pid:
                     self._json(with_meta({"items": []}))
                     return
-                # ... heatmap logic ...
+
+                risk_rows = conn.execute(
+                    "SELECT area, score FROM risks WHERE project_id=?",
+                    (pid,),
+                ).fetchall()
+                risk_map = {r[0]: int(r[1] or 0) for r in risk_rows}
+
+                rows = conn.execute(
+                    "SELECT path, size_bytes FROM files WHERE project_id=? ORDER BY size_bytes DESC LIMIT 500",
+                    (pid,),
+                ).fetchall()
+                items = [
+                    {
+                        "path": r[0],
+                        "size": int(r[1] or 0),
+                        "score": int(risk_map.get(r[0], 0)),
+                    }
+                    for r in rows
+                ]
                 self._json(with_meta({"items": items}))
                 return
 
