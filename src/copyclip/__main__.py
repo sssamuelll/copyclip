@@ -19,6 +19,7 @@ from copyclip.presets import get_preset
 from copyclip.minimizer import minimize_content
 from copyclip.tokens import count_raw_tokens
 from copyclip.flow_diagram import extract_flow_diagram
+from copyclip.ast_extractor import build_dependency_mermaid
 
 DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
@@ -87,6 +88,8 @@ def main():
 
     parser.add_argument("--docstrings", choices=["off", "generate", "overwrite"], default=os.environ.get("COPYCLIP_DOCSTRINGS", "off"))
     parser.add_argument("--doc-lang", choices=["en","es"], default=os.environ.get("COPYCLIP_DOC_LANG","en"))
+    parser.add_argument("--with-dependencies", action="store_true",
+                        help="When used with --minimize contextual, prepend a Mermaid module dependency graph.")
 
     # Removed: --discover-ignore and --no-discover-ignore arguments
 
@@ -165,6 +168,9 @@ def main():
             max_file_size=args.max_file_size,
             no_progress=args.no_progress
         ))
+
+        # Keep an immutable snapshot for optional dependency graph generation.
+        original_files = dict(files_with_content)
 
         if args.minimize:
             print(f"[INFO] Applying {args.minimize} token minimization...", file=sys.stderr)
@@ -257,6 +263,15 @@ def main():
                         logger.warning("Token re-estimation failed for %s: %s", rel_path, e)
 
         output_parts = []
+
+        if args.minimize == "contextual" and args.with_dependencies:
+            try:
+                graph = build_dependency_mermaid(original_files)
+                if graph.strip():
+                    output_parts.append(f"```mermaid\n{graph}\n```")
+            except Exception as e:
+                print(f"[WARN] Dependency graph generation failed: {e}", file=sys.stderr)
+
         if view_mode in ("text", "both"):
             for rel_path in sorted(files_with_content):
                 output_parts.append(f"{rel_path}:\n{files_with_content[rel_path]}")

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "copyclip"
+version = "0.1.0"
+description = "CLI to scan folders, minimize content, and copy AI-friendly context to clipboard"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "tqdm",
+  "pyperclip",
+  "gitignore-parser",
+  "aiofiles",
+  "python-dotenv",
+  "aiohttp",
+  "tiktoken",
+  "pyyaml",
+]
+
+[project.scripts]
+copyclip = "copyclip.__main__:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

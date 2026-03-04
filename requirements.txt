@@ -2,3 +2,7 @@ tqdm
 pyperclip
 gitignore-parser
 aiofiles
+python-dotenv
+aiohttp
+tiktoken
+pyyaml
