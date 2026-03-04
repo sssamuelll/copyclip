@@ -426,9 +426,16 @@ async def analyze(project_root: str) -> Dict[str, int]:
         "issues": issue_count,
         "git_stats": git_stats,
     }
+
+    risk_breakdown_rows = conn.execute(
+        "SELECT kind, COUNT(*) FROM risks WHERE project_id=? GROUP BY kind",
+        (project_id,),
+    ).fetchall()
+    risk_breakdown = {r[0]: r[1] for r in risk_breakdown_rows}
+
     conn.execute(
         "INSERT INTO snapshots(project_id, summary_json) VALUES(?,?)",
-        (project_id, json.dumps(summary)),
+        (project_id, json.dumps({**summary, "risk_breakdown": risk_breakdown})),
     )
 
     # Project Storytelling (Async)

@@ -435,6 +435,28 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 )
                 return
 
+            if parsed.path == "/api/risks/trends":
+                if not pid:
+                    self._json(with_meta({"latest": {}, "previous": {}, "delta": {}, "has_previous": False}))
+                    return
+                rows = conn.execute(
+                    "SELECT summary_json, generated_at FROM snapshots WHERE project_id=? ORDER BY id DESC LIMIT 2",
+                    (pid,),
+                ).fetchall()
+                latest = json.loads(rows[0][0]) if rows else {}
+                previous = json.loads(rows[1][0]) if len(rows) > 1 else {}
+                latest_b = latest.get("risk_breakdown", {}) if isinstance(latest, dict) else {}
+                prev_b = previous.get("risk_breakdown", {}) if isinstance(previous, dict) else {}
+                keys = sorted(set(latest_b.keys()) | set(prev_b.keys()))
+                delta = {k: int(latest_b.get(k, 0)) - int(prev_b.get(k, 0)) for k in keys}
+                self._json(with_meta({
+                    "latest": latest_b,
+                    "previous": prev_b,
+                    "delta": delta,
+                    "has_previous": len(rows) > 1,
+                }))
+                return
+
             self._json({"error": "not_found"}, 404)
 
         def do_PATCH(self):

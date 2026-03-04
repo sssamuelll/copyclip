@@ -71,6 +71,13 @@ export type RiskItem = {
   score: number
   created_at: string
 }
+
+export type RiskTrends = {
+  latest: Record<string, number>
+  previous: Record<string, number>
+  delta: Record<string, number>
+  has_previous: boolean
+}
 export type AgentResponse = {
   response: string
   agent: string

@@ -125,3 +125,27 @@ def test_ask_endpoint_returns_grounded_answer_with_citations():
         assert res["grounded"] is True
         assert len(res["citations"]) >= 1
         assert any(c["type"] == "decision" for c in res["citations"])
+
+
+def test_risk_trends_endpoint_works_with_snapshot_breakdown():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        root_path = str(root.absolute())
+        conn = connect(root_path)
+        init_schema(conn)
+        conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root_path, "tmp"))
+        pid = conn.execute("SELECT id FROM projects WHERE root_path=?", (root_path,)).fetchone()[0]
+        conn.execute("INSERT INTO snapshots(project_id, summary_json) VALUES(?,?)", (pid, json.dumps({"risk_breakdown": {"churn": 2, "test_gap": 1}})))
+        conn.execute("INSERT INTO snapshots(project_id, summary_json) VALUES(?,?)", (pid, json.dumps({"risk_breakdown": {"churn": 4, "complexity": 3}})))
+        conn.commit()
+
+        port = _free_port()
+        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
+        th.start()
+        _wait_port(port)
+
+        res = _get_json(f"http://127.0.0.1:{port}/api/risks/trends")
+        assert res["has_previous"] is True
+        assert res["latest"]["churn"] == 4
+        assert res["delta"]["churn"] == 2
+        assert res["delta"]["test_gap"] == -1
