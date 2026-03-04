@@ -36,7 +36,12 @@ def maybe_handle(argv) -> bool:
         p.add_argument("--path", default=".")
         p.add_argument("--port", type=int, default=4310)
         args = p.parse_args(argv[2:])
-        run_server(args.path, args.port)
+        try:
+            run_server(args.path, args.port)
+        except KeyboardInterrupt:
+            print("\n[INFO] Stopped.")
+        except OSError as e:
+            print(f"[ERROR] Could not start server on port {args.port}: {e}")
         return True
 
     if cmd == "start":
@@ -55,7 +60,12 @@ def maybe_handle(argv) -> bool:
         
         print(f"[INFO] Open CopyClip dashboard: http://127.0.0.1:{args.port}")
 
-        run_server(root, args.port)
+        try:
+            run_server(root, args.port)
+        except KeyboardInterrupt:
+            print("\n[INFO] Stopped.")
+        except OSError as e:
+            print(f"[ERROR] Could not start server on port {args.port}: {e}")
         return True
 
     if cmd == "decision":

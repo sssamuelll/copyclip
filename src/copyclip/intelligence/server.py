@@ -1221,4 +1221,14 @@ def run_server(project_root: str, port: int = 4310) -> None:
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     print(f"[INFO] CopyClip Intelligence running at http://127.0.0.1:{port}")
     print("[INFO] Press Ctrl+C to stop")
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n[INFO] Shutting down CopyClip Intelligence...")
+    finally:
+        try:
+            server.shutdown()
+        except Exception:
+            pass
+        server.server_close()
+        print("[INFO] Bye.")
