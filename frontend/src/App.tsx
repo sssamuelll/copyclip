@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from './api/client'
 import { Sidebar } from './components/Sidebar'
 import { ArchitecturePage } from './pages/ArchitecturePage'
@@ -24,36 +24,59 @@ export function App() {
   const [nodes, setNodes] = useState<ArchNode[]>([])
   const [edges, setEdges] = useState<ArchEdge[]>([])
   const [error, setError] = useState<string>('')
+  const reloadTimer = useRef<number | null>(null)
+
+  const loadAll = useCallback(async () => {
+    try {
+      const [o, c, d, r, i, a] = await Promise.all([
+        api.overview(),
+        api.changes(),
+        api.decisions(),
+        api.risks(),
+        api.issues(),
+        api.architecture()
+      ])
+      setOverview(o)
+      setChanges(c.items)
+      setDecisions(d.items)
+      setRisks(r.items)
+      setIssues(i.items)
+      setNodes(a.nodes)
+      setEdges(a.edges)
+      setError('')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load API data')
+    }
+  }, [])
 
   useEffect(() => {
-    ;(async () => {
-      try {
-        const [o, c, d, r, i, a] = await Promise.all([
-          api.overview(),
-          api.changes(),
-          api.decisions(),
-          api.risks(),
-          api.issues(),
-          api.architecture()
-        ])
-        setOverview(o)
-        setChanges(c.items)
-        setDecisions(d.items)
-        setRisks(r.items)
-        setIssues(i.items)
-        setNodes(a.nodes)
-        setEdges(a.edges)
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Failed to load API data')
-      }
-    })()
-  }, [])
+    loadAll()
+  }, [loadAll])
+
+  useEffect(() => {
+    const sse = new EventSource('/api/events?cursor=0')
+    const scheduleReload = () => {
+      if (reloadTimer.current) window.clearTimeout(reloadTimer.current)
+      reloadTimer.current = window.setTimeout(() => {
+        loadAll()
+      }, 300)
+    }
+
+    sse.addEventListener('decision.created', scheduleReload)
+    sse.addEventListener('decision.status_changed', scheduleReload)
+    sse.addEventListener('decision.ref_added', scheduleReload)
+
+    return () => {
+      if (reloadTimer.current) window.clearTimeout(reloadTimer.current)
+      sse.close()
+    }
+  }, [loadAll])
 
   return (
     <div className="app">
       <Sidebar page={page} setPage={(v) => setPage(v as Page)} />
       <main className="main">
-        {error && <div className="error">API error: {error}. Make sure `copyclip serve --path . --port 4310` is running.</div>}
+        {error && <div className="error">API error: {error}. Make sure `copyclip start` is running.</div>}
         {page === 'atlas' && <AtlasPage overview={overview} changes={changes} risks={risks} decisions={decisions} />}
         {page === 'architecture' && <ArchitecturePage nodes={nodes} edges={edges} />}
         {page === 'impact' && <ImpactSimulatorPage />}
