@@ -23,6 +23,7 @@ const GROUPS = [
       { id: 'risks', label: 'Risks' },
       { id: 'decisions', label: 'Decisions' },
       { id: 'changes', label: 'History' },
+      { id: 'ops', label: 'Ops Center' },
     ]
   }
 ]

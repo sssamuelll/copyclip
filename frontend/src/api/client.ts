@@ -1,4 +1,4 @@
-import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, AgentResponse, AskResponse, RiskTrends } from '../types/api'
+import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, AgentResponse, AskResponse, RiskTrends, AlertRule, AlertsResponse, WeeklyExport } from '../types/api'
 
 async function getJSON<T>(url: string): Promise<T> {
   const r = await fetch(url)
@@ -39,6 +39,10 @@ export const api = {
     postJSON(`/api/decisions/${id}/refs`, { ref_type, ref_value }),
   risks: () => getJSON<{ items: RiskItem[]; total?: number; limit?: number; offset?: number }>('/api/risks'),
   riskTrends: () => getJSON<RiskTrends>('/api/risks/trends'),
+  alerts: () => getJSON<AlertsResponse>('/api/alerts'),
+  alertRules: () => getJSON<{ items: AlertRule[] }>('/api/alerts/rules'),
+  upsertAlertRule: (rule: { name: string; kind?: string; severity?: string; min_score?: number; cooldown_min?: number; enabled?: boolean }) => postJSON<{ ok: boolean; name: string }>('/api/alerts/rules', rule),
+  weeklyExport: (days = 7) => getJSON<WeeklyExport>(`/api/export/weekly?days=${days}`),
   issues: () => getJSON<{ items: IssueItem[] }>('/api/issues'),
   files: () => getJSON<{ items: FileItem[] }>('/api/files'),
   heatmap: () => getJSON<{ items: HeatmapItem[] }>('/api/heatmap'),
