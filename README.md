@@ -208,6 +208,10 @@ copyclip . --preset code --view both --output architecture.md
 
 ---
 
+## Version
+
+Current release target: `v0.3.0` (see `VERSION` and `CHANGELOG.md`).
+
 ## Release prep quick checks
 
 ```bash
