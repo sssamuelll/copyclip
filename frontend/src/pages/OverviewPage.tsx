@@ -17,6 +17,7 @@ export function OverviewPage({ overview, changes, risks, decisions }: Props) {
         <Card label="modules" value={overview?.modules ?? 0} />
         <Card label="risks" value={overview?.risks ?? 0} />
         <Card label="decisions" value={overview?.decisions ?? 0} />
+        <Card label="issues" value={overview?.issues ?? 0} />
       </div>
       <div className="cols">
         <Panel title="recent changes" items={changes.slice(0, 8).map((c) => `${c.sha.slice(0, 7)} — ${c.message}`)} />

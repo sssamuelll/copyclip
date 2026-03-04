@@ -133,6 +133,74 @@ def _complexity_score(content: str, language: str) -> int:
     return keyword_hits + fn_hits
 
 
+# Brief: _fetch_github_issues
+
+def _fetch_github_issues(project_root: str, project_id: int, conn) -> int:
+    try:
+        cmd = [
+            "gh",
+            "issue",
+            "list",
+            "--limit",
+            "100",
+            "--json",
+            "number,title,state,author,labels,url,createdAt,updatedAt,body",
+            "--state",
+            "all",
+        ]
+        out = subprocess.check_output(cmd, cwd=project_root, text=True, stderr=subprocess.DEVNULL)
+        issues = json.loads(out)
+        for issue in issues:
+            conn.execute(
+                "INSERT INTO issues(project_id, external_id, title, body, status, labels, author, url, created_at, updated_at, source) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    project_id,
+                    str(issue["number"]),
+                    issue["title"],
+                    issue.get("body", ""),
+                    issue["state"],
+                    ",".join([l["name"] for l in issue.get("labels", [])]),
+                    issue["author"].get("login", "unknown") if issue.get("author") else "unknown",
+                    issue["url"],
+                    issue["createdAt"],
+                    issue["updatedAt"],
+                    "github",
+                ),
+            )
+        return len(issues)
+    except Exception:
+        return 0
+
+
+# Brief: _analyze_git_folder
+
+def _analyze_git_folder(project_root: str, project_id: int, conn) -> Dict:
+    git_dir = Path(project_root) / ".git"
+    if not git_dir.exists():
+        return {}
+
+    # Size
+    total_size = 0
+    try:
+        for p in git_dir.rglob("*"):
+            if p.is_file():
+                total_size += p.stat().st_size
+    except Exception:
+        pass
+
+    # Branches & Tags
+    branches = _safe_git(project_root, ["branch", "-a"]).splitlines()
+    tags = _safe_git(project_root, ["tag"]).splitlines()
+
+    stats = {
+        "git_size_kb": total_size // 1024,
+        "branches_count": len(branches),
+        "tags_count": len(tags),
+    }
+    return stats
+
+
 # Brief: analyze
 
 def analyze(project_root: str) -> Dict[str, int]:
@@ -148,8 +216,14 @@ def analyze(project_root: str) -> Dict[str, int]:
     )
     project_id = conn.execute("SELECT id FROM projects WHERE root_path=?", (root,)).fetchone()[0]
 
-    for table in ("files", "commits", "file_changes", "modules", "dependencies", "risks"):
+    for table in ("files", "commits", "file_changes", "modules", "dependencies", "risks", "issues"):
         conn.execute(f"DELETE FROM {table} WHERE project_id=?", (project_id,))
+
+    # GitHub Issues
+    issue_count = _fetch_github_issues(root, project_id, conn)
+
+    # Git stats
+    git_stats = _analyze_git_folder(root, project_id, conn)
 
     indexed = 0
     modules_seen: Counter = Counter()
@@ -292,6 +366,8 @@ def analyze(project_root: str) -> Dict[str, int]:
         "modules": len(modules_seen),
         "dependencies": len(dep_edges),
         "risks": risk_count,
+        "issues": issue_count,
+        "git_stats": git_stats,
     }
     conn.execute(
         "INSERT INTO snapshots(project_id, summary_json) VALUES(?,?)",

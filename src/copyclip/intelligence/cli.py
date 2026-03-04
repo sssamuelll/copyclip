@@ -24,7 +24,10 @@ def maybe_handle(argv) -> bool:
         if args.as_json:
             print(json.dumps(res))
         else:
-            print(f"[INFO] Indexed {res['files']} files and {res['commits']} commits")
+            print(f"[INFO] Indexed {res['files']} files, {res['commits']} commits, {res['issues']} issues")
+            if res.get("git_stats"):
+                gs = res["git_stats"]
+                print(f"[INFO] Git: {gs['git_size_kb']}KB, {gs['branches_count']} branches, {gs['tags_count']} tags")
         return True
 
     if cmd == "serve":
@@ -43,7 +46,11 @@ def maybe_handle(argv) -> bool:
 
         root = os.path.abspath(args.path)
         res = analyze(root)
-        print(f"[INFO] Indexed {res['files']} files and {res['commits']} commits")
+        print(f"[INFO] Indexed {res['files']} files, {res['commits']} commits, {res['issues']} issues")
+        if res.get("git_stats"):
+            gs = res["git_stats"]
+            print(f"[INFO] Git: {gs['git_size_kb']}KB, {gs['branches_count']} branches, {gs['tags_count']} tags")
+        
         print(f"[INFO] Open CopyClip dashboard: http://127.0.0.1:{args.port}")
 
         run_server(root, args.port)

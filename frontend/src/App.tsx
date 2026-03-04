@@ -6,9 +6,10 @@ import { ChangesPage } from './pages/ChangesPage'
 import { DecisionsPage } from './pages/DecisionsPage'
 import { OverviewPage } from './pages/OverviewPage'
 import { RisksPage } from './pages/RisksPage'
-import type { ArchEdge, ArchNode, ChangeItem, DecisionItem, Overview, RiskItem } from './types/api'
+import { IssuesPage } from './pages/IssuesPage'
+import type { ArchEdge, ArchNode, ChangeItem, DecisionItem, IssueItem, Overview, RiskItem } from './types/api'
 
-type Page = 'overview' | 'architecture' | 'changes' | 'decisions' | 'risks'
+type Page = 'overview' | 'architecture' | 'changes' | 'decisions' | 'risks' | 'issues'
 
 export function App() {
   const [page, setPage] = useState<Page>('overview')
@@ -16,6 +17,7 @@ export function App() {
   const [changes, setChanges] = useState<ChangeItem[]>([])
   const [decisions, setDecisions] = useState<DecisionItem[]>([])
   const [risks, setRisks] = useState<RiskItem[]>([])
+  const [issues, setIssues] = useState<IssueItem[]>([])
   const [nodes, setNodes] = useState<ArchNode[]>([])
   const [edges, setEdges] = useState<ArchEdge[]>([])
   const [error, setError] = useState<string>('')
@@ -23,17 +25,19 @@ export function App() {
   useEffect(() => {
     ;(async () => {
       try {
-        const [o, c, d, r, a] = await Promise.all([
+        const [o, c, d, r, i, a] = await Promise.all([
           api.overview(),
           api.changes(),
           api.decisions(),
           api.risks(),
+          api.issues(),
           api.architecture()
         ])
         setOverview(o)
         setChanges(c.items)
         setDecisions(d.items)
         setRisks(r.items)
+        setIssues(i.items)
         setNodes(a.nodes)
         setEdges(a.edges)
       } catch (e) {
@@ -52,6 +56,7 @@ export function App() {
         {page === 'changes' && <ChangesPage items={changes} />}
         {page === 'decisions' && <DecisionsPage items={decisions} />}
         {page === 'risks' && <RisksPage items={risks} />}
+        {page === 'issues' && <IssuesPage items={issues} />}
       </main>
     </div>
   )

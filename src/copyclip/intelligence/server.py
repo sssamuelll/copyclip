@@ -171,6 +171,34 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 )
                 return
 
+            if parsed.path == "/api/issues":
+                if not pid:
+                    self._json(with_meta({"items": []}))
+                    return
+                rows = conn.execute(
+                    "SELECT external_id,title,status,labels,author,url,source,created_at,updated_at FROM issues WHERE project_id=? ORDER BY created_at DESC LIMIT 200",
+                    (pid,),
+                ).fetchall()
+                self._json(
+                    with_meta({
+                        "items": [
+                            {
+                                "id": r[0],
+                                "title": r[1],
+                                "status": r[2],
+                                "labels": r[3].split(",") if r[3] else [],
+                                "author": r[4],
+                                "url": r[5],
+                                "source": r[6],
+                                "created_at": r[7],
+                                "updated_at": r[8],
+                            }
+                            for r in rows
+                        ]
+                    })
+                )
+                return
+
             self._json({"error": "not_found"}, 404)
 
         def do_PATCH(self):

@@ -1,5 +1,5 @@
 type Props = { page: string; setPage: (v: string) => void }
-const pages = ['overview', 'architecture', 'changes', 'decisions', 'risks'] as const
+const pages = ['overview', 'architecture', 'changes', 'decisions', 'risks', 'issues'] as const
 
 export function Sidebar({ page, setPage }: Props) {
   return (

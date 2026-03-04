@@ -1,4 +1,4 @@
-import type { ArchEdge, ArchNode, ChangeItem, DecisionItem, Overview, RiskItem } from '../types/api'
+import type { ArchEdge, ArchNode, ChangeItem, DecisionItem, IssueItem, Overview, RiskItem } from '../types/api'
 
 async function getJSON<T>(url: string): Promise<T> {
   const r = await fetch(url)
@@ -11,5 +11,6 @@ export const api = {
   changes: () => getJSON<{ items: ChangeItem[] }>('/api/changes'),
   decisions: () => getJSON<{ items: DecisionItem[] }>('/api/decisions'),
   risks: () => getJSON<{ items: RiskItem[] }>('/api/risks'),
+  issues: () => getJSON<{ items: IssueItem[] }>('/api/issues'),
   architecture: () => getJSON<{ nodes: ArchNode[]; edges: ArchEdge[] }>('/api/architecture/graph')
 }

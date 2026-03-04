@@ -107,6 +107,22 @@ def init_schema(conn: sqlite3.Connection) -> None:
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
 
+        CREATE TABLE IF NOT EXISTS issues (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            external_id TEXT,
+            title TEXT NOT NULL,
+            body TEXT,
+            status TEXT,
+            labels TEXT,
+            author TEXT,
+            url TEXT,
+            source TEXT DEFAULT 'github',
+            created_at TEXT,
+            updated_at TEXT,
+            UNIQUE(project_id, external_id, source)
+        );
+
         CREATE TABLE IF NOT EXISTS snapshots (
             id INTEGER PRIMARY KEY,
             project_id INTEGER NOT NULL,
