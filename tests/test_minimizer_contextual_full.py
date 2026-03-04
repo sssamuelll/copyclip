@@ -100,6 +100,16 @@ class Bar {
         self.assertIn("// desc3", result)
 
 
+class TestJSFallbackRendering(unittest.TestCase):
+    @patch("copyclip.minimizer._run_coro_sync")
+    def test_contextual_fallback_keeps_export_arrow_signal(self, mock_run_coro):
+        mock_run_coro.side_effect = RuntimeError("LLM unavailable")
+        code = "export const sum=(a:number,b:number)=>a+b"
+        result = minimize_content(code, "ts", "contextual")
+        self.assertIn("export const sum", result)
+        self.assertIn("=> { /* ... logic omitted ... */ }", result)
+
+
 class TestCLIEndToEnd(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
