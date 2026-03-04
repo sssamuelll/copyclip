@@ -132,3 +132,29 @@ def init_schema(conn: sqlite3.Connection) -> None:
         """
     )
     conn.commit()
+
+
+# Brief: get_active_decisions
+
+def get_active_decisions(project_root: str):
+    try:
+        root = str(Path(project_root).resolve())
+        db = db_path(root)
+        if not Path(db).exists():
+            return []
+        conn = sqlite3.connect(db)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT id FROM projects WHERE root_path=?", (root,)).fetchone()
+        if not row:
+            conn.close()
+            return []
+        pid = row[0]
+        rows = conn.execute(
+            "SELECT title, summary, status FROM decisions WHERE project_id=? AND status IN ('accepted', 'resolved') ORDER BY id DESC",
+            (pid,),
+        ).fetchall()
+        res = [dict(r) for r in rows]
+        conn.close()
+        return res
+    except Exception:
+        return []

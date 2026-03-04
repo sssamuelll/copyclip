@@ -21,6 +21,8 @@ from copyclip.tokens import count_raw_tokens
 from copyclip.flow_diagram import extract_flow_diagram
 from copyclip.ast_extractor import build_dependency_mermaid
 from copyclip.intelligence.cli import maybe_handle as maybe_handle_intelligence
+from copyclip.intelligence.db import get_active_decisions
+from copyclip.llm.selector_service import select_relevant_files
 
 DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
@@ -95,6 +97,8 @@ def main():
     parser.add_argument("--doc-lang", choices=["en","es"], default=os.environ.get("COPYCLIP_DOC_LANG","en"))
     parser.add_argument("--with-dependencies", action="store_true",
                         help="When used with --minimize contextual, prepend a Mermaid module dependency graph.")
+    parser.add_argument("--no-decisions", action="store_true", help="Do not inject active project decisions into the context")
+    parser.add_argument("--prompt", help="Select relevant files based on this task/intent using LLM")
 
     # Removed: --discover-ignore and --no-discover-ignore arguments
 
@@ -165,6 +169,12 @@ def main():
         if not all_files:
             print("[WARN] No files found to process based on the current filters.", file=sys.stderr)
             return
+
+        # --- AI-based file selection ---
+        if args.prompt:
+            print(f"[INFO] Using AI to select relevant files for intent: '{args.prompt}'...", file=sys.stderr)
+            all_files = asyncio.run(select_relevant_files(all_files, args.prompt, provider_hint=args.provider))
+            print(f"[INFO] AI selected {len(all_files)} files.", file=sys.stderr)
 
         files_with_content = asyncio.run(read_files_concurrently(
             all_files,
@@ -293,6 +303,17 @@ def main():
                         print(f"[WARN] Could not generate flow diagram for {rel_path}: {e}", file=sys.stderr)
             if flow_diagrams:
                 output_parts.append("\n\n".join(flow_diagrams))
+
+        # --- Inject Project Decisions ---
+        if not args.no_decisions:
+            decisions = get_active_decisions(base_path)
+            if decisions:
+                d_parts = ["# PROJECT RULES & DECISIONS"]
+                for d in decisions:
+                    d_parts.append(f"## {d['title']}")
+                    if d['summary']:
+                        d_parts.append(d['summary'])
+                output_parts.insert(0, "\n\n".join(d_parts))
 
         final_output = "\n\n".join(output_parts)
 

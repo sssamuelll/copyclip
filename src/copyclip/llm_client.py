@@ -41,6 +41,7 @@ class LLMClient(Protocol):
     """Protocol for a generic LLM client."""
     async def describe_functions(self, snippets: List[str], lang: str, system_prompt: Optional[str] = None) -> List[str]: ...
     async def minimize_code_contextually(self, code: str, file_ext: str, language: str = "en", system_prompt: Optional[str] = None) -> str: ...
+    async def select_relevant_files(self, files: List[str], intent: str) -> List[str]: ...
 
 
 # --------------------------- helpers ---------------------------
@@ -350,6 +351,51 @@ class OpenAIClient:
                 error=str(e)
             )
             raise
+
+    async def select_relevant_files(self, files: List[str], intent: str) -> List[str]:
+        """Select relevant files from a list based on user intent."""
+        aiohttp = _need("aiohttp", "Install aiohttp: pip install aiohttp")
+        url = self._endpoint("chat/completions")
+
+        system_content = (
+            "You are a repository assistant. Given a list of files and a user's task/intent, "
+            "select the most relevant files to help the user. Return ONLY a JSON list of file paths. "
+            "Limit your selection to the top 10 most relevant files."
+        )
+        
+        user_content = f"Files:\n{chr(10).join(files)}\n\nIntent: {intent}"
+
+        base_payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_content},
+                {"role": "user", "content": user_content}
+            ],
+            "response_format": { "type": "json_object" } if "gpt-4" in self.model or "gpt-3.5" in self.model else None,
+            "temperature": 0.0,
+        }
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json", **self.extra_headers}
+
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout)) as sess:
+            data = await self._post(sess, url, base_payload, headers)
+
+        content = (data.get("choices", [{}])[0].get("message", {}) or {}).get("content", "") or "[]"
+        try:
+            # Some models might return a wrapper object like {"files": [...]} or just [...]
+            parsed = _json.loads(_strip_code_fences(content))
+            if isinstance(parsed, dict):
+                for k in ["files", "relevant_files", "selection"]:
+                    if k in parsed and isinstance(parsed[k], list):
+                        return parsed[k]
+                return []
+            return parsed if isinstance(parsed, list) else []
+        except:
+            # Fallback: look for lines that match files
+            found = []
+            for f in files:
+                if f in content:
+                    found.append(f)
+            return found[:10]
 
 # --------------------------- Anthropic ---------------------------
 

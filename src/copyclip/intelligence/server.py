@@ -245,6 +245,62 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 self._json({"error": "run_analyze_first"}, 400)
                 return
 
+            if parsed.path == "/api/assemble-context":
+                import asyncio
+                from ..reader import read_files_concurrently
+                from ..minimizer import minimize_content
+                from .db import get_active_decisions
+
+                length = int(self.headers.get("Content-Length", "0"))
+                raw = self.rfile.read(length) if length else b"{}"
+                data = json.loads(raw.decode("utf-8"))
+                
+                selected_files = data.get("files", [])
+                selected_issues = data.get("issues", [])
+                include_decisions = data.get("include_decisions", True)
+                minimize_mode = data.get("minimize", "basic")
+
+                prompt_parts = []
+                
+                # 1. Decisions
+                if include_decisions:
+                    decs = get_active_decisions(root)
+                    if decs:
+                        d_p = ["# PROJECT RULES & DECISIONS"]
+                        for d in decs:
+                            d_p.append(f"## {d['title']}\n{d['summary']}")
+                        prompt_parts.append("\n\n".join(d_p))
+                
+                # 2. Issues
+                if selected_issues:
+                    for iid in selected_issues:
+                        issue = conn.execute(
+                            "SELECT external_id, title, body, author, url FROM issues WHERE project_id=? AND external_id=?",
+                            (pid, str(iid))
+                        ).fetchone()
+                        if issue:
+                            prompt_parts.append(f"# ISSUE: #{issue[0]} {issue[1]}\nAuthor: {issue[3]}\nURL: {issue[4]}\n\n{issue[2]}")
+                
+                # 3. Code
+                if selected_files:
+                    prompt_parts.append("# CODE CONTEXT")
+                    # Filter valid files
+                    valid_files = []
+                    for f in selected_files:
+                        if os.path.exists(os.path.join(root, f)):
+                            valid_files.append(f)
+                    
+                    if valid_files:
+                        files_data = asyncio.run(read_files_concurrently(valid_files, root, no_progress=True))
+                        for path, content in files_data.items():
+                            _, ext = os.path.splitext(path)
+                            minimized = minimize_content(content, ext.lstrip("."), minimize_mode)
+                            prompt_parts.append(f"### {path}\n```\n{minimized}\n```")
+                
+                final_context = "\n\n".join(prompt_parts)
+                self._json({"context": final_context})
+                return
+
             if parsed.path == "/api/decisions":
                 length = int(self.headers.get("Content-Length", "0"))
                 raw = self.rfile.read(length) if length else b"{}"
