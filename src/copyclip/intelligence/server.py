@@ -57,20 +57,60 @@ def run_server(project_root: str, port: int = 4310) -> None:
 
             if parsed.path == "/api/overview":
                 if not pid:
-                    self._json(with_meta({"files": 0, "commits": 0, "decisions": 0, "modules": 0, "risks": 0}))
+                    self._json(with_meta({"files": 0, "commits": 0, "decisions": 0, "modules": 0, "risks": 0, "issues": 0, "story": ""}))
                     return
                 files = conn.execute("SELECT COUNT(*) FROM files WHERE project_id=?", (pid,)).fetchone()[0]
                 commits = conn.execute("SELECT COUNT(*) FROM commits WHERE project_id=?", (pid,)).fetchone()[0]
                 decisions = conn.execute("SELECT COUNT(*) FROM decisions WHERE project_id=?", (pid,)).fetchone()[0]
                 modules = conn.execute("SELECT COUNT(*) FROM modules WHERE project_id=?", (pid,)).fetchone()[0]
                 risks = conn.execute("SELECT COUNT(*) FROM risks WHERE project_id=?", (pid,)).fetchone()[0]
+                issues = conn.execute("SELECT COUNT(*) FROM issues WHERE project_id=?", (pid,)).fetchone()[0]
+                story = conn.execute("SELECT story FROM projects WHERE id=?", (pid,)).fetchone()[0]
                 self._json(with_meta({
                     "files": files,
                     "commits": commits,
                     "decisions": decisions,
                     "modules": modules,
                     "risks": risks,
+                    "issues": issues,
+                    "story": story or "",
                 }))
+                return
+
+            if parsed.path == "/api/heatmap":
+                if not pid:
+                    self._json(with_meta({"items": []}))
+                    return
+                # Calculate DebtScore = (Complexity * Churn)
+                # We join files with their risk scores
+                rows = conn.execute(
+                    """
+                    SELECT 
+                        f.path, 
+                        f.size_bytes,
+                        MAX(CASE WHEN r.kind = 'complexity' THEN r.score ELSE 0 END) as complexity_score,
+                        MAX(CASE WHEN r.kind = 'churn' THEN r.score ELSE 0 END) as churn_score
+                    FROM files f
+                    LEFT JOIN risks r ON f.path = r.area AND f.project_id = r.project_id
+                    WHERE f.project_id = ?
+                    GROUP BY f.path
+                    """, (pid,)
+                ).fetchall()
+                
+                items = []
+                for r in rows:
+                    comp = r[2] or 0
+                    churn = r[3] or 0
+                    # Debt score formula:
+                    debt = (comp * 0.6) + (churn * 0.4)
+                    items.append({
+                        "path": r[0],
+                        "size": r[1],
+                        "complexity": comp,
+                        "churn": churn,
+                        "score": round(debt, 2)
+                    })
+                self._json(with_meta({"items": items}))
                 return
 
             if parsed.path == "/api/changes":

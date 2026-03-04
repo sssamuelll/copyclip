@@ -28,6 +28,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             id INTEGER PRIMARY KEY,
             root_path TEXT UNIQUE NOT NULL,
             name TEXT,
+            story TEXT,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
 

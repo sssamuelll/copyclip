@@ -16,11 +16,12 @@ def maybe_handle(argv) -> bool:
 
     cmd = argv[1]
     if cmd == "analyze":
+        import asyncio
         p = argparse.ArgumentParser("copyclip analyze")
         p.add_argument("--path", default=".")
         p.add_argument("--json", action="store_true", dest="as_json")
         args = p.parse_args(argv[2:])
-        res = analyze(args.path)
+        res = asyncio.run(analyze(args.path))
         if args.as_json:
             print(json.dumps(res))
         else:
@@ -39,13 +40,14 @@ def maybe_handle(argv) -> bool:
         return True
 
     if cmd == "start":
+        import asyncio
         p = argparse.ArgumentParser("copyclip start")
         p.add_argument("--path", default=".")
         p.add_argument("--port", type=int, default=4310, help="CopyClip service port (frontend + API)")
         args = p.parse_args(argv[2:])
 
         root = os.path.abspath(args.path)
-        res = analyze(root)
+        res = asyncio.run(analyze(root))
         print(f"[INFO] Indexed {res['files']} files, {res['commits']} commits, {res['issues']} issues")
         if res.get("git_stats"):
             gs = res["git_stats"]

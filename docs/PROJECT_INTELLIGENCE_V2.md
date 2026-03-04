@@ -1,184 +1,49 @@
-# CopyClip Project Intelligence v2 (Current State + Next Specs)
+# CopyClip V2 Blueprint: Human-in-the-Loop Operator
 
-## Status
+CopyClip is evolving from a static context-gathering tool into a **Developer Operations Center**. The goal is to maximize the "Human-in-the-Loop" aspect, helping the developer understand, simulate, and selectively assemble context before interacting with LLMs.
 
-This document updates v1 with what is already implemented in production code (`main`) and what remains for the next phase.
+## Core Features (The 7 Pillars)
 
----
+### 1. Project Storyteller (Narrative Documentation)
+**Goal:** Generate a technical "biography" of the project that explains the *what* and *how* without reading all the code.
+*   **Backend:** `/api/story`. Collects `README.md`, modules, main dependencies, and latest decisions. Sends to an LLM to generate a narrative.
+*   **UI:** A "Project Atlas" page showing the AI-generated text, updated after each `analyze`.
+*   **Human-in-the-Loop:** Users can refine the story manually, adding context that is persisted in the DB.
 
-## 1) Product Positioning (Current)
+### 2. Impact Simulator (Blast Radius Analysis)
+**Goal:** Visualize what breaks if a file or module is modified.
+*   **Backend:** `/api/simulate-impact?path=file_path`. Recursively traverses the `dependencies` table to find dependents and dependencies, crossing this with the `risk_score`.
+*   **UI:** Interactive node graph. Hovering over a file highlights its blast radius. Larger nodes = higher impact.
+*   **Human-in-the-Loop:** Humans can flag nodes as "critical" to artificially inflate their weight in the simulator.
 
-CopyClip is now:
+### 3. Decision Advisor (Contextual Guardrails)
+**Goal:** Prevent humans or AI from suggesting solutions that contradict previous architectural decisions.
+*   **Backend:** Integrated into the CLI prompt engine and `/api/assemble-context`. A fast LLM checks the task intent against the `decisions` table.
+*   **UI:** Floating warnings in the Dashboard (e.g., "Warning: You are requesting Redis, but Decision #14 enforces Memcached").
 
-1. **Context Compiler** for AI-assisted development workflows
-2. **Human Control Plane** to understand and govern AI-heavy codebases
+### 4. Git Archaeology (Linking Why to What)
+**Goal:** Connect code blocks with their underlying rationale.
+*   **Backend:** `analyzer.py` extended to aggressively parse issue IDs in commit messages. `/api/archaeology?file=path` endpoint.
+*   **UI:** Code viewer with a side panel revealing the originating commit, GitHub Issue, and related Architectural Decision for the selected code block.
 
-Core command UX:
+### 5. Smart Context Scrubbing (The Context Cart)
+**Goal:** Give humans granular control over what tokens are sent to the AI.
+*   **Backend:** `/api/context/preview` returns mini-summaries of selected files.
+*   **UI:** A "Shopping Cart" interface. Left: AI suggestions. Right: The Context Payload. Users can toggle files between `Full Code`, `Signatures Only`, or `Docstrings Only`.
+*   **Human-in-the-Loop:** Real-time token counter reflecting the exact payload size.
 
-```bash
-# from any project folder
-copyclip start
-```
+### 6. Health & Technical Debt Heatmap
+**Goal:** Help humans decide where to invest refactoring time.
+*   **Backend:** Calculates `DebtScore = (Complexity * Churn) + (OpenIssues * 2)`. `/api/heatmap` endpoint.
+*   **UI:** A Treemap visualization. Size = file size. Color (Green -> Red) = DebtScore.
 
-Expected behavior:
-- analyze project
-- start one local service
-- serve frontend + API in one port
-- provide URL for browser access
+### 7. Interactive Project Chat (RAG on Metadata)
+**Goal:** Ask questions about the project history and state.
+*   **Backend:** RAG system querying the SQLite DB (issues, decisions, risks, commits).
+*   **UI:** Persistent chat widget in the Dashboard.
 
----
-
-## 2) Implemented Commands
-
-## Stable
-- `copyclip` (core context compiler features)
-- `copyclip analyze [--path .] [--json]`
-- `copyclip serve [--path .] [--port 4310]`
-- `copyclip start [--path .] [--port 4310]`
-- `copyclip decision add|list|resolve`
-- `copyclip report`
-
-## Notes
-- `start` is the preferred entrypoint for project intelligence.
-- `serve` remains available for manual/advanced flow.
-
----
-
-## 3) Dashboard (Current)
-
-Built-in dashboard served from:
-- `src/copyclip/intelligence/ui/index.html`
-
-## Dynamic sections implemented
-- Overview KPIs
-- Recent changes
-- Architecture modules/edges
-- Risks table + severity distribution
-- Decisions list + detail panel
-
-## Interactions implemented
-- Decision status transitions (`accept/resolve/supersede`)
-- Decision refs add/read (`file|commit|doc`)
-- Global search
-- Page-level filters:
-  - Changes: author + text
-  - Decisions: status + text
-  - Risks: kind + severity + text
-  - Architecture: text filter
-- Filters/search persistence (localStorage)
-- Graph zoom/pan
-- Empty states + toast feedback
-
----
-
-## 4) Data Layer (Current)
-
-SQLite DB at:
-- `.copyclip/intelligence.db`
-
-## Main tables in use
-- `projects`
-- `files`
-- `commits`
-- `file_changes`
-- `modules`
-- `dependencies`
-- `decisions`
-- `decision_refs`
-- `risks`
-- `snapshots`
-
----
-
-## 5) API Contract (Current)
-
-## GET
-- `/api/overview`
-- `/api/changes`
-- `/api/decisions`
-- `/api/decisions/{id}/refs`
-- `/api/architecture/graph`
-- `/api/risks`
-
-## POST
-- `/api/decisions`
-- `/api/decisions/{id}/refs`
-
-## PATCH
-- `/api/decisions/{id}`
-
-## Contract notes
-- Collection/snapshot endpoints include `meta.project`.
-- `changes` includes `author`.
-- Decision payloads include `source_type`.
-
----
-
-## 6) Risk Engine (Current v1.1)
-
-Implemented risk kinds:
-- `churn`
-- `test_gap`
-- `complexity`
-
-## Heuristic summary
-- Churn from recent git file-change frequency
-- Test gap from changed non-test paths lacking test signal
-- Complexity proxy from control-flow + function density
-
----
-
-## 7) Quality Gates (Current)
-
-- Existing suite is green at latest checkpoint.
-- Intelligence analyzer tests added (test-path + complexity helpers).
-
----
-
-## 8) Open Gaps (Next)
-
-## A. API hardening
-- Add `meta.generated_at`
-- Add pagination (`limit`, `offset`) for changes/risks/decisions
-- Introduce error schema consistency across endpoints
-
-## B. Risk v1.2
-- Better test matching (import/path-aware)
-- Boundary risk from dependency fan-in/fan-out instability
-- Confidence score per risk item
-
-## C. Decision system
-- Add `decision_refs` management in CLI
-- Add ref delete/edit endpoints
-- Add status history/audit trail
-
-## D. Ask Project
-- New endpoint `POST /api/ask`
-- answer + citations (files/commits/decisions)
-- strict “no citation, no claim” mode
-
-## E. Performance
-- Virtualize large tables in UI
-- Cache and incremental analyze runs
-- Graph rendering optimization for larger module sets
-
----
-
-## 9) Acceptance Criteria for Next Milestone
-
-A milestone is done when:
-1. `copyclip start` remains one-command stable UX
-2. API supports pagination + generated metadata
-3. Ask Project returns citation-backed answers
-4. Risks include confidence and reduced false positives
-5. Dashboard handles large repos without major lag
-
----
-
-## 10) Recommended Immediate Sequence
-
-1. API contract formalization (meta + pagination)
-2. Ask Project MVP with citations
-3. Risk v1.2 confidence + boundary signals
-4. Table virtualization and graph perf pass
-5. Decision audit trail
+## Implementation Iterations
+1. **Iteration 1: UI Revamp.** Update Dashboard layout to support the new toolset (Atlas, Context Cart, Impact).
+2. **Iteration 2: Storyteller & Heatmap.** Visual tools for immediate project comprehension.
+3. **Iteration 3: Context Cart.** Visual prompt assembly and token scrubbing.
+4. **Iteration 4: Simulator & Advisor.** Advanced predictive capabilities and guardrails.

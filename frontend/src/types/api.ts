@@ -5,6 +5,15 @@ export type Overview = {
   modules: number
   risks: number
   issues: number
+  story: string
+}
+
+export type HeatmapItem = {
+  path: string
+  size: number
+  complexity: number
+  churn: number
+  score: number
 }
 
 export type ChangeItem = { sha: string; message: string; date: string }

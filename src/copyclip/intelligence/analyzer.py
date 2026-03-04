@@ -10,6 +10,63 @@ from typing import Dict, Iterable, List, Set, Tuple
 from .db import connect, init_schema
 
 
+# Brief: _generate_project_story
+
+async def _generate_project_story(root: str, project_id: int, conn) -> str:
+    from ..llm_client import LLMClientFactory
+    from ..llm.config import load_config
+    from ..llm.provider_config import resolve_provider, ProviderConfigError
+    
+    # 1. Gather Context
+    readme = ""
+    for rname in ["README.md", "readme.md", "README.txt"]:
+        rp = Path(root) / rname
+        if rp.exists():
+            readme = rp.read_text(encoding="utf-8", errors="ignore")[:3000]
+            break
+            
+    modules = [r[0] for r in conn.execute("SELECT name FROM modules WHERE project_id=? LIMIT 20", (project_id,)).fetchall()]
+    decisions = [f"- {r[0]}: {r[1]}" for r in conn.execute("SELECT title, summary FROM decisions WHERE project_id=? AND status='accepted' LIMIT 5", (project_id,)).fetchall()]
+    
+    prompt = f"""
+    You are a principal software architect. Summarize this project into a high-level narrative.
+    
+    README Extract:
+    {readme}
+    
+    Identified Modules:
+    {', '.join(modules)}
+    
+    Key Architectural Decisions:
+    {chr(10).join(decisions)}
+    
+    Instructions:
+    - Write 2-3 concise paragraphs.
+    - Explain the "soul" of the project: what problem it solves and how it is structured.
+    - Mention major tech/patterns found.
+    - Be professional, narrative, and highly useful for a new developer.
+    """
+    
+    # 2. Call LLM
+    try:
+        cfg = load_config(os.getenv("COPYCLIP_LLM_CONFIG"))
+        cli_p = os.getenv("COPYCLIP_LLM_PROVIDER")
+        prov = resolve_provider(cli_p, cfg)
+        
+        client = LLMClientFactory.create(
+            prov["name"],
+            api_key=prov.get("api_key"),
+            model=prov.get("model"),
+            endpoint=prov.get("base_url"),
+            timeout=30,
+            extra_headers=prov.get("extra_headers"),
+        )
+        story = await client.minimize_code_contextually(prompt, "markdown", "en")
+        return story
+    except Exception:
+        return "No narrative story generated yet. Run 'copyclip analyze' with an LLM provider configured."
+
+
 # Brief: _lang_from_ext
 
 def _lang_from_ext(path: str) -> str:
@@ -203,7 +260,7 @@ def _analyze_git_folder(project_root: str, project_id: int, conn) -> Dict:
 
 # Brief: analyze
 
-def analyze(project_root: str) -> Dict[str, int]:
+async def analyze(project_root: str) -> Dict[str, int]:
     root = os.path.abspath(project_root)
     conn = connect(root)
     init_schema(conn)
@@ -211,7 +268,7 @@ def analyze(project_root: str) -> Dict[str, int]:
     name = os.path.basename(root)
     conn.execute(
         "INSERT INTO projects(root_path,name,updated_at) VALUES(?,?,CURRENT_TIMESTAMP) "
-        "ON CONFLICT(root_path) DO UPDATE SET name=excluded.name, updated_at=CURRENT_TIMESTAMP",
+        "ON CONFLICT(root_path) DO UPDATE SET name=excluded.name, updated_at=excluded.updated_at",
         (root, name),
     )
     project_id = conn.execute("SELECT id FROM projects WHERE root_path=?", (root,)).fetchone()[0]
@@ -373,6 +430,10 @@ def analyze(project_root: str) -> Dict[str, int]:
         "INSERT INTO snapshots(project_id, summary_json) VALUES(?,?)",
         (project_id, json.dumps(summary)),
     )
+
+    # Project Storytelling (Async)
+    story = await _generate_project_story(root, project_id, conn)
+    conn.execute("UPDATE projects SET story=? WHERE id=?", (story, project_id))
 
     conn.commit()
     conn.close()
