@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import sqlite3
@@ -415,7 +416,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                             
                             If there is a conflict or a risk, return a 1-sentence warning. If no conflict, return "OK".
                             """
-                            adv_res = await client.minimize_code_contextually(advisor_prompt, "text", "en")
+                            adv_res = asyncio.run(client.minimize_code_contextually(advisor_prompt, "text", "en"))
                             if adv_res and "OK" not in adv_res.upper():
                                 warnings.append(adv_res.strip())
                         except:

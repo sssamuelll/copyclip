@@ -132,6 +132,14 @@ def init_schema(conn: sqlite3.Connection) -> None:
         );
         """
     )
+    # Lightweight migration for existing DBs created before new columns existed.
+    try:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(projects)").fetchall()}
+        if "story" not in cols:
+            conn.execute("ALTER TABLE projects ADD COLUMN story TEXT")
+    except Exception:
+        pass
+
     conn.commit()
 
 
