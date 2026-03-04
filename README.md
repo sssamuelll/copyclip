@@ -1,8 +1,10 @@
 # CopyClip
 
-CopyClip is a **context compiler for AI-assisted development**.
+CopyClip is a **context compiler + project intelligence dashboard** for AI-assisted development.
 
-It takes a project folder and produces a clean, token-aware, model-friendly context bundle you can send to ChatGPT/Claude/Codex (or teammates) without manual copy/paste chaos.
+It does two things well:
+1. Compiles clean, token-aware context bundles for ChatGPT/Claude/Codex.
+2. Builds a local human control plane (`copyclip analyze` + `copyclip serve`) so teams can understand architecture, change flow, risk, and decisions.
 
 ---
 
@@ -127,6 +129,15 @@ copyclip . --preset code --output -
 ---
 
 ## Project Intelligence (New)
+
+CopyClip now includes a local dashboard for humans to stay in control as AI code volume grows.
+
+Current dashboard covers:
+- high-level project KPIs (files, commits, modules, risks, decisions)
+- architecture edges (module dependency map)
+- recent change timeline
+- explicit decision tracking
+- risk cards with severity + rationale
 
 Analyze repository intelligence data:
 
