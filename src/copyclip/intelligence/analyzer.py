@@ -97,6 +97,42 @@ def _iter_repo_files(root: str) -> Iterable[Tuple[Path, str]]:
             yield p, rel
 
 
+# Brief: _is_test_path
+
+def _is_test_path(rel: str) -> bool:
+    low = rel.lower()
+    return (
+        "/tests/" in f"/{low}"
+        or low.endswith("_test.py")
+        or low.endswith(".test.ts")
+        or low.endswith(".test.tsx")
+        or low.endswith(".test.js")
+        or low.endswith(".spec.ts")
+        or low.endswith(".spec.tsx")
+        or low.endswith(".spec.js")
+    )
+
+
+# Brief: _base_for_test_match
+
+def _base_for_test_match(rel: str) -> str:
+    name = Path(rel).name.lower()
+    for suffix in ["_test.py", ".test.ts", ".test.tsx", ".test.js", ".spec.ts", ".spec.tsx", ".spec.js"]:
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return Path(rel).stem.lower()
+
+
+# Brief: _complexity_score
+
+def _complexity_score(content: str, language: str) -> int:
+    if language not in {"python", "javascript", "typescript"}:
+        return 0
+    keyword_hits = len(re.findall(r"\b(if|elif|else|for|while|switch|case|catch|except|try)\b", content))
+    fn_hits = len(re.findall(r"\b(def|function)\b|=>", content))
+    return keyword_hits + fn_hits
+
+
 # Brief: analyze
 
 def analyze(project_root: str) -> Dict[str, int]:
@@ -112,13 +148,14 @@ def analyze(project_root: str) -> Dict[str, int]:
     )
     project_id = conn.execute("SELECT id FROM projects WHERE root_path=?", (root,)).fetchone()[0]
 
-    # Full refresh for deterministic v1 skeleton.
     for table in ("files", "commits", "file_changes", "modules", "dependencies", "risks"):
         conn.execute(f"DELETE FROM {table} WHERE project_id=?", (project_id,))
 
     indexed = 0
     modules_seen: Counter = Counter()
     dep_edges: Set[Tuple[str, str]] = set()
+    repo_files: Set[str] = set()
+    complexity_by_file: Dict[str, int] = {}
 
     for p, rel in _iter_repo_files(root):
         try:
@@ -131,6 +168,7 @@ def analyze(project_root: str) -> Dict[str, int]:
                 (project_id, rel, language, st.st_size, st.st_mtime, _hash_file(p)),
             )
             indexed += 1
+            repo_files.add(rel)
 
             mod = _module_from_relpath(rel)
             modules_seen[mod] += 1
@@ -138,6 +176,7 @@ def analyze(project_root: str) -> Dict[str, int]:
             if language in {"python", "javascript", "typescript"} and st.st_size < 300_000:
                 try:
                     content = p.read_text(encoding="utf-8", errors="ignore")
+                    complexity_by_file[rel] = _complexity_score(content, language)
                     for t in _extract_import_targets(content, language):
                         dep_edges.add((mod, t))
                 except Exception:
@@ -145,7 +184,7 @@ def analyze(project_root: str) -> Dict[str, int]:
         except Exception:
             continue
 
-    for module, count in modules_seen.items():
+    for module in modules_seen:
         conn.execute(
             "INSERT OR REPLACE INTO modules(project_id,name,path_prefix) VALUES(?,?,?)",
             (project_id, module, module),
@@ -159,7 +198,6 @@ def analyze(project_root: str) -> Dict[str, int]:
             (project_id, frm, to, "import"),
         )
 
-    # Commit timeline
     log = _safe_git(root, ["log", "--pretty=format:%H|%an|%ad|%s", "--date=iso", "-n", "300"])
     commits = 0
     if log:
@@ -174,7 +212,6 @@ def analyze(project_root: str) -> Dict[str, int]:
             except ValueError:
                 continue
 
-    # Per-file churn from git (for risk scoring)
     churn = Counter()
     raw_changes = _safe_git(root, ["log", "--name-only", "--pretty=format:---%H", "-n", "200"])
     current_sha = None
@@ -192,9 +229,10 @@ def analyze(project_root: str) -> Dict[str, int]:
                 (project_id, current_sha, line, 0, 0),
             )
 
-    # Simple risk cards.
-    top_churn = churn.most_common(10)
-    for file_path, score in top_churn:
+    risk_count = 0
+
+    # churn risks
+    for file_path, score in churn.most_common(10):
         sev = "high" if score >= 8 else ("med" if score >= 4 else "low")
         conn.execute(
             "INSERT INTO risks(project_id,area,severity,kind,rationale,score) VALUES(?,?,?,?,?,?)",
@@ -207,13 +245,53 @@ def analyze(project_root: str) -> Dict[str, int]:
                 min(score * 10, 100),
             ),
         )
+        risk_count += 1
+
+    # test gap risks: changed non-test files without nearby tests
+    test_bases = {_base_for_test_match(p) for p in repo_files if _is_test_path(p)}
+    for file_path, score in churn.most_common(25):
+        if _is_test_path(file_path):
+            continue
+        base = _base_for_test_match(file_path)
+        if base not in test_bases and score >= 3:
+            sev = "high" if score >= 8 else ("med" if score >= 5 else "low")
+            conn.execute(
+                "INSERT INTO risks(project_id,area,severity,kind,rationale,score) VALUES(?,?,?,?,?,?)",
+                (
+                    project_id,
+                    file_path,
+                    sev,
+                    "test_gap",
+                    "Frequent changes without matching test file signal",
+                    min(20 + score * 8, 100),
+                ),
+            )
+            risk_count += 1
+
+    # complexity risks
+    for file_path, cscore in sorted(complexity_by_file.items(), key=lambda x: x[1], reverse=True)[:10]:
+        if cscore < 18:
+            continue
+        sev = "high" if cscore >= 35 else ("med" if cscore >= 24 else "low")
+        conn.execute(
+            "INSERT INTO risks(project_id,area,severity,kind,rationale,score) VALUES(?,?,?,?,?,?)",
+            (
+                project_id,
+                file_path,
+                sev,
+                "complexity",
+                f"Control-flow and function density indicates complexity ({cscore})",
+                min(cscore * 2, 100),
+            ),
+        )
+        risk_count += 1
 
     summary = {
         "files": indexed,
         "commits": commits,
         "modules": len(modules_seen),
         "dependencies": len(dep_edges),
-        "risks": len(top_churn),
+        "risks": risk_count,
     }
     conn.execute(
         "INSERT INTO snapshots(project_id, summary_json) VALUES(?,?)",

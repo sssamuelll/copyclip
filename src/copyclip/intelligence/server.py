@@ -26,6 +26,11 @@ def _project_id(conn: sqlite3.Connection, root: str):
 def run_server(project_root: str, port: int = 4310) -> None:
     root = os.path.abspath(project_root)
 
+    def with_meta(payload: dict):
+        payload.setdefault("meta", {})
+        payload["meta"]["project"] = os.path.basename(root)
+        return payload
+
     class Handler(BaseHTTPRequestHandler):
         def _json(self, payload, code=200):
             body = json.dumps(payload).encode("utf-8")
@@ -52,42 +57,42 @@ def run_server(project_root: str, port: int = 4310) -> None:
 
             if parsed.path == "/api/overview":
                 if not pid:
-                    self._json({"files": 0, "commits": 0, "decisions": 0, "modules": 0, "risks": 0})
+                    self._json(with_meta({"files": 0, "commits": 0, "decisions": 0, "modules": 0, "risks": 0}))
                     return
                 files = conn.execute("SELECT COUNT(*) FROM files WHERE project_id=?", (pid,)).fetchone()[0]
                 commits = conn.execute("SELECT COUNT(*) FROM commits WHERE project_id=?", (pid,)).fetchone()[0]
                 decisions = conn.execute("SELECT COUNT(*) FROM decisions WHERE project_id=?", (pid,)).fetchone()[0]
                 modules = conn.execute("SELECT COUNT(*) FROM modules WHERE project_id=?", (pid,)).fetchone()[0]
                 risks = conn.execute("SELECT COUNT(*) FROM risks WHERE project_id=?", (pid,)).fetchone()[0]
-                self._json({
+                self._json(with_meta({
                     "files": files,
                     "commits": commits,
                     "decisions": decisions,
                     "modules": modules,
                     "risks": risks,
-                })
+                }))
                 return
 
             if parsed.path == "/api/changes":
                 if not pid:
-                    self._json({"items": []})
+                    self._json(with_meta({"items": []}))
                     return
                 rows = conn.execute(
                     "SELECT sha, author, message, date FROM commits WHERE project_id=? ORDER BY date DESC LIMIT 200", (pid,)
                 ).fetchall()
-                self._json({"items": [{"sha": r[0], "author": r[1], "message": r[2], "date": r[3]} for r in rows]})
+                self._json(with_meta({"items": [{"sha": r[0], "author": r[1], "message": r[2], "date": r[3]} for r in rows]}))
                 return
 
             if parsed.path == "/api/decisions":
                 if not pid:
-                    self._json({"items": []})
+                    self._json(with_meta({"items": []}))
                     return
                 rows = conn.execute(
                     "SELECT id,title,summary,status,source_type,created_at FROM decisions WHERE project_id=? ORDER BY id DESC LIMIT 200",
                     (pid,),
                 ).fetchall()
                 self._json(
-                    {
+                    with_meta({
                         "items": [
                             {
                                 "id": r[0],
@@ -99,13 +104,13 @@ def run_server(project_root: str, port: int = 4310) -> None:
                             }
                             for r in rows
                         ]
-                    }
+                    })
                 )
                 return
 
             if parsed.path == "/api/architecture/graph":
                 if not pid:
-                    self._json({"nodes": [], "edges": []})
+                    self._json(with_meta({"nodes": [], "edges": []}))
                     return
                 nodes = [
                     {"name": r[0]}
@@ -118,19 +123,19 @@ def run_server(project_root: str, port: int = 4310) -> None:
                         (pid,),
                     ).fetchall()
                 ]
-                self._json({"nodes": nodes, "edges": edges})
+                self._json(with_meta({"nodes": nodes, "edges": edges}))
                 return
 
             if parsed.path == "/api/risks":
                 if not pid:
-                    self._json({"items": []})
+                    self._json(with_meta({"items": []}))
                     return
                 rows = conn.execute(
                     "SELECT area,severity,kind,rationale,score,created_at FROM risks WHERE project_id=? ORDER BY score DESC, id DESC LIMIT 100",
                     (pid,),
                 ).fetchall()
                 self._json(
-                    {
+                    with_meta({
                         "items": [
                             {
                                 "area": r[0],
@@ -142,7 +147,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                             }
                             for r in rows
                         ]
-                    }
+                    })
                 )
                 return
 
