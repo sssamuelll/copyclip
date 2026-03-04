@@ -52,6 +52,8 @@
   .search-box { display:flex; align-items:center; gap:8px; height:36px; padding:0 12px; border:1px solid var(--border); }
   .search-slash { font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--text-secondary); }
   .search-text { font-size:12px; color:var(--text-tertiary); }
+  .search-input-field { background:transparent;border:none;outline:none;color:var(--text-primary);font-family:'JetBrains Mono',monospace;font-size:12px;width:180px; }
+  .search-input-field::placeholder { color:var(--text-tertiary); }
   .index-info { display:flex; align-items:center; gap:6px; }
   .index-dot { width:6px; height:6px; border-radius:50%; background:var(--accent-green); }
   .index-text { font-size:11px; color:var(--text-secondary); }
@@ -244,7 +246,7 @@
   ::-webkit-scrollbar-thumb:hover { background:var(--text-tertiary); }
 
   /* Search input */
-  .search-input { padding:8px 16px; border:1px solid var(--border); font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--text-tertiary); background:transparent; cursor:pointer; }
+  .search-input { padding:8px 16px; border:1px solid var(--border); font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--text-tertiary); background:transparent; }
   .add-btn { padding:8px 16px; background:var(--accent-green); font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:500; color:var(--bg); cursor:pointer; border:none; transition:opacity 0.15s; }
   .add-btn:hover { opacity:0.85; }
 
@@ -296,7 +298,7 @@
     <div class="sidebar-bottom">
       <div class="search-box">
         <span class="search-slash">/</span>
-        <span class="search-text">search...</span>
+        <input id="global-search" class="search-input-field" placeholder="search everything..." />
       </div>
       <div class="index-info">
         <div class="index-dot"></div>
@@ -408,7 +410,7 @@
             <button class="filter-opt">internal</button>
             <button class="filter-opt">external</button>
           </div>
-          <div class="search-input">/ search modules</div>
+          <input id="arch-search" class="search-input" placeholder="/ search modules" />
         </div>
       </div>
       <div class="arch-body">
@@ -501,7 +503,7 @@
           <h1 class="page-title">decisions</h1>
         </div>
         <div class="header-right">
-          <div class="search-input">/ search decisions...</div>
+          <input id="decisions-search" class="search-input" placeholder="/ search decisions..." />
           <button class="add-btn">+ add decision</button>
         </div>
       </div>
@@ -563,9 +565,9 @@
           <h1 class="page-title">risks</h1>
         </div>
         <div class="header-right">
-          <button class="filter-btn">kind: all <span class="filter-chev">v</span></button>
-          <button class="filter-btn">module: all <span class="filter-chev">v</span></button>
-          <button class="filter-btn">sort: score <span class="filter-chev">v</span></button>
+          <select id="risks-kind-filter" class="filter-btn"><option value="all">kind: all</option></select>
+          <select id="risks-severity-filter" class="filter-btn"><option value="all">severity: all</option></select>
+          <input id="risks-search" class="search-input" placeholder="/ search risks" />
         </div>
       </div>
       <div class="risk-top-row">
@@ -606,7 +608,7 @@
 <div id="toast" class="toast"></div>
 
 <script>
-const state = { overview:null, changes:[], decisions:[], risks:[], arch:{nodes:[],edges:[]}, decisionRefs:{}, selectedDecision:null, selectedModule:null, decisionFilter:'all' };
+const state = { overview:null, changes:[], decisions:[], risks:[], arch:{nodes:[],edges:[]}, decisionRefs:{}, selectedDecision:null, selectedModule:null, decisionFilter:'all', globalSearch:'', changesAuthor:'all', changesSearch:'', risksKind:'all', risksSeverity:'all', risksSearch:'', archSearch:'', decisionsSearch:'' };
 
 const qs = (s, root=document) => root.querySelector(s);
 const qsa = (s, root=document) => Array.from(root.querySelectorAll(s));
@@ -642,7 +644,28 @@ async function ensureDecisionRefs(id){
 
 function sevClass(sev){ return sev === 'high' ? 'severity-high' : (sev === 'med' ? 'severity-med' : 'severity-low'); }
 function scoreColor(score){ return score >= 75 ? 'var(--accent-red)' : (score >= 45 ? 'var(--accent-amber)' : 'var(--accent-green)'); }
+function includesSearch(v,q){ return String(v||'').toLowerCase().includes(String(q||'').toLowerCase()); }
 function showToast(msg){ const t=qs('#toast'); if(!t) return; t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), 1800); }
+
+
+function filteredChanges(){
+  const q = (state.globalSearch || state.changesSearch || '').toLowerCase();
+  return state.changes.filter(c => {
+    const authorOk = state.changesAuthor === 'all' || (c.author || 'git') === state.changesAuthor;
+    const textOk = !q || includesSearch(c.message, q) || includesSearch(c.sha, q) || includesSearch(c.author, q);
+    return authorOk && textOk;
+  });
+}
+
+function filteredRisks(){
+  const q = (state.globalSearch || state.risksSearch || '').toLowerCase();
+  return state.risks.filter(r => {
+    const kindOk = state.risksKind === 'all' || r.kind === state.risksKind;
+    const sevOk = state.risksSeverity === 'all' || r.severity === state.risksSeverity;
+    const textOk = !q || includesSearch(r.area, q) || includesSearch(r.rationale, q) || includesSearch(r.kind, q);
+    return kindOk && sevOk && textOk;
+  });
+}
 
 function renderOverview(){
   const o = state.overview || {files:0,commits:0,modules:0,risks:0};
@@ -684,12 +707,15 @@ function renderChanges(){
     panel.insertAdjacentHTML('beforeend', `<div class="commit-row"><span class="commit-msg">no commits indexed yet</span></div>`);
     return;
   }
-  state.changes.slice(0, 50).forEach(c => panel.insertAdjacentHTML('beforeend', `<div class="commit-row"><span class="commit-sha">${(c.sha||'').slice(0,7)}</span><span class="commit-msg">${c.message||''}</span><div class="commit-meta"><span class="commit-author">${c.author||'git'}</span><span class="commit-time">${(c.date||'').slice(0,10)}</span></div></div>`));
+  filteredChanges().slice(0, 50).forEach(c => panel.insertAdjacentHTML('beforeend', `<div class="commit-row"><span class="commit-sha">${(c.sha||'').slice(0,7)}</span><span class="commit-msg">${c.message||''}</span><div class="commit-meta"><span class="commit-author">${c.author||'git'}</span><span class="commit-time">${(c.date||'').slice(0,10)}</span></div></div>`));
 }
 
 function filteredDecisions(){
-  if (state.decisionFilter === 'all') return state.decisions;
-  return state.decisions.filter(d => d.status === state.decisionFilter);
+  let items = state.decisions;
+  if (state.decisionFilter !== 'all') items = items.filter(d => d.status === state.decisionFilter);
+  const q = (state.globalSearch || state.decisionsSearch || '').toLowerCase();
+  if (!q) return items;
+  return items.filter(d => includesSearch(d.title, q) || includesSearch(d.summary, q) || includesSearch(d.status, q) || includesSearch(d.id, q));
 }
 
 async function selectDecision(dec){
@@ -779,12 +805,15 @@ function renderArchitecture(){
   canvas.className = 'graph-canvas';
   area.appendChild(canvas);
 
-  const nodes = layoutNodes(state.arch.nodes || []);
+  const aq = (state.globalSearch || state.archSearch || '').toLowerCase();
+  const nodesRaw = (state.arch.nodes || []).filter(n => !aq || includesSearch(n.name, aq));
+  const edgesRaw = (state.arch.edges || []).filter(e => !aq || includesSearch(e.from, aq) || includesSearch(e.to, aq));
+  const nodes = layoutNodes(nodesRaw);
   const byName = Object.fromEntries(nodes.map(n => [n.name, n]));
 
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('class', 'graph-lines');
-  (state.arch.edges || []).forEach(e => {
+  edgesRaw.forEach(e => {
     const a = byName[e.from], b = byName[e.to];
     if (!a || !b) return;
     const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
@@ -818,16 +847,17 @@ function renderRisks(){
   const table = qs('#page-risks .risk-table');
   if (!table) return;
   qsa('.risk-table-row', table).forEach(n => n.remove());
-  if (!state.risks.length){
+  const riskItems = filteredRisks();
+  if (!riskItems.length){
     table.insertAdjacentHTML('beforeend', `<div class="risk-table-row"><span class="rt-col-area">No risks detected yet</span></div>`);
   } else {
-    state.risks.forEach(r => table.insertAdjacentHTML('beforeend', `<div class="risk-table-row"><span class="rt-col-sev"><span class="severity-badge ${sevClass(r.severity)}">${r.severity}</span></span><span class="rt-col-area">${r.area||''}</span><span class="rt-col-kind">${r.kind||''}</span><span class="rt-col-score" style="color:${scoreColor(r.score||0)}">${r.score||0}</span><span class="rt-col-rationale">${r.rationale||''}</span></div>`));
+    riskItems.forEach(r => table.insertAdjacentHTML('beforeend', `<div class="risk-table-row"><span class="rt-col-sev"><span class="severity-badge ${sevClass(r.severity)}">${r.severity}</span></span><span class="rt-col-area">${r.area||''}</span><span class="rt-col-kind">${r.kind||''}</span><span class="rt-col-score" style="color:${scoreColor(r.score||0)}">${r.score||0}</span><span class="rt-col-rationale">${r.rationale||''}</span></div>`));
   }
 
   const counts = {high:0, med:0, low:0};
-  state.risks.forEach(r => { if (counts[r.severity] !== undefined) counts[r.severity]++; });
+  riskItems.forEach(r => { if (counts[r.severity] !== undefined) counts[r.severity]++; });
   const rows = qsa('#page-risks .sev-bar-row');
-  const total = Math.max(state.risks.length, 1);
+  const total = Math.max(riskItems.length, 1);
   [['high',0],['med',1],['low',2]].forEach(([k,i]) => {
     const row = rows[i]; if (!row) return;
     const fill = qs('.sev-bar-fill', row); const count = qs('.sev-bar-count', row);
@@ -885,6 +915,33 @@ function attachDecisionActions(){
   }));
 }
 
+function bindFilters(){
+  const gs = qs('#global-search');
+  if (gs) gs.addEventListener('input', () => { state.globalSearch = gs.value; renderOverview(); renderChanges(); renderDecisions(); renderRisks(); renderArchitecture(); });
+
+  const as = qs('#arch-search');
+  if (as) as.addEventListener('input', () => { state.archSearch = as.value; renderArchitecture(); });
+
+  const ds = qs('#decisions-search');
+  if (ds) ds.addEventListener('input', () => { state.decisionsSearch = ds.value; renderDecisions(); });
+
+  const cs = qs('#changes-search');
+  if (cs) cs.addEventListener('input', () => { state.changesSearch = cs.value; renderChanges(); renderOverview(); });
+
+  const ca = qs('#changes-author-filter');
+  if (ca) ca.addEventListener('change', () => { state.changesAuthor = ca.value; renderChanges(); renderOverview(); });
+
+  const rk = qs('#risks-kind-filter');
+  if (rk) rk.addEventListener('change', () => { state.risksKind = rk.value; renderRisks(); renderOverview(); });
+
+  const rs = qs('#risks-severity-filter');
+  if (rs) rs.addEventListener('change', () => { state.risksSeverity = rs.value; renderRisks(); renderOverview(); });
+
+  const rsearch = qs('#risks-search');
+  if (rsearch) rsearch.addEventListener('input', () => { state.risksSearch = rsearch.value; renderRisks(); renderOverview(); });
+}
+
+
 async function refresh(){
   const [overview, changes, decisions, risks, arch] = await Promise.all([
     getJSON('/api/overview'),
@@ -900,6 +957,33 @@ async function refresh(){
   state.arch = arch || {nodes:[],edges:[]};
   state.decisionRefs = {};
 
+  const authors = Array.from(new Set(state.changes.map(c => c.author || 'git'))).sort();
+  const ca = qs('#changes-author-filter');
+  if (ca){
+    const prev = state.changesAuthor;
+    ca.innerHTML = '<option value="all">author: all</option>' + authors.map(a => `<option value="${a}">author: ${a}</option>`).join('');
+    ca.value = authors.includes(prev) ? prev : 'all';
+    state.changesAuthor = ca.value;
+  }
+
+  const kinds = Array.from(new Set(state.risks.map(r => r.kind))).sort();
+  const rk = qs('#risks-kind-filter');
+  if (rk){
+    const prev = state.risksKind;
+    rk.innerHTML = '<option value="all">kind: all</option>' + kinds.map(k => `<option value="${k}">kind: ${k}</option>`).join('');
+    rk.value = kinds.includes(prev) ? prev : 'all';
+    state.risksKind = rk.value;
+  }
+
+  const rs = qs('#risks-severity-filter');
+  if (rs){
+    const prev = state.risksSeverity;
+    const vals = ['high','med','low'];
+    rs.innerHTML = '<option value="all">severity: all</option>' + vals.map(v => `<option value="${v}">severity: ${v}</option>`).join('');
+    rs.value = vals.includes(prev) ? prev : 'all';
+    state.risksSeverity = rs.value;
+  }
+
   renderOverview();
   renderChanges();
   renderDecisions();
@@ -912,6 +996,7 @@ async function refresh(){
 
 (async function init(){
   attachDecisionActions();
+  bindFilters();
   qs('.refresh-btn')?.addEventListener('click', refresh);
   try { await refresh(); }
   catch (err) {
