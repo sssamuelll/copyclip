@@ -13,7 +13,7 @@ import { AskPage } from './pages/AskPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { AgentTerminal } from './components/AgentTerminal'
 import { OpsPage } from './pages/OpsPage'
-import type { ArchEdge, ArchNode, ChangeItem, DecisionItem, IssueItem, Overview, RiskItem } from './types/api'
+import type { ArchEdge, ArchNode, AskCitation, ChangeItem, DecisionItem, IssueItem, Overview, RiskItem } from './types/api'
 
 type Page = 'atlas' | 'architecture' | 'impact' | 'context-builder' | 'ask' | 'changes' | 'decisions' | 'risks' | 'issues' | 'ops' | 'settings'
 
@@ -27,6 +27,9 @@ export function App() {
   const [nodes, setNodes] = useState<ArchNode[]>([])
   const [edges, setEdges] = useState<ArchEdge[]>([])
   const [error, setError] = useState<string>('')
+  const [focusDecisionId, setFocusDecisionId] = useState<number | null>(null)
+  const [focusRiskArea, setFocusRiskArea] = useState<string | null>(null)
+  const [focusCommitId, setFocusCommitId] = useState<string | null>(null)
   const reloadTimer = useRef<number | null>(null)
 
   const loadAll = useCallback(async () => {
@@ -75,6 +78,29 @@ export function App() {
     }
   }, [loadAll])
 
+  const handleOpenCitation = (c: AskCitation) => {
+    if (c.type === 'decision') {
+      setPage('decisions')
+      setFocusDecisionId(Number(c.id))
+      setFocusRiskArea(null)
+      setFocusCommitId(null)
+      return
+    }
+    if (c.type === 'risk') {
+      setPage('risks')
+      setFocusRiskArea(String(c.id))
+      setFocusDecisionId(null)
+      setFocusCommitId(null)
+      return
+    }
+    if (c.type === 'commit') {
+      setPage('changes')
+      setFocusCommitId(String(c.id).slice(0, 7))
+      setFocusDecisionId(null)
+      setFocusRiskArea(null)
+    }
+  }
+
   return (
     <div className="app">
       <Sidebar page={page} setPage={(v) => setPage(v as Page)} />
@@ -84,10 +110,10 @@ export function App() {
         {page === 'architecture' && <ArchitecturePage nodes={nodes} edges={edges} />}
         {page === 'impact' && <ImpactSimulatorPage />}
         {page === 'context-builder' && <ContextBuilderPage />}
-        {page === 'ask' && <AskPage />}
-        {page === 'changes' && <ChangesPage items={changes} />}
-        {page === 'decisions' && <DecisionsPage items={decisions} />}
-        {page === 'risks' && <RisksPage items={risks} />}
+        {page === 'ask' && <AskPage onOpenCitation={handleOpenCitation} />}
+        {page === 'changes' && <ChangesPage items={changes} focusCommitId={focusCommitId} />}
+        {page === 'decisions' && <DecisionsPage items={decisions} focusDecisionId={focusDecisionId} />}
+        {page === 'risks' && <RisksPage items={risks} focusRiskArea={focusRiskArea} />}
         {page === 'issues' && <IssuesPage items={issues} />}
         {page === 'ops' && <OpsPage />}
         {page === 'settings' && <SettingsPage />}

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import type { RiskItem, RiskTrends } from '../types/api'
 
-export function RisksPage({ items }: { items: RiskItem[] }) {
+export function RisksPage({ items, focusRiskArea }: { items: RiskItem[]; focusRiskArea?: string | null }) {
   const [trends, setTrends] = useState<RiskTrends | null>(null)
 
   useEffect(() => {
@@ -44,7 +44,10 @@ export function RisksPage({ items }: { items: RiskItem[] }) {
       </div>
 
       <div className="panel">
-        <ul>{items.map((r, i) => <li key={i}>[{r.severity}] {r.area} — {r.rationale} ({r.score})</li>)}</ul>
+        <ul>{items.map((r, i) => {
+          const focused = !!focusRiskArea && r.area === focusRiskArea
+          return <li key={i} style={focused ? { background: 'rgba(16,185,129,0.2)', padding: '2px 4px' } : undefined}>[{r.severity}] {r.area} — {r.rationale} ({r.score})</li>
+        })}</ul>
       </div>
     </section>
   )

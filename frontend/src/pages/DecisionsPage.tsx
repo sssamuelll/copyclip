@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import type { DecisionHistoryItem, DecisionItem } from '../types/api'
 
-export function DecisionsPage({ items }: { items: DecisionItem[] }) {
+export function DecisionsPage({ items, focusDecisionId }: { items: DecisionItem[]; focusDecisionId?: number | null }) {
   const [selectedId, setSelectedId] = useState<number | null>(items[0]?.id ?? null)
   const [history, setHistory] = useState<DecisionHistoryItem[]>([])
   const [error, setError] = useState('')
@@ -34,6 +34,12 @@ export function DecisionsPage({ items }: { items: DecisionItem[] }) {
     if (!selectedId) return
     loadHistory(selectedId)
   }, [selectedId])
+
+  useEffect(() => {
+    if (focusDecisionId && items.find((d) => d.id === focusDecisionId)) {
+      setSelectedId(focusDecisionId)
+    }
+  }, [focusDecisionId, items])
 
   const onTransition = async (status: string) => {
     if (!selected) return

@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { api } from '../api/client'
-import type { AskResponse } from '../types/api'
+import type { AskCitation, AskResponse } from '../types/api'
 
-export function AskPage() {
+export function AskPage({ onOpenCitation }: { onOpenCitation: (c: AskCitation) => void }) {
   const [q, setQ] = useState('What are the highest-risk areas right now?')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<AskResponse | null>(null)
@@ -41,7 +41,7 @@ export function AskPage() {
               <ul>
                 {result.citations.map((c, i) => (
                   <li key={`${c.type}-${c.id}-${i}`}>
-                    <a href="#" onClick={(e) => e.preventDefault()}>
+                    <a href="#" onClick={(e) => { e.preventDefault(); onOpenCitation(c) }}>
                       [{c.type}] {c.label}
                     </a>
                   </li>
