@@ -3,6 +3,7 @@
 ## Pre-release quality
 - [ ] `PYTHONPATH=src .venv/bin/python -m pytest -q` is green
 - [ ] `scripts/smoke_e2e.sh . 4333` passes
+- [ ] `scripts/qa_gate.sh . 4334` passes
 - [ ] `copyclip start` works on a clean project folder
 
 ## API sanity

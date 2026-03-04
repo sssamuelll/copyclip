@@ -217,6 +217,7 @@ Current release target: `v0.3.0` (see `VERSION` and `CHANGELOG.md`).
 ```bash
 PYTHONPATH=src .venv/bin/python -m pytest -q
 ./scripts/smoke_e2e.sh . 4333
+./scripts/qa_gate.sh . 4334
 ```
 
 Health endpoint:
