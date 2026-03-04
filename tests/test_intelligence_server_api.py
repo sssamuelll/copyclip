@@ -244,3 +244,34 @@ def test_pulls_endpoint_pagination():
         assert res["limit"] == 2
         assert res["offset"] == 1
         assert len(res["items"]) == 2
+
+
+def test_alert_rules_and_cooldown_evaluation():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        root_path = str(root.absolute())
+        conn = connect(root_path)
+        init_schema(conn)
+        conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root_path, "tmp"))
+        pid = conn.execute("SELECT id FROM projects WHERE root_path=?", (root_path,)).fetchone()[0]
+        conn.execute(
+            "INSERT INTO alert_rules(project_id,name,kind,severity,min_score,cooldown_min,enabled) VALUES(?,?,?,?,?,?,1)",
+            (pid, "high-risk", None, "high", 70, 60),
+        )
+        conn.execute(
+            "INSERT INTO risks(project_id,area,severity,kind,rationale,score) VALUES(?,?,?,?,?,?)",
+            (pid, "src/core.ts", "high", "churn", "spike", 90),
+        )
+        conn.commit()
+
+        port = _free_port()
+        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
+        th.start()
+        _wait_port(port)
+
+        first = _get_json(f"http://127.0.0.1:{port}/api/alerts")
+        assert len(first["fired"]) >= 1
+
+        second = _get_json(f"http://127.0.0.1:{port}/api/alerts")
+        assert len(second["fired"]) == 0
+        assert second["total"] >= 1

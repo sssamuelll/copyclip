@@ -314,6 +314,18 @@ async def analyze(project_root: str) -> Dict[str, int]:
     )
     project_id = conn.execute("SELECT id FROM projects WHERE root_path=?", (root,)).fetchone()[0]
 
+    # Seed default alert rules once per project.
+    default_rules = [
+        ("high-risk", None, "high", 70, 60),
+        ("test-gap-spike", "test_gap", None, 50, 120),
+        ("churn-spike", "churn", None, 70, 60),
+    ]
+    for name_r, kind_r, sev_r, score_r, cooldown_r in default_rules:
+        conn.execute(
+            "INSERT OR IGNORE INTO alert_rules(project_id,name,kind,severity,min_score,cooldown_min,enabled) VALUES(?,?,?,?,?,?,1)",
+            (project_id, name_r, kind_r, sev_r, score_r, cooldown_r),
+        )
+
     for table in ("files", "commits", "file_changes", "modules", "dependencies", "risks", "issues", "pulls"):
         conn.execute(f"DELETE FROM {table} WHERE project_id=?", (project_id,))
 

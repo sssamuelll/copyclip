@@ -67,6 +67,67 @@ def run_server(project_root: str, port: int = 4310) -> None:
             offset = 0
         return limit, offset
 
+    def _parse_dt(value: str | None):
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except Exception:
+            try:
+                return datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+            except Exception:
+                return None
+
+    def _evaluate_alerts(conn, pid):
+        rules = conn.execute(
+            "SELECT id,name,kind,severity,min_score,cooldown_min,enabled,last_triggered_at FROM alert_rules WHERE project_id=? AND enabled=1 ORDER BY id",
+            (pid,),
+        ).fetchall()
+        risks = conn.execute(
+            "SELECT area,severity,kind,rationale,score,created_at FROM risks WHERE project_id=? ORDER BY score DESC, id DESC",
+            (pid,),
+        ).fetchall()
+
+        now = datetime.now(timezone.utc)
+        fired = []
+        for r in rules:
+            rid, name, kind, severity, min_score, cooldown_min, enabled, last_t = r
+            candidates = []
+            for risk in risks:
+                area, sev, knd, rationale, score, created_at = risk
+                if kind and knd != kind:
+                    continue
+                if severity and sev != severity:
+                    continue
+                if int(score or 0) < int(min_score or 0):
+                    continue
+                candidates.append(risk)
+
+            if not candidates:
+                continue
+
+            last_dt = _parse_dt(last_t)
+            if last_dt is not None and (now - last_dt).total_seconds() < int(cooldown_min or 0) * 60:
+                continue
+
+            top = candidates[0]
+            title = f"{name}: {top[0]}"
+            detail = f"[{top[2]}/{top[1]}] score={top[4]} — {top[3]}"
+
+            conn.execute(
+                "INSERT INTO alert_events(project_id,rule_id,title,detail) VALUES(?,?,?,?)",
+                (pid, rid, title, detail),
+            )
+            conn.execute(
+                "UPDATE alert_rules SET last_triggered_at=? WHERE id=?",
+                (now.isoformat(), rid),
+            )
+            fired.append({"rule": name, "title": title, "detail": detail})
+
+        if fired:
+            conn.commit()
+        return fired
+
     class Handler(BaseHTTPRequestHandler):
         def _json(self, payload, code=200):
             body = json.dumps(payload).encode("utf-8")
@@ -491,6 +552,54 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 }))
                 return
 
+            if parsed.path == "/api/alerts":
+                if not pid:
+                    self._json(with_meta({"fired": [], "events": []}))
+                    return
+                fired = _evaluate_alerts(conn, pid)
+                limit, offset = _pagination(parsed)
+                total = conn.execute("SELECT COUNT(*) FROM alert_events WHERE project_id=?", (pid,)).fetchone()[0]
+                rows = conn.execute(
+                    "SELECT id,rule_id,title,detail,created_at FROM alert_events WHERE project_id=? ORDER BY id DESC LIMIT ? OFFSET ?",
+                    (pid, limit, offset),
+                ).fetchall()
+                self._json(with_meta({
+                    "fired": fired,
+                    "events": [
+                        {"id": r[0], "rule_id": r[1], "title": r[2], "detail": r[3], "created_at": r[4]}
+                        for r in rows
+                    ],
+                    "total": total,
+                    "limit": limit,
+                    "offset": offset,
+                }))
+                return
+
+            if parsed.path == "/api/alerts/rules":
+                if not pid:
+                    self._json(with_meta({"items": []}))
+                    return
+                rows = conn.execute(
+                    "SELECT id,name,kind,severity,min_score,cooldown_min,enabled,last_triggered_at FROM alert_rules WHERE project_id=? ORDER BY id",
+                    (pid,),
+                ).fetchall()
+                self._json(with_meta({
+                    "items": [
+                        {
+                            "id": r[0],
+                            "name": r[1],
+                            "kind": r[2],
+                            "severity": r[3],
+                            "min_score": r[4],
+                            "cooldown_min": r[5],
+                            "enabled": bool(r[6]),
+                            "last_triggered_at": r[7],
+                        }
+                        for r in rows
+                    ]
+                }))
+                return
+
             self._json({"error": "not_found"}, 404)
 
         def do_PATCH(self):
@@ -565,6 +674,27 @@ def run_server(project_root: str, port: int = 4310) -> None:
             pid = _project_id(conn, root)
             if not pid:
                 self._json({"error": "run_analyze_first"}, 400)
+                return
+
+            if parsed.path == "/api/alerts/rules":
+                length = int(self.headers.get("Content-Length", "0"))
+                raw = self.rfile.read(length) if length else b"{}"
+                data = json.loads(raw.decode("utf-8"))
+                name = (data.get("name") or "").strip()
+                if not name:
+                    self._json({"error": "name_required"}, 400)
+                    return
+                kind = (data.get("kind") or "").strip() or None
+                severity = (data.get("severity") or "").strip() or None
+                min_score = int(data.get("min_score") or 0)
+                cooldown_min = int(data.get("cooldown_min") or 60)
+                enabled = 1 if bool(data.get("enabled", True)) else 0
+                conn.execute(
+                    "INSERT OR REPLACE INTO alert_rules(project_id,name,kind,severity,min_score,cooldown_min,enabled,last_triggered_at) VALUES(?,?,?,?,?,?,?,NULL)",
+                    (pid, name, kind, severity, min_score, cooldown_min, enabled),
+                )
+                conn.commit()
+                self._json({"ok": True, "name": name})
                 return
 
             if parsed.path == "/api/github/sync":

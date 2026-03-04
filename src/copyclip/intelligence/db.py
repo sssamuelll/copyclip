@@ -157,6 +157,28 @@ def init_schema(conn: sqlite3.Connection) -> None:
             generated_at TEXT DEFAULT CURRENT_TIMESTAMP,
             summary_json TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS alert_rules (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            kind TEXT,
+            severity TEXT,
+            min_score INTEGER DEFAULT 0,
+            cooldown_min INTEGER DEFAULT 60,
+            enabled INTEGER DEFAULT 1,
+            last_triggered_at TEXT,
+            UNIQUE(project_id, name)
+        );
+
+        CREATE TABLE IF NOT EXISTS alert_events (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            rule_id INTEGER,
+            title TEXT NOT NULL,
+            detail TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
         """
     )
     # Lightweight migration for existing DBs created before new columns existed.
