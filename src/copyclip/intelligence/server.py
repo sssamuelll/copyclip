@@ -948,10 +948,12 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 # 3. Code
                 if selected_files:
                     prompt_parts.append("# CODE CONTEXT")
-                    # Filter valid files
+                    # Filter valid files securely
                     valid_files = []
+                    root_path = Path(root).resolve()
                     for f in selected_files:
-                        if os.path.exists(os.path.join(root, f)):
+                        p = (root_path / f).resolve()
+                        if p.is_relative_to(root_path) and p.exists() and p.is_file():
                             valid_files.append(f)
                     
                     if valid_files:

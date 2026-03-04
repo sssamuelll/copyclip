@@ -37,11 +37,18 @@ class CopyClipAgent:
 
     def _tool_query_db(self, query: str) -> str:
         try:
-            conn = connect(self.root)
-            # Basic safety: only SELECT
-            if not query.strip().lower().startswith("select"):
+            # Basic safety: only SELECT and no stacked queries
+            q_clean = query.strip().split(';')[0].strip()
+            
+            if not q_clean.lower().startswith("select"):
                 return "Error: Only SELECT queries are allowed."
-            rows = conn.execute(query).fetchall()
+                
+            # Security: Prevent agents from reading API keys
+            if "config" in q_clean.lower() or "sqlite_master" in q_clean.lower():
+                return "Error: Access to system or configuration tables is denied."
+                
+            conn = connect(self.root)
+            rows = conn.execute(q_clean).fetchall()
             res = [dict(r) for r in rows]
             conn.close()
             return json.dumps(res, indent=2)
@@ -50,7 +57,13 @@ class CopyClipAgent:
 
     def _tool_read_file(self, path: str) -> str:
         try:
-            p = Path(self.root) / path
+            root_path = Path(self.root).resolve()
+            p = (root_path / path).resolve()
+            
+            # Security: Prevent path traversal outside project root
+            if not p.is_relative_to(root_path):
+                return "Error: Access denied. Path is outside the project directory."
+                
             if not p.exists() or not p.is_file():
                 return f"Error: File {path} not found."
             return p.read_text(encoding="utf-8", errors="ignore")[:5000] # Limit size
