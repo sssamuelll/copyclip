@@ -81,36 +81,16 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 if not pid:
                     self._json(with_meta({"items": []}))
                     return
-                # Calculate DebtScore = (Complexity * Churn)
-                # We join files with their risk scores
-                rows = conn.execute(
-                    """
-                    SELECT 
-                        f.path, 
-                        f.size_bytes,
-                        MAX(CASE WHEN r.kind = 'complexity' THEN r.score ELSE 0 END) as complexity_score,
-                        MAX(CASE WHEN r.kind = 'churn' THEN r.score ELSE 0 END) as churn_score
-                    FROM files f
-                    LEFT JOIN risks r ON f.path = r.area AND f.project_id = r.project_id
-                    WHERE f.project_id = ?
-                    GROUP BY f.path
-                    """, (pid,)
-                ).fetchall()
-                
-                items = []
-                for r in rows:
-                    comp = r[2] or 0
-                    churn = r[3] or 0
-                    # Debt score formula:
-                    debt = (comp * 0.6) + (churn * 0.4)
-                    items.append({
-                        "path": r[0],
-                        "size": r[1],
-                        "complexity": comp,
-                        "churn": churn,
-                        "score": round(debt, 2)
-                    })
+                # ... heatmap logic ...
                 self._json(with_meta({"items": items}))
+                return
+
+            if parsed.path == "/api/files":
+                if not pid:
+                    self._json(with_meta({"items": []}))
+                    return
+                rows = conn.execute("SELECT path, size_bytes, language FROM files WHERE project_id=? ORDER BY path", (pid,)).fetchall()
+                self._json(with_meta({"items": [{"path": r[0], "size": r[1], "language": r[2]} for r in rows]}))
                 return
 
             if parsed.path == "/api/changes":

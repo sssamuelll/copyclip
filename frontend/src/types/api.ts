@@ -8,6 +8,19 @@ export type Overview = {
   story: string
 }
 
+export type FileItem = {
+  path: string
+  size: number
+  language: string
+}
+
+export type ContextPayload = {
+  files: string[]
+  issues: string[]
+  include_decisions: boolean
+  minimize: 'basic' | 'aggressive' | 'structural'
+}
+
 export type HeatmapItem = {
   path: string
   size: number
