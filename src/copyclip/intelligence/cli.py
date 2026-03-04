@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import subprocess
 import sys
 
 from .analyzer import analyze
@@ -83,6 +84,8 @@ def maybe_handle(argv) -> bool:
         p = argparse.ArgumentParser("copyclip start")
         p.add_argument("--path", default=".")
         p.add_argument("--port", type=int, default=4310, help="CopyClip service port (frontend + API)")
+        p.add_argument("--open", dest="open_browser", action=argparse.BooleanOptionalAction, default=True,
+                       help="Auto-open dashboard in browser (default: on)")
         args = p.parse_args(argv[2:])
 
         root = os.path.abspath(args.path)
@@ -91,6 +94,15 @@ def maybe_handle(argv) -> bool:
         if res.get("git_stats"):
             gs = res["git_stats"]
             print(_info(f"Git: {gs['git_size_kb']}KB, {gs['branches_count']} branches, {gs['tags_count']} tags"))
+
+        dash_url = f"http://127.0.0.1:{args.port}"
+        if args.open_browser:
+            try:
+                if sys.platform == "darwin":
+                    subprocess.Popen(["open", dash_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    print(_info(f"Opening dashboard in browser: {dash_url}"))
+            except Exception:
+                pass
 
         try:
             run_server(root, args.port)
