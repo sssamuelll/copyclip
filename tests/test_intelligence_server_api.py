@@ -41,6 +41,13 @@ def _patch_json(url: str, payload: dict):
         return json.loads(r.read().decode("utf-8"))
 
 
+def _post_json(url: str, payload: dict):
+    data = json.dumps(payload).encode("utf-8")
+    req = request.Request(url, method="POST", data=data, headers={"Content-Type": "application/json"})
+    with request.urlopen(req, timeout=3) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
 def test_decisions_pagination_and_meta():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
@@ -93,3 +100,28 @@ def test_decision_history_endpoint():
         hist = _get_json(f"http://127.0.0.1:{port}/api/decisions/{decision_id}/history")
         assert hist["total"] >= 1
         assert any(item["action"] == "status_change" for item in hist["items"])
+
+
+def test_ask_endpoint_returns_grounded_answer_with_citations():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        root_path = str(root.absolute())
+        conn = connect(root_path)
+        init_schema(conn)
+        conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root_path, "tmp"))
+        pid = conn.execute("SELECT id FROM projects WHERE root_path=?", (root_path,)).fetchone()[0]
+        conn.execute(
+            "INSERT INTO decisions(project_id,title,summary,status,source_type) VALUES(?,?,?,?,?)",
+            (pid, "Adopt WebGPU pipeline", "Use GPU as default simulation backend", "accepted", "manual"),
+        )
+        conn.commit()
+
+        port = _free_port()
+        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
+        th.start()
+        _wait_port(port)
+
+        res = _post_json(f"http://127.0.0.1:{port}/api/ask", {"question": "what did we decide about webgpu?"})
+        assert res["grounded"] is True
+        assert len(res["citations"]) >= 1
+        assert any(c["type"] == "decision" for c in res["citations"])

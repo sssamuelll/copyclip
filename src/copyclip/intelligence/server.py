@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -489,6 +490,106 @@ def run_server(project_root: str, port: int = 4310) -> None:
             pid = _project_id(conn, root)
             if not pid:
                 self._json({"error": "run_analyze_first"}, 400)
+                return
+
+            if parsed.path == "/api/ask":
+                length = int(self.headers.get("Content-Length", "0"))
+                raw = self.rfile.read(length) if length else b"{}"
+                data = json.loads(raw.decode("utf-8"))
+                question = (data.get("question") or "").strip()
+                if not question:
+                    self._json({"error": "question_required"}, 400)
+                    return
+
+                # Lightweight retrieval over indexed artifacts.
+                terms = [t for t in re.findall(r"[a-zA-Z0-9_\-]{3,}", question.lower()) if t not in {"the", "and", "for", "with", "that", "this", "what", "how"}]
+
+                evidence = []
+
+                # Decisions
+                for r in conn.execute(
+                    "SELECT id,title,summary,status FROM decisions WHERE project_id=? ORDER BY id DESC LIMIT 200",
+                    (pid,),
+                ).fetchall():
+                    text = f"{r[1]} {r[2] or ''} {r[3]}".lower()
+                    score = sum(1 for t in terms if t in text)
+                    if score > 0:
+                        evidence.append({
+                            "score": score + 2,
+                            "type": "decision",
+                            "id": r[0],
+                            "title": r[1],
+                            "snippet": (r[2] or "")[:240],
+                        })
+
+                # Risks
+                for r in conn.execute(
+                    "SELECT area,kind,rationale,score FROM risks WHERE project_id=? ORDER BY score DESC LIMIT 300",
+                    (pid,),
+                ).fetchall():
+                    text = f"{r[0]} {r[1]} {r[2] or ''}".lower()
+                    score = sum(1 for t in terms if t in text)
+                    if score > 0:
+                        evidence.append({
+                            "score": score + 1,
+                            "type": "risk",
+                            "id": r[0],
+                            "title": f"{r[0]} ({r[1]})",
+                            "snippet": (r[2] or "")[:240],
+                        })
+
+                # Commits
+                for r in conn.execute(
+                    "SELECT sha,message,date FROM commits WHERE project_id=? ORDER BY date DESC LIMIT 300",
+                    (pid,),
+                ).fetchall():
+                    text = f"{r[0]} {r[1] or ''}".lower()
+                    score = sum(1 for t in terms if t in text)
+                    if score > 0:
+                        evidence.append({
+                            "score": score,
+                            "type": "commit",
+                            "id": r[0],
+                            "title": (r[1] or "")[:120],
+                            "snippet": f"commit {r[0][:7]} on {(r[2] or '')[:10]}",
+                        })
+
+                evidence.sort(key=lambda x: x["score"], reverse=True)
+                top = evidence[:5]
+
+                if not top:
+                    self._json(with_meta({
+                        "answer": "I don’t have enough indexed evidence to answer that yet. Re-run analyze or ask with more specific entities (module/file/decision).",
+                        "citations": [],
+                        "grounded": False,
+                    }))
+                    return
+
+                citations = []
+                lines = []
+                for e in top:
+                    if e["type"] == "decision":
+                        citations.append({"type": "decision", "id": e["id"], "label": f"decision #{e['id']}"})
+                        lines.append(f"Decision #{e['id']}: {e['title']}")
+                    elif e["type"] == "risk":
+                        citations.append({"type": "risk", "id": e["id"], "label": e["title"]})
+                        lines.append(f"Risk signal: {e['title']}")
+                    elif e["type"] == "commit":
+                        citations.append({"type": "commit", "id": e["id"], "label": f"commit {e['id'][:7]}"})
+                        lines.append(f"Recent commit: {e['title']}")
+
+                answer = "Based on indexed project evidence, here are the strongest signals:\n- " + "\n- ".join(lines)
+
+                # Strict grounding contract: no claim without citations.
+                if not citations:
+                    self._json({"error": "ungrounded_answer_blocked"}, 500)
+                    return
+
+                self._json(with_meta({
+                    "answer": answer,
+                    "citations": citations,
+                    "grounded": True,
+                }))
                 return
 
             if parsed.path == "/api/assemble-context":
