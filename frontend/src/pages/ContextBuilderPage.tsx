@@ -50,10 +50,9 @@ export function ContextBuilderPage() {
       await navigator.clipboard.writeText(res.context)
       if (res.warnings && res.warnings.length > 0) {
         setWarnings(res.warnings)
-      } else {
-        setCopied(true)
-        setTimeout(() => setCopied(false), 2000)
       }
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2200)
     } catch (e) {
       alert('Failed to assemble context')
     } finally {
@@ -141,9 +140,10 @@ export function ContextBuilderPage() {
             </div>
 
             {warnings.length > 0 && (
-              <div className="panel" style={{ border: '1px solid #92400e', background: 'rgba(146, 64, 14, 0.2)', padding: '8px', fontSize: '0.8rem' }}>
-                <div style={{ color: '#fbbf24', fontWeight: 'bold', marginBottom: '4px' }}>Decision Advisor Warning:</div>
-                {warnings.map((w, idx) => <div key={idx}>{w}</div>)}
+              <div className="panel" style={{ border: '1px solid #92400e', background: 'rgba(146, 64, 14, 0.2)', padding: '10px', fontSize: '0.8rem' }}>
+                <div style={{ color: '#fbbf24', fontWeight: 'bold', marginBottom: '6px' }}>Decision Advisor Warning</div>
+                <div className="muted" style={{ marginBottom: 6 }}>Context copied, but this payload may conflict with prior architecture decisions.</div>
+                {warnings.map((w, idx) => <div key={idx} style={{ marginBottom: 4 }}>• {w}</div>)}
               </div>
             )}
 
