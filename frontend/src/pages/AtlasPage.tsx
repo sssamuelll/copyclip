@@ -10,6 +10,8 @@ type Props = {
 export function AtlasPage({ overview, changes, risks, decisions }: Props) {
   const proposed = decisions.filter((d) => d.status === 'proposed').length
   const unresolved = decisions.filter((d) => d.status === 'unresolved').length
+  const topRisk = [...risks].sort((a, b) => b.score - a.score)[0]
+  const lastChange = changes[0]
 
   return (
     <section style={{ display: 'grid', gap: 14 }}>
@@ -28,6 +30,27 @@ export function AtlasPage({ overview, changes, risks, decisions }: Props) {
           change={`${proposed} proposed / ${unresolved} unresolved`}
           warn={true}
         />
+      </div>
+
+      <div className="narrative-grid">
+        <div className="insight-card">
+          <div className="insight-title">// what_changed</div>
+          <div className="insight-text">
+            {lastChange ? `Latest: ${lastChange.sha.slice(0, 7)} — ${lastChange.message}` : 'No recent commits indexed yet.'}
+          </div>
+        </div>
+        <div className="insight-card">
+          <div className="insight-title">// why_it_matters</div>
+          <div className="insight-text">
+            {topRisk ? `Highest risk is ${topRisk.area} (${topRisk.score}) due to ${topRisk.kind}.` : 'Risk model has not produced actionable items yet.'}
+          </div>
+        </div>
+        <div className="insight-card">
+          <div className="insight-title">// suggested_action</div>
+          <div className="insight-text">
+            {proposed > 0 ? `Review ${proposed} proposed decision(s) before next major refactor.` : 'No pending proposals. Validate risk hotspots and schedule refactor windows.'}
+          </div>
+        </div>
       </div>
 
       <div className="content-columns">

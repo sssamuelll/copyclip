@@ -23,12 +23,29 @@ export function RisksPage({ items, focusRiskArea }: { items: RiskItem[]; focusRi
     total: Math.max(items.length, 1),
   }), [items])
 
-  const escalated = [...items].sort((a, b) => b.score - a.score).slice(0, 2)
+  const sortedByScore = [...items].sort((a, b) => b.score - a.score)
+  const escalated = sortedByScore.slice(0, 2)
+  const top = sortedByScore[0]
 
   return (
     <section style={{ display: 'grid', gap: 12 }}>
       <div className="page-header">
         <h2 className="page-title">risks</h2>
+      </div>
+
+      <div className="narrative-grid">
+        <div className="insight-card">
+          <div className="insight-title">// what_changed</div>
+          <div className="insight-text">{trends?.has_previous ? 'Risk trend has a previous baseline snapshot for comparison.' : 'This appears to be an early snapshot window.'}</div>
+        </div>
+        <div className="insight-card">
+          <div className="insight-title">// why_it_matters</div>
+          <div className="insight-text">{top ? `${top.area} is currently the highest-scoring risk (${top.score}).` : 'No risks scored yet.'}</div>
+        </div>
+        <div className="insight-card">
+          <div className="insight-title">// suggested_action</div>
+          <div className="insight-text">Prioritize top 3 risks, then link each to a decision or mitigation owner.</div>
+        </div>
       </div>
 
       <div className="risk-top-row">
@@ -60,7 +77,7 @@ export function RisksPage({ items, focusRiskArea }: { items: RiskItem[]; focusRi
         <div className="table-header" style={{ gridTemplateColumns: '90px 1.1fr 120px 70px 1.3fr' }}>
           <span>severity</span><span>area</span><span>kind</span><span>score</span><span>rationale</span>
         </div>
-        {[...items].sort((a, b) => b.score - a.score).map((r, i) => {
+        {sortedByScore.map((r, i) => {
           const focused = !!focusRiskArea && r.area === focusRiskArea
           return (
             <div

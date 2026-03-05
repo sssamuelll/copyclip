@@ -3,11 +3,27 @@ import type { ChangeItem } from '../types/api'
 export function ChangesPage({ items, focusCommitId }: { items: ChangeItem[]; focusCommitId?: string | null }) {
   const sorted = [...items]
   const highImpact = sorted.slice(0, 3)
+  const latest = sorted[0]
 
   return (
     <section style={{ display: 'grid', gap: 12 }}>
       <div className="page-header">
         <h2 className="page-title">changes</h2>
+      </div>
+
+      <div className="narrative-grid">
+        <div className="insight-card">
+          <div className="insight-title">// what_changed</div>
+          <div className="insight-text">{latest ? `${latest.sha.slice(0, 7)} touched: ${latest.message}` : 'No commit timeline indexed yet.'}</div>
+        </div>
+        <div className="insight-card">
+          <div className="insight-title">// why_it_matters</div>
+          <div className="insight-text">Recent change velocity can hide architectural drift when AI agents ship fast.</div>
+        </div>
+        <div className="insight-card">
+          <div className="insight-title">// suggested_action</div>
+          <div className="insight-text">Review high-impact commits first, then reconcile with open decisions and top risks.</div>
+        </div>
       </div>
 
       <div className="section-panel">
