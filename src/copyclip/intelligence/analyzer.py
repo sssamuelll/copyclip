@@ -3,6 +3,7 @@ import json
 import os
 import re
 import subprocess
+from fnmatch import fnmatch
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -713,6 +714,69 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
             ),
         )
         risk_count += 1
+
+    # intent drift risks (CCIA phase-2 bootstrap): code touched in areas linked to accepted/resolved decisions.
+    decision_link_rows = conn.execute(
+        """
+        SELECT dl.decision_id, dl.link_type, dl.target_pattern, d.title, d.summary, d.status
+        FROM decision_links dl
+        JOIN decisions d ON d.id = dl.decision_id
+        WHERE dl.project_id=? AND d.project_id=? AND d.status IN ('accepted','resolved')
+        ORDER BY dl.id DESC
+        """,
+        (project_id, project_id),
+    ).fetchall()
+
+    decision_tokens = {}
+    for r in decision_link_rows:
+        did = int(r[0])
+        if did in decision_tokens:
+            continue
+        dtext = f"{r[3] or ''} {r[4] or ''}".lower()
+        decision_tokens[did] = set(re.findall(r"[a-zA-Z0-9_\-]{4,}", dtext))
+
+    seen_intent_risk = set()
+    for file_path, churn_score in churn.most_common(40):
+        _check_canceled()
+        if not file_path:
+            continue
+
+        for r in decision_link_rows:
+            did = int(r[0])
+            link_type = (r[1] or "").strip()
+            target_pattern = (r[2] or "").strip()
+            title = (r[3] or "").strip()
+
+            matched = False
+            if link_type == "file_glob" and target_pattern:
+                matched = fnmatch(file_path, target_pattern)
+            elif link_type == "module" and target_pattern:
+                matched = file_path.startswith(f"{target_pattern}/") or file_path == target_pattern
+
+            if not matched:
+                continue
+
+            # heuristic contradiction signal: file path lexemes not represented in the decision language.
+            ftokens = set(re.findall(r"[a-zA-Z0-9_\-]{4,}", file_path.lower()))
+            overlap = len(ftokens & decision_tokens.get(did, set()))
+            novelty = max(0, len(ftokens) - overlap)
+
+            score = min(100, 25 + churn_score * 5 + novelty * 4)
+            sev = "high" if score >= 75 else ("med" if score >= 45 else "low")
+            key = (did, file_path)
+            if key in seen_intent_risk:
+                continue
+            seen_intent_risk.add(key)
+
+            rationale = (
+                f"File touches decision-linked intent surface (decision #{did}: {title}). "
+                f"Churn={churn_score}, token_novelty={novelty}, lexical_overlap={overlap}."
+            )
+            conn.execute(
+                "INSERT INTO risks(project_id,area,severity,kind,rationale,score) VALUES(?,?,?,?,?,?)",
+                (project_id, file_path, sev, "intent_drift", rationale, score),
+            )
+            risk_count += 1
 
     _check_canceled()
 
