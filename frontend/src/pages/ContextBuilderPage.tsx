@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
-import type { FileItem, IssueItem } from '../types/api'
+import type { AdvisorConflict, FileItem, IssueItem } from '../types/api'
 
 type Mode = 'full' | 'signatures' | 'docstrings'
 
@@ -16,6 +16,9 @@ export function ContextBuilderPage() {
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(false)
   const [warnings, setWarnings] = useState<string[]>([])
+  const [advisorIntent, setAdvisorIntent] = useState('')
+  const [advisorConflicts, setAdvisorConflicts] = useState<AdvisorConflict[]>([])
+  const [advisorOverride, setAdvisorOverride] = useState(false)
 
   useEffect(() => {
     api.files().then((res) => setFiles(res.items))
@@ -31,16 +34,22 @@ export function ContextBuilderPage() {
     setSelectedFiles(next)
     if (!fileModes[path]) setFileModes((prev) => ({ ...prev, [path]: 'full' }))
     setWarnings([])
+    setAdvisorConflicts([])
+    setAdvisorOverride(false)
   }
 
   const setMode = (path: string, mode: Mode) => {
     setFileModes((prev) => ({ ...prev, [path]: mode }))
+    setAdvisorConflicts([])
+    setAdvisorOverride(false)
   }
 
   const applyModeToAllSelected = (mode: Mode) => {
     const patch: Record<string, Mode> = {}
     Array.from(selectedFiles).forEach((f) => (patch[f] = mode))
     setFileModes((prev) => ({ ...prev, ...patch }))
+    setAdvisorConflicts([])
+    setAdvisorOverride(false)
   }
 
   const toggleIssue = (id: string) => {
@@ -49,6 +58,8 @@ export function ContextBuilderPage() {
     else next.add(id)
     setSelectedIssues(next)
     setWarnings([])
+    setAdvisorConflicts([])
+    setAdvisorOverride(false)
   }
 
   const selectedFileObjs = useMemo(() => files.filter((f) => selectedFiles.has(f.path)), [files, selectedFiles])
@@ -71,6 +82,18 @@ export function ContextBuilderPage() {
     setLoading(true)
     setWarnings([])
     try {
+      const intent = advisorIntent.trim() || `Assemble context for ${selectedFiles.size} files and ${selectedIssues.size} issues`
+      const advisor = await api.decisionAdvisorCheck(intent, Array.from(selectedFiles))
+      const conflicts = advisor?.conflicts || []
+      setAdvisorConflicts(conflicts)
+
+      // First click with conflicts = review step (no copy yet)
+      if (conflicts.length > 0 && !advisorOverride) {
+        setAdvisorOverride(true)
+        setLoading(false)
+        return
+      }
+
       const res = await api.assembleContext({
         files: Array.from(selectedFiles),
         issues: Array.from(selectedIssues),
@@ -191,13 +214,24 @@ export function ContextBuilderPage() {
 
             <div style={{ display: 'flex', gap: 8 }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-                <input type="checkbox" checked={includeDecisions} onChange={(e) => setIncludeDecisions(e.target.checked)} /> include decisions
+                <input type="checkbox" checked={includeDecisions} onChange={(e) => { setIncludeDecisions(e.target.checked); setAdvisorConflicts([]); setAdvisorOverride(false) }} /> include decisions
               </label>
-              <select value={minimize} onChange={(e) => setMinimize(e.target.value as any)} style={{ background: 'var(--bg)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}>
+              <select value={minimize} onChange={(e) => { setMinimize(e.target.value as any); setAdvisorConflicts([]); setAdvisorOverride(false) }} style={{ background: 'var(--bg)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}>
                 <option value="basic">basic</option>
                 <option value="aggressive">aggressive</option>
                 <option value="structural">structural</option>
               </select>
+            </div>
+
+            <div>
+              <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>advisor_intent (used for conflict checks)</div>
+              <textarea
+                rows={2}
+                value={advisorIntent}
+                onChange={(e) => { setAdvisorIntent(e.target.value); setAdvisorConflicts([]); setAdvisorOverride(false) }}
+                placeholder="e.g. Refactor dependency graph around analyzer + server API"
+                style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: 8 }}
+              />
             </div>
 
             <div className="table" style={{ maxHeight: '30vh' }}>
@@ -212,6 +246,21 @@ export function ContextBuilderPage() {
               )) : <div className="muted" style={{ padding: 12 }}>No files selected</div>}
             </div>
 
+            {advisorConflicts.length > 0 && (
+              <div className="panel" style={{ border: '1px solid #7f1d1d', background: 'rgba(127, 29, 29, 0.18)', padding: '10px', fontSize: '0.8rem' }}>
+                <div style={{ color: '#fca5a5', fontWeight: 'bold', marginBottom: '6px' }}>Advisor conflicts detected ({advisorConflicts.length})</div>
+                <div className="muted" style={{ marginBottom: 6 }}>
+                  {advisorOverride ? 'Proceed is unlocked. Review conflicts and click again to copy context.' : 'Review before copy. Copy is paused until you confirm.'}
+                </div>
+                {advisorConflicts.map((c) => (
+                  <div key={`ctx-adv-${c.decision_id}`} style={{ marginBottom: 6, borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 6 }}>
+                    <div style={{ fontSize: 12 }}>#dec-{String(c.decision_id).padStart(3, '0')} · {c.title} · {Math.round((c.confidence || 0) * 100)}%</div>
+                    <div className="muted">{c.why_conflict}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {warnings.length > 0 && (
               <div className="panel" style={{ border: '1px solid #92400e', background: 'rgba(146, 64, 14, 0.2)', padding: '10px', fontSize: '0.8rem' }}>
                 <div style={{ color: '#fbbf24', fontWeight: 'bold', marginBottom: '6px' }}>Decision Advisor Warning</div>
@@ -223,7 +272,7 @@ export function ContextBuilderPage() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span className="muted" style={{ fontSize: 12 }}>{copied ? 'copied to clipboard' : 'ready to assemble'}</span>
               <button className="btn primary" onClick={handleCopy} disabled={loading || (selectedFiles.size === 0 && selectedIssues.size === 0)}>
-                {loading ? 'assembling…' : copied ? 'copied!' : 'copy context'}
+                {loading ? 'assembling…' : copied ? 'copied!' : advisorConflicts.length > 0 && advisorOverride ? 'proceed & copy' : 'copy context'}
               </button>
             </div>
           </div>
