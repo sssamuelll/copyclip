@@ -122,6 +122,7 @@ def maybe_handle(argv) -> bool:
         p = argparse.ArgumentParser("copyclip start")
         p.add_argument("--path", default=".")
         p.add_argument("--port", type=int, default=4310, help="CopyClip service port (frontend + API)")
+        p.add_argument("--port-scan", type=int, default=50, help="How many subsequent ports to scan if --port is busy (default: 50)")
         p.add_argument("--open", dest="open_browser", action=argparse.BooleanOptionalAction, default=True,
                        help="Auto-open dashboard in browser (default: on)")
         args = p.parse_args(argv[2:])
@@ -140,7 +141,7 @@ def maybe_handle(argv) -> bool:
 
         selected_port = args.port
         try:
-            selected_port = _pick_open_port(args.port)
+            selected_port = _pick_open_port(args.port, max_scan=max(0, int(args.port_scan)))
             if selected_port != args.port:
                 print(_warn(f"Port {args.port} is busy; using {selected_port} instead."))
         except OSError as e:
