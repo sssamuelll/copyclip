@@ -35,6 +35,25 @@ class CopyClipAgent:
         self.tools["list_files"] = AgentTool(
             "list_files", "List all indexed files in the project.", self._tool_list_files
         )
+        # Visual/GenUI Tools
+        self.tools["show_architecture"] = AgentTool(
+            "show_architecture", "Render the project's visual architecture dependency graph.", self._tool_show_architecture
+        )
+        self.tools["show_risks"] = AgentTool(
+            "show_risks", "Render the project's risk signals heatmap and details.", self._tool_show_risks
+        )
+        self.tools["show_overview"] = AgentTool(
+            "show_overview", "Render the high-level project soul and intent manifesto.", self._tool_show_overview
+        )
+
+    def _tool_show_architecture(self) -> str:
+        return "__UI_ARTIFACT__:architecture"
+
+    def _tool_show_risks(self) -> str:
+        return "__UI_ARTIFACT__:risks"
+
+    def _tool_show_overview(self) -> str:
+        return "__UI_ARTIFACT__:atlas"
 
     def _tool_query_db(self, query: str) -> str:
         try:
@@ -160,8 +179,6 @@ class CopyClipAgent:
 
         # Simple ReAct loop (max 3 turns)
         for _ in range(3):
-            # We use minimize_code_contextually as a generic chat call for now
-            # In a real scenario we'd use a dedicated chat method
             response = await client.minimize_code_contextually(json.dumps(messages), "json", "en")
             
             try:
@@ -169,13 +186,61 @@ class CopyClipAgent:
                 if "tool" in action and action["tool"] in self.tools:
                     tool = self.tools[action["tool"]]
                     result = tool.func(**action.get("args", {}))
+                    
+                    # Check if the tool is a UI artifact
+                    if isinstance(result, str) and result.startswith("__UI_ARTIFACT__:"):
+                        artifact_name = result.split(":")[1]
+                        # Fetch the data for the artifact
+                        artifact_data = await self._fetch_artifact_data(artifact_name)
+                        return json.dumps({
+                            "answer": action.get("thought", "Here is the visual information you requested."),
+                            "tool_used": artifact_name,
+                            "tool_data": artifact_data
+                        })
+
                     messages.append({"role": "assistant", "content": response})
                     messages.append({"role": "user", "content": f"Tool Output: {result}"})
                     continue
-            except:
+            except Exception:
                 pass
             
             return response
+
+    async def _fetch_artifact_data(self, name: str) -> Any:
+        """Fetch raw data for UI components based on tool usage."""
+        conn = connect(self.root)
+        pid = conn.execute("SELECT id FROM projects WHERE root_path=?", (str(Path(self.root).resolve()),)).fetchone()[0]
+        
+        if name == "architecture":
+            nodes = [{"name": r[0]} for r in conn.execute("SELECT name FROM modules WHERE project_id=? ORDER BY name", (pid,)).fetchall()]
+            edges = [{"from": r[0], "to": r[1], "type": r[2]} for r in conn.execute("SELECT from_module,to_module,edge_type FROM dependencies WHERE project_id=? ORDER BY id LIMIT 800", (pid,)).fetchall()]
+            conn.close()
+            return {"nodes": nodes, "edges": edges}
+            
+        if name == "risks":
+            rows = conn.execute("SELECT area,severity,kind,rationale,score,created_at FROM risks WHERE project_id=? ORDER BY score DESC, id DESC LIMIT 50", (pid,)).fetchall()
+            conn.close()
+            return [{"area": r[0], "severity": r[1], "kind": r[2], "rationale": r[3], "score": r[4], "created_at": r[5]} for r in rows]
+            
+        if name == "atlas":
+            # Overview data
+            files = conn.execute("SELECT COUNT(*) FROM files WHERE project_id=?", (pid,)).fetchone()[0]
+            commits = conn.execute("SELECT COUNT(*) FROM commits WHERE project_id=?", (pid,)).fetchone()[0]
+            risks = conn.execute("SELECT COUNT(*) FROM risks WHERE project_id=?", (pid,)).fetchone()[0]
+            story = conn.execute("SELECT story FROM projects WHERE id=?", (pid,)).fetchone()[0]
+            # Changes, Decisions
+            changes = [{"sha": r[0], "author": r[1], "message": r[2], "date": r[3]} for r in conn.execute("SELECT sha, author, message, date FROM commits WHERE project_id=? ORDER BY date DESC LIMIT 10", (pid,)).fetchall()]
+            decisions = [{"id": r[0], "title": r[1], "summary": r[2], "status": r[3]} for r in conn.execute("SELECT id,title,summary,status FROM decisions WHERE project_id=? ORDER BY id DESC LIMIT 20", (pid,)).fetchall()]
+            conn.close()
+            return {
+                "overview": {"files": files, "commits": commits, "risks": risks, "story": story},
+                "changes": changes,
+                "risks": [], # Handled by overview but kept for compat
+                "decisions": decisions
+            }
+        
+        conn.close()
+        return {}
 
         return "Agent timed out or reached maximum tool usage iterations."
 

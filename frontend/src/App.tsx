@@ -1,56 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from './api/client'
-import { Sidebar } from './components/Sidebar'
-import { ArchitecturePage } from './pages/ArchitecturePage'
-import { ChangesPage } from './pages/ChangesPage'
-import { DecisionsPage } from './pages/DecisionsPage'
-import { AtlasPage } from './pages/AtlasPage'
-import { RisksPage } from './pages/RisksPage'
-import { IssuesPage } from './pages/IssuesPage'
-import { ContextBuilderPage } from './pages/ContextBuilderPage'
-import { ImpactSimulatorPage } from './pages/ImpactSimulatorPage'
 import { AskPage } from './pages/AskPage'
-import { NarrativePage } from './pages/NarrativePage'
-import { SettingsPage } from './pages/SettingsPage'
-import { AgentTerminal } from './components/AgentTerminal'
-import { OpsPage } from './pages/OpsPage'
-import type { ArchEdge, ArchNode, AskCitation, ChangeItem, DecisionItem, IssueItem, Overview, RiskItem } from './types/api'
-
-type Page = 'atlas' | 'architecture' | 'impact' | 'narrative' | 'context-builder' | 'ask' | 'changes' | 'decisions' | 'risks' | 'issues' | 'ops' | 'settings'
+import type { Overview } from './types/api'
 
 export function App() {
-  const [page, setPage] = useState<Page>('atlas')
   const [overview, setOverview] = useState<Overview>()
-  const [changes, setChanges] = useState<ChangeItem[]>([])
-  const [decisions, setDecisions] = useState<DecisionItem[]>([])
-  const [risks, setRisks] = useState<RiskItem[]>([])
-  const [issues, setIssues] = useState<IssueItem[]>([])
-  const [nodes, setNodes] = useState<ArchNode[]>([])
-  const [edges, setEdges] = useState<ArchEdge[]>([])
   const [error, setError] = useState<string>('')
   const [toast, setToast] = useState<string>('')
-  const [focusDecisionId, setFocusDecisionId] = useState<number | null>(null)
-  const [focusRiskArea, setFocusRiskArea] = useState<string | null>(null)
-  const [focusCommitId, setFocusCommitId] = useState<string | null>(null)
   const reloadTimer = useRef<number | null>(null)
 
   const loadAll = useCallback(async () => {
     try {
-      const [o, c, d, r, i, a] = await Promise.all([
-        api.overview(),
-        api.changes(),
-        api.decisions(),
-        api.risks(),
-        api.issues(),
-        api.architecture()
-      ])
+      const o = await api.overview()
       setOverview(o)
-      setChanges(c.items)
-      setDecisions(d.items)
-      setRisks(r.items)
-      setIssues(i.items)
-      setNodes(a.nodes)
-      setEdges(a.edges)
       setError('')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load API data')
@@ -85,78 +47,33 @@ export function App() {
     window.setTimeout(() => setToast(''), 2200)
   }
 
-  const handleOpenCitation = (c: AskCitation) => {
-    if (c.type === 'decision') {
-      setPage('decisions')
-      setFocusDecisionId(Number(c.id))
-      setFocusRiskArea(null)
-      setFocusCommitId(null)
-      return
-    }
-    if (c.type === 'risk') {
-      setPage('risks')
-      setFocusRiskArea(String(c.id))
-      setFocusDecisionId(null)
-      setFocusCommitId(null)
-      return
-    }
-    if (c.type === 'commit') {
-      setPage('changes')
-      setFocusCommitId(String(c.id).slice(0, 7))
-      setFocusDecisionId(null)
-      setFocusRiskArea(null)
-    }
-  }
-
   return (
-    <div className="app">
-      <Sidebar
-        page={page}
-        setPage={(v) => setPage(v as Page)}
-        lastIndexedText={overview?.meta?.generated_at ? `last indexed ${overview.meta.generated_at.replace('T', ' ').slice(0, 19)}` : 'last indexed n/a'}
-      />
-      <main className="main">
-        {error && <div className="error">API error: {error}. Make sure `copyclip start` is running.</div>}
-        <div className="muted" style={{ fontSize: '0.75rem' }}>
-          last analyzed: {overview?.meta?.generated_at ? overview.meta.generated_at.replace('T', ' ').slice(0, 19) : 'n/a'}
+    <div className="app gen-ui-layout" style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg)', color: 'var(--text-primary)' }}>
+      {/* Header Minimalista */}
+      <header style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <strong style={{ fontSize: 18, color: 'var(--text-primary)' }}>&gt; copyclip</strong>
+          <span className="badge badge-low" style={{ fontFamily: 'monospace' }}>consciousness</span>
         </div>
-        {page === 'atlas' && <AtlasPage overview={overview} changes={changes} risks={risks} decisions={decisions} />}
-        {page === 'architecture' && <ArchitecturePage nodes={nodes} edges={edges} />}
-        {page === 'impact' && <ImpactSimulatorPage />}
-        {page === 'narrative' && <NarrativePage />}
-        {page === 'context-builder' && <ContextBuilderPage />}
-        {page === 'ask' && <AskPage onOpenCitation={handleOpenCitation} onNotify={notify} />}
-        {page === 'changes' && (
-          <ChangesPage
-            items={changes}
-            risks={risks}
-            focusCommitId={focusCommitId}
-            onOpenDecision={(id) => {
-              setFocusDecisionId(id)
-              setFocusRiskArea(null)
-              setFocusCommitId(null)
-              setPage('decisions')
-            }}
-            onOpenRisk={(area) => {
-              setFocusRiskArea(area)
-              setFocusDecisionId(null)
-              setFocusCommitId(null)
-              setPage('risks')
-            }}
-          />
-        )}
-        {page === 'decisions' && <DecisionsPage items={decisions} focusDecisionId={focusDecisionId} />}
-        {page === 'risks' && <RisksPage items={risks} focusRiskArea={focusRiskArea} />}
-        {page === 'issues' && <IssuesPage items={issues} />}
-        {page === 'ops' && <OpsPage onNotify={notify} />}
-        {page === 'settings' && <SettingsPage onNotify={notify} />}
+        <div className="muted" style={{ fontSize: 11 }}>
+          {overview?.meta?.generated_at ? `last analyzed: ${overview.meta.generated_at.replace('T', ' ').slice(0, 19)}` : 'analyzing...'}
+        </div>
+      </header>
+
+      {/* Main Chat Area */}
+      <main style={{ flex: 1, overflowY: 'auto', display: 'flex', justifyContent: 'center' }}>
+        <div style={{ width: '100%', maxWidth: '900px', padding: '24px' }}>
+          {error && <div className="error" style={{ marginBottom: 20 }}>API error: {error}. Make sure `copyclip start` is running.</div>}
+          <AskPage onNotify={notify} />
+        </div>
       </main>
+
+      {/* Global Toast */}
       {toast && (
-        <div style={{ position: 'fixed', right: 16, bottom: 16, background: '#111827', color: '#e5e7eb', border: '1px solid #374151', padding: '8px 10px', zIndex: 9999 }}>
+        <div style={{ position: 'fixed', top: 24, left: '50%', transform: 'translateX(-50%)', background: 'var(--accent-cyan)', color: '#000', borderRadius: 4, padding: '8px 16px', zIndex: 9999, fontWeight: 500, boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}>
           {toast}
         </div>
       )}
-      <AgentTerminal />
     </div>
   )
 }

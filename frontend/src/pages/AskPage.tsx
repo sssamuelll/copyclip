@@ -1,161 +1,201 @@
-import { useMemo, useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { api } from '../api/client'
-import type { AdvisorConflict, AskCitation, AskResponse } from '../types/api'
+import type { AskResponse, AdvisorConflict } from '../types/api'
 
-export function AskPage({ onOpenCitation, onNotify }: { onOpenCitation: (c: AskCitation) => void; onNotify?: (msg: string) => void }) {
-  const [q, setQ] = useState('What are the highest-risk areas right now?')
-  const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState<AskResponse | null>(null)
-  const [advisorConflicts, setAdvisorConflicts] = useState<AdvisorConflict[]>([])
-  const [error, setError] = useState('')
+// Import existing visual components to use them as "Artifacts" in the chat
+import { ArchitecturePage } from './ArchitecturePage'
+import { RisksPage } from './RisksPage'
+import { AtlasPage } from './AtlasPage'
 
-  const grouped = useMemo(() => {
-    const citations = result?.citations || []
-    return {
-      decision: citations.filter((c) => c.type === 'decision'),
-      risk: citations.filter((c) => c.type === 'risk'),
-      commit: citations.filter((c) => c.type === 'commit'),
-    }
-  }, [result])
+type ChatMessage = {
+  id: string
+  role: 'user' | 'assistant'
+  text: string
+  loading?: boolean
+  error?: string
+  // Artifacts returned by the API
+  toolUsed?: 'architecture' | 'risks' | 'atlas' | 'decisions'
+  toolData?: any
+  citations?: any[]
+  conflicts?: AdvisorConflict[]
+}
 
-  const runAsk = async () => {
-    if (!q.trim()) return
-    setLoading(true)
-    setError('')
-    setAdvisorConflicts([])
-    try {
-      const intent = q.trim()
-      const [res, advisor] = await Promise.all([
-        api.ask(intent),
-        api.decisionAdvisorCheck(intent, []),
-      ])
-      setResult(res)
-      setAdvisorConflicts(advisor?.conflicts || [])
-      if ((advisor?.conflicts || []).length > 0) {
-        onNotify?.(`Advisor detected ${(advisor?.conflicts || []).length} potential decision conflict(s)`)
-      } else {
-        onNotify?.(res.grounded ? 'Grounded answer ready' : 'Low-grounding answer: review citations')
+export function AskPage({ onNotify }: { onNotify?: (msg: string) => void }) {
+  const [messages, setMessages] = useState<ChatMessage[]>([{
+    id: 'welcome',
+    role: 'assistant',
+    text: "I am the project's consciousness. Ask me anything about the architecture, risks, or intent.",
+  }])
+  const [input, setInput] = useState('')
+  const [isTyping, setIsTyping] = useState(false)
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  const handleSend = async () => {
+    if (!input.trim() || isTyping) return
+    const userText = input.trim()
+    setInput('')
+    
+    const userMsgId = Date.now().toString()
+    setMessages(prev => [...prev, { id: userMsgId, role: 'user', text: userText }])
+    
+    const loadingMsgId = (Date.now() + 1).toString()
+    setMessages(prev => [...prev, { id: loadingMsgId, role: 'assistant', text: 'Thinking...', loading: true }])
+    setIsTyping(true)
+
+    try:
+      const chatRes = await api.agentsChat({ agent: 'scout', message: userText })
+      
+      let answer = chatRes.response
+      let toolUsed: any = undefined
+      let toolData: any = undefined
+
+      // Check if response is JSON-encoded (it will be for artifacts)
+      try {
+        const parsed = JSON.parse(chatRes.response)
+        if (parsed.tool_used) {
+          answer = parsed.answer
+          toolUsed = parsed.tool_used
+          toolData = parsed.tool_data
+        }
+      } catch {
+        // Not JSON, use as plain text
       }
+
+      setMessages(prev => prev.map(m => m.id === loadingMsgId ? {
+        ...m,
+        text: answer,
+        loading: false,
+        toolUsed: toolUsed,
+        toolData: toolData
+      } : m))
+
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Ask failed')
-      setResult(null)
+      setMessages(prev => prev.map(m => m.id === loadingMsgId ? {
+        ...m,
+        text: '',
+        loading: false,
+        error: e instanceof Error ? e.message : 'Failed to get answer'
+      } : m))
     } finally {
-      setLoading(false)
+      setIsTyping(false)
+    }
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSend()
     }
   }
 
   return (
-    <section style={{ display: 'grid', gap: 12 }}>
-      <div className="page-header">
-        <h2 className="page-title">ask project</h2>
-      </div>
+    <div className="chat-container" style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 120px)', background: 'var(--bg)', borderRadius: 8, overflow: 'hidden' }}>
+      
+      {/* Chat History */}
+      <div className="chat-history" style={{ flex: 1, overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', gap: '32px' }}>
+        {messages.map(msg => (
+          <div key={msg.id} className={`chat-message role-${msg.role}`} style={{ display: 'flex', gap: '16px', maxWidth: '100%', alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+            
+            {/* Avatar */}
+            {msg.role === 'assistant' && (
+              <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--accent-cyan)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#000', fontWeight: 'bold', flexShrink: 0 }}>C</div>
+            )}
+            
+            {/* Content Area */}
+            <div style={{ display: 'grid', gap: '16px', width: msg.role === 'user' ? 'auto' : '100%' }}>
+              
+              {/* Text Bubble */}
+              {msg.text && (
+                <div style={{ 
+                  background: msg.role === 'user' ? 'var(--accent-cyan)' : 'transparent', 
+                  color: msg.role === 'user' ? '#000' : 'var(--text-primary)',
+                  padding: msg.role === 'user' ? '12px 16px' : '0',
+                  borderRadius: msg.role === 'user' ? '16px 16px 0 16px' : '0',
+                  lineHeight: '1.6',
+                  fontSize: '15px',
+                  whiteSpace: 'pre-wrap'
+                }}>
+                  {msg.loading ? <span className="pulsing-cursor">●</span> : msg.text}
+                </div>
+              )}
 
-      <div className="narrative-grid">
-        <div className="insight-card">
-          <div className="insight-title">// what_changed</div>
-          <div className="insight-text">Ask reads project metadata and returns a grounded answer with citations.</div>
-        </div>
-        <div className="insight-card">
-          <div className="insight-title">// why_it_matters</div>
-          <div className="insight-text">Without grounding, AI responses can drift from real project decisions and risk signals.</div>
-        </div>
-        <div className="insight-card">
-          <div className="insight-title">// suggested_action</div>
-          <div className="insight-text">Prefer answers with citations, then jump directly to the referenced entities.</div>
-        </div>
-      </div>
+              {/* Error State */}
+              {msg.error && <div className="error" style={{ fontSize: 13, padding: 8 }}>{msg.error}</div>}
 
-      <div className="split" style={{ gridTemplateColumns: '1.2fr 1fr' }}>
-        <div className="section-panel">
-          <div className="section-header">
-            <span className="section-title">// prompt</span>
-          </div>
-          <div style={{ padding: 14, display: 'grid', gap: 10 }}>
-            <textarea
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              rows={6}
-              style={{ width: '100%', background: 'var(--bg)', color: 'var(--text-primary)', border: '1px solid var(--border)', padding: 10 }}
-            />
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span className="muted" style={{ fontSize: 12 }}>{q.trim().length} chars</span>
-              <button className="btn primary" onClick={runAsk} disabled={loading}>{loading ? 'asking…' : 'ask'}</button>
+              {/* Dynamic Artifacts (GenUI Component Injection) */}
+              {msg.toolUsed === 'architecture' && msg.toolData && (
+                <div className="artifact-container" style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 16, background: '#111115' }}>
+                  <div className="muted" style={{ marginBottom: 12, fontSize: 11 }}>// artifact: architecture_graph</div>
+                  <ArchitecturePage nodes={msg.toolData.nodes} edges={msg.toolData.edges} />
+                </div>
+              )}
+
+              {msg.toolUsed === 'risks' && msg.toolData && (
+                <div className="artifact-container" style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 16, background: '#111115' }}>
+                   <div className="muted" style={{ marginBottom: 12, fontSize: 11 }}>// artifact: risk_map</div>
+                   <RisksPage items={msg.toolData} focusRiskArea={null} />
+                </div>
+              )}
+
+              {msg.toolUsed === 'atlas' && msg.toolData && (
+                <div className="artifact-container" style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 16, background: '#111115' }}>
+                   <div className="muted" style={{ marginBottom: 12, fontSize: 11 }}>// artifact: project_overview</div>
+                   <AtlasPage overview={msg.toolData.overview} changes={msg.toolData.changes} risks={msg.toolData.risks} decisions={msg.toolData.decisions} />
+                </div>
+              )}
+
+              {/* Citations & Conflicts (Inline) */}
+              {msg.conflicts && msg.conflicts.length > 0 && (
+                <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid var(--accent-red)', borderRadius: 6, padding: 12, fontSize: 13 }}>
+                  <strong style={{ color: 'var(--accent-red)' }}>Warning: Potential Intent Conflict</strong>
+                  <ul style={{ margin: '8px 0 0 0', paddingLeft: 20 }}>
+                    {msg.conflicts.map(c => <li key={c.decision_id} className="muted">{c.why_conflict}</li>)}
+                  </ul>
+                </div>
+              )}
             </div>
-            {error && <div className="error">{error}</div>}
           </div>
-        </div>
-
-        <div className="section-panel">
-          <div className="section-header">
-            <span className="section-title">// answer_state</span>
-            {result && (
-              <span className={`badge ${result.grounded ? 'badge-low' : 'badge-high'}`}>
-                {result.grounded ? 'grounded' : 'low grounding'}
-              </span>
-            )}
-          </div>
-          <div style={{ padding: 14, display: 'grid', gap: 10 }}>
-            {!result && !loading && <div className="muted">Run a query to get a grounded project answer.</div>}
-            {loading && <div className="muted">Querying project graph and intelligence DB...</div>}
-            {result && (
-              <>
-                <div className="panel" style={{ padding: 10, fontSize: 13, lineHeight: 1.5 }}>{result.answer}</div>
-                <div className="muted" style={{ fontSize: 12 }}>
-                  citations: {result.citations.length} (decisions: {grouped.decision.length}, risks: {grouped.risk.length}, commits: {grouped.commit.length})
-                </div>
-                {!result.grounded && (
-                  <div className="panel" style={{ padding: 10, borderColor: 'var(--accent-amber)', background: 'rgba(245,158,11,.08)' }}>
-                    <div style={{ color: 'var(--accent-amber)', fontSize: 12, marginBottom: 6 }}>guardrail</div>
-                    <div style={{ fontSize: 12 }}>Answer has low grounding. Validate via citations before acting.</div>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </div>
+        ))}
+        <div ref={bottomRef} />
       </div>
 
-      {advisorConflicts.length > 0 && (
-        <div className="section-panel">
-          <div className="section-header">
-            <span className="section-title">// decision_advisor_conflicts</span>
-            <span className="badge badge-high">{advisorConflicts.length} conflicts</span>
-          </div>
-          <div style={{ display: 'grid', gap: 0 }}>
-            {advisorConflicts.map((c) => (
-              <div key={`adv-${c.decision_id}`} className="row-item" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%' }}>
-                  <span className="status-badge status-proposed">#dec-{String(c.decision_id).padStart(3, '0')}</span>
-                  <span className="muted" style={{ fontSize: 12 }}>confidence {Math.round((c.confidence || 0) * 100)}%</span>
-                  <button className="btn" style={{ marginLeft: 'auto' }} onClick={() => onOpenCitation({ type: 'decision', id: c.decision_id, label: `decision #${c.decision_id}` })}>open decision</button>
-                </div>
-                <div style={{ fontSize: 12 }}>{c.title}</div>
-                <div className="muted" style={{ fontSize: 12 }}>{c.why_conflict}</div>
-                <div className="muted" style={{ fontSize: 12 }}>suggested: {c.suggested_alternative}</div>
-              </div>
-            ))}
-          </div>
+      {/* Input Area */}
+      <div className="chat-input-area" style={{ padding: '24px', borderTop: '1px solid var(--border)', background: 'var(--bg-dark)' }}>
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Ask project consciousness or request specific maps (e.g., 'show architecture')..."
+            rows={1}
+            disabled={isTyping}
+            style={{ 
+              width: '100%', 
+              background: 'transparent', 
+              color: 'var(--text-primary)', 
+              border: '1px solid var(--border)', 
+              borderRadius: 24, 
+              padding: '16px 24px', 
+              paddingRight: '60px',
+              fontSize: '15px',
+              resize: 'none',
+              overflow: 'hidden',
+              lineHeight: '1.5'
+            }}
+          />
+          <button 
+            onClick={handleSend} 
+            disabled={!input.trim() || isTyping}
+            style={{ position: 'absolute', right: 8, background: 'var(--accent-cyan)', color: '#000', border: 'none', borderRadius: '50%', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', opacity: input.trim() ? 1 : 0.5 }}
+          >
+            ↑
+          </button>
         </div>
-      )}
-
-      {result && (
-        <div className="section-panel">
-          <div className="section-header">
-            <span className="section-title">// citations</span>
-          </div>
-          <div style={{ display: 'grid', gap: 0 }}>
-            {result.citations.map((c, i) => (
-              <div key={`${c.type}-${c.id}-${i}`} className="row-item" style={{ justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <span className={`badge ${c.type === 'decision' ? 'badge-low' : c.type === 'risk' ? 'badge-high' : 'badge-med'}`}>{c.type}</span>
-                  <span style={{ fontSize: 12 }}>{c.label}</span>
-                </div>
-                <button className="btn" onClick={() => onOpenCitation(c)}>open</button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </section>
+      </div>
+    </div>
   )
 }
