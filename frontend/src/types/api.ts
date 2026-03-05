@@ -249,3 +249,23 @@ export type DecisionLinkItem = {
   target_pattern: string
   created_at: string
 }
+
+export type CognitiveLoadItem = {
+  module: string
+  files: number
+  churn: number
+  avg_complexity: number
+  decision_linked: boolean
+  cognitive_debt_score: number
+  fog_level: 'low' | 'med' | 'high'
+}
+
+export type CognitiveLoadResponse = {
+  items: CognitiveLoadItem[]
+  total: number
+  last_review_at?: string | null
+  meta?: {
+    project?: string
+    generated_at?: string
+  }
+}

@@ -428,6 +428,87 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 }))
                 return
 
+            if parsed.path == "/api/cognitive-load":
+                if not pid:
+                    self._json(with_meta({"items": [], "total": 0, "generated_at": None}))
+                    return
+
+                # Last review proxy = last snapshot timestamp.
+                last_snap = conn.execute(
+                    "SELECT generated_at FROM snapshots WHERE project_id=? ORDER BY id DESC LIMIT 1",
+                    (pid,),
+                ).fetchone()
+                last_review = last_snap[0] if last_snap else None
+
+                # Module stats from indexed insights + churn proxy from file_changes.
+                rows = conn.execute(
+                    """
+                    SELECT i.module, i.path, COALESCE(i.complexity,0) AS complexity,
+                           COALESCE((SELECT COUNT(*) FROM file_changes fc WHERE fc.project_id=i.project_id AND fc.file_path=i.path),0) AS churn
+                    FROM analysis_file_insights i
+                    WHERE i.project_id=?
+                    """,
+                    (pid,),
+                ).fetchall()
+
+                module_map = {}
+                for r in rows:
+                    module = (r[0] or "root")
+                    complexity = int(r[2] or 0)
+                    churn = int(r[3] or 0)
+                    m = module_map.setdefault(module, {"files": 0, "complexity": 0, "churn": 0})
+                    m["files"] += 1
+                    m["complexity"] += complexity
+                    m["churn"] += churn
+
+                # Decision-link coverage proxy per module.
+                lrows = conn.execute(
+                    "SELECT link_type, target_pattern FROM decision_links WHERE project_id=?",
+                    (pid,),
+                ).fetchall()
+
+                items = []
+                for module, agg in module_map.items():
+                    files = max(1, int(agg["files"]))
+                    avg_complexity = agg["complexity"] / files
+                    churn = int(agg["churn"])
+
+                    covered = False
+                    for lr in lrows:
+                        ltype = (lr[0] or "").strip()
+                        pattern = (lr[1] or "").strip()
+                        if ltype == "module" and pattern == module:
+                            covered = True
+                            break
+                        if ltype == "file_glob" and module != "root" and (module in pattern):
+                            covered = True
+                            break
+
+                    # CognitiveDebt v1 proxy:
+                    # generated_ratio~churn pressure + complexity pressure, amplified when not decision-linked.
+                    generated_ratio = min(1.0, (churn / max(1, files * 12)) + (avg_complexity / 120.0))
+                    time_factor = 1.0  # snapshot cadence not yet per-module; keep neutral for v1
+                    debt = generated_ratio * time_factor * (1.25 if not covered else 1.0)
+                    score = round(min(100.0, debt * 100.0), 2)
+
+                    items.append({
+                        "module": module,
+                        "files": files,
+                        "churn": churn,
+                        "avg_complexity": round(avg_complexity, 2),
+                        "decision_linked": covered,
+                        "cognitive_debt_score": score,
+                        "fog_level": "high" if score >= 70 else ("med" if score >= 40 else "low"),
+                    })
+
+                items.sort(key=lambda x: x["cognitive_debt_score"], reverse=True)
+                self._json(with_meta({
+                    "items": items[:80],
+                    "total": len(items),
+                    "last_review_at": last_review,
+                }))
+                return
+
             if parsed.path == "/api/identity/drift":
                 if not pid:
                     self._json(with_meta({"items": [], "total": 0, "range_days": 30, "current": None}))

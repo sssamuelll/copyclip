@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
-import type { ChangeItem, DecisionItem, IdentityDriftItem, Overview, RiskItem, StoryTimelineItem } from '../types/api'
+import type { ChangeItem, CognitiveLoadItem, DecisionItem, IdentityDriftItem, Overview, RiskItem, StoryTimelineItem } from '../types/api'
 
 type Props = {
   overview?: Overview
@@ -12,10 +12,12 @@ type Props = {
 export function AtlasPage({ overview, changes, risks, decisions }: Props) {
   const [storyItems, setStoryItems] = useState<StoryTimelineItem[]>([])
   const [driftCurrent, setDriftCurrent] = useState<IdentityDriftItem | null>(null)
+  const [cognitiveItems, setCognitiveItems] = useState<CognitiveLoadItem[]>([])
 
   useEffect(() => {
     api.storyTimeline('30d').then((res) => setStoryItems(res.items || [])).catch(() => setStoryItems([]))
     api.identityDrift('30d').then((res) => setDriftCurrent(res.current || null)).catch(() => setDriftCurrent(null))
+    api.cognitiveLoad().then((res) => setCognitiveItems(res.items || [])).catch(() => setCognitiveItems([]))
   }, [])
 
   const proposed = decisions.filter((d) => d.status === 'proposed').length
@@ -138,6 +140,29 @@ export function AtlasPage({ overview, changes, risks, decisions }: Props) {
           ) : (
             <div className="muted">No drift snapshot yet. Run analyze to compute identity drift signals.</div>
           )}
+        </div>
+      </div>
+
+      <div className="section-panel">
+        <div className="section-header">
+          <span className="section-title">// fog_of_war (cognitive_debt)</span>
+          <span className="muted" style={{ fontSize: 11 }}>{cognitiveItems.length} modules</span>
+        </div>
+        <div style={{ padding: 12, display: 'grid', gap: 8 }}>
+          {cognitiveItems.length ? cognitiveItems.slice(0, 8).map((m) => (
+            <div key={m.module} className="row-item" style={{ margin: 0, border: '1px solid var(--border)', justifyContent: 'space-between' }}>
+              <div style={{ display: 'grid', gap: 3 }}>
+                <span style={{ fontSize: 12 }}>{m.module}</span>
+                <span className="muted" style={{ fontSize: 11 }}>
+                  files {m.files} · churn {m.churn} · complexity {m.avg_complexity.toFixed(1)} · link {m.decision_linked ? 'yes' : 'no'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span className={`badge ${m.fog_level === 'high' ? 'badge-high' : m.fog_level === 'med' ? 'badge-med' : 'badge-low'}`}>{m.fog_level}</span>
+                <strong style={{ minWidth: 56, textAlign: 'right' }}>{m.cognitive_debt_score.toFixed(1)}</strong>
+              </div>
+            </div>
+          )) : <div className="muted">No cognitive load data yet. Run analyze to populate fog-of-war metrics.</div>}
         </div>
       </div>
 

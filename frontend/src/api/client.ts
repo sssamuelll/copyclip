@@ -1,4 +1,4 @@
-import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, AgentResponse, AskResponse, RiskTrends, AlertRule, AlertsResponse, WeeklyExport, SchedulerState, AnalyzeJob, ArchaeologyResponse, StoryTimelineResponse, AdvisorCheckResponse, IdentityDriftResponse, DecisionLinkItem } from '../types/api'
+import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, AgentResponse, AskResponse, RiskTrends, AlertRule, AlertsResponse, WeeklyExport, SchedulerState, AnalyzeJob, ArchaeologyResponse, StoryTimelineResponse, AdvisorCheckResponse, IdentityDriftResponse, DecisionLinkItem, CognitiveLoadResponse } from '../types/api'
 
 async function getJSON<T>(url: string): Promise<T> {
   const r = await fetch(url)
@@ -78,6 +78,7 @@ export const api = {
   archaeology: (file: string) => getJSON<ArchaeologyResponse>(`/api/archaeology?file=${encodeURIComponent(file)}`),
   storyTimeline: (range = '30d') => getJSON<StoryTimelineResponse>(`/api/story/timeline?range=${encodeURIComponent(range)}`),
   identityDrift: (range = '30d') => getJSON<IdentityDriftResponse>(`/api/identity/drift?range=${encodeURIComponent(range)}`),
+  cognitiveLoad: () => getJSON<CognitiveLoadResponse>('/api/cognitive-load'),
   agentChat: (agent: string, message: string) => postJSON<AgentResponse>('/api/agents/chat', { agent, message }),
   getConfig: () => getJSON<Record<string, string>>('/api/config'),
   setConfig: (data: Record<string, string>) => postJSON<{ status: string }>('/api/config', data),
