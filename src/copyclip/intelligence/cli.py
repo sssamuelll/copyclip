@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import socket
 import subprocess
 import sys
 
@@ -9,7 +10,7 @@ from .db import connect, init_schema
 from .server import run_server
 
 
-COMMANDS = {"analyze", "serve", "start", "decision", "report", "issue", "audit"}
+COMMANDS = {"analyze", "serve", "start", "decision", "report", "issue", "audit", "mcp"}
 
 
 def _use_color() -> bool:
@@ -61,6 +62,26 @@ def _looks_like_project_folder(root: str) -> bool:
         "app",
     ]
     return any(os.path.exists(os.path.join(root, m)) for m in markers)
+
+
+def _port_available(port: int, host: str = "127.0.0.1") -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind((host, int(port)))
+            return True
+        except OSError:
+            return False
+
+
+def _pick_open_port(preferred: int, max_scan: int = 50) -> int:
+    base = int(preferred)
+    if _port_available(base):
+        return base
+    for p in range(base + 1, base + 1 + max_scan):
+        if _port_available(p):
+            return p
+    raise OSError(f"No open port found in range {base}-{base + max_scan}")
 
 def maybe_handle(argv) -> bool:
     if len(argv) < 2 or argv[1] not in COMMANDS:
@@ -117,21 +138,32 @@ def maybe_handle(argv) -> bool:
             gs = res["git_stats"]
             print(_info(f"Git: {gs['git_size_kb']}KB, {gs['branches_count']} branches, {gs['tags_count']} tags"))
 
-        dash_url = f"http://127.0.0.1:{args.port}"
+        selected_port = args.port
+        try:
+            selected_port = _pick_open_port(args.port)
+            if selected_port != args.port:
+                print(_warn(f"Port {args.port} is busy; using {selected_port} instead."))
+        except OSError as e:
+            print(_err(f"Could not find an open port near {args.port}: {e}"))
+            return True
+
+        dash_url = f"http://127.0.0.1:{selected_port}"
         if args.open_browser:
             try:
                 if sys.platform == "darwin":
                     subprocess.Popen(["open", dash_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    print(_info(f"Opening dashboard in browser: {dash_url}"))
+                print(_info(f"Opening dashboard in browser: {dash_url}"))
             except Exception:
-                pass
+                print(_info(f"Dashboard URL: {dash_url}"))
+        else:
+            print(_info(f"Dashboard URL: {dash_url}"))
 
         try:
-            run_server(root, args.port)
+            run_server(root, selected_port)
         except KeyboardInterrupt:
             print("\n" + _info("Stopped."))
         except OSError as e:
-            print(_err(f"Could not start server on port {args.port}: {e}"))
+            print(_err(f"Could not start server on port {selected_port}: {e}"))
         return True
 
     if cmd == "decision":
@@ -430,6 +462,19 @@ Reason: <one concise paragraph>
                     continue
                 print(f"- [score={v['score']}] area={v['area']} vs #dec-{v['decision_id']}: {v['decision_title']}")
                 print(f"  ↳ {v['reason'][:200]}")
+        return True
+
+    if cmd == "mcp":
+        import asyncio
+        from ..mcp_server import main as run_mcp_server
+        p = argparse.ArgumentParser("copyclip mcp")
+        sub = p.add_subparsers(dest="action", required=True)
+        sub.add_parser("start")
+        
+        args = p.parse_args(argv[2:])
+        if args.action == "start":
+            print(_info("Starting CopyClip MCP Intent Oracle (stdio)..."), file=sys.stderr)
+            asyncio.run(run_mcp_server())
         return True
 
     if cmd == "issue":
