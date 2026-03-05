@@ -378,7 +378,7 @@ class OpenAIClient:
         base_payload = {
             "model": self.model,
             "messages": messages,
-            "temperature": 0.7,
+            "temperature": 1.0,
         }
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json", **self.extra_headers}
 
@@ -582,7 +582,7 @@ class AnthropicClient:
             "model": self.model,
             "system": system,
             "messages": user_msgs,
-            "temperature": 0.7,
+            "temperature": 1.0,
             "max_tokens": _MAX_TOKENS,
         }
         headers = {"x-api-key": self.api_key, "Content-Type": "application/json", **self.extra_headers}
@@ -777,7 +777,7 @@ class DeepSeekClient:
         payload = {
             "model": self.model,
             "messages": messages,
-            "temperature": 0.7,
+            "temperature": 1.0,
             "max_tokens": _MAX_TOKENS,
         }
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json", **self.extra_headers}
@@ -878,7 +878,7 @@ class GeminiClient:
 
         payload = {
             "contents": contents,
-            "generationConfig": {"temperature": 0.7}
+            "generationConfig": {"temperature": 1.0}
         }
 
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout)) as sess:
