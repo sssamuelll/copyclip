@@ -7,6 +7,7 @@ const GROUPS = [
       { id: 'atlas', label: 'atlas' },
       { id: 'architecture', label: 'architecture' },
       { id: 'impact', label: 'impact simulator' },
+      { id: 'narrative', label: 'narrative' },
       { id: 'ask', label: 'ask project' },
     ]
   },

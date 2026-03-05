@@ -10,12 +10,13 @@ import { IssuesPage } from './pages/IssuesPage'
 import { ContextBuilderPage } from './pages/ContextBuilderPage'
 import { ImpactSimulatorPage } from './pages/ImpactSimulatorPage'
 import { AskPage } from './pages/AskPage'
+import { NarrativePage } from './pages/NarrativePage'
 import { SettingsPage } from './pages/SettingsPage'
 import { AgentTerminal } from './components/AgentTerminal'
 import { OpsPage } from './pages/OpsPage'
 import type { ArchEdge, ArchNode, AskCitation, ChangeItem, DecisionItem, IssueItem, Overview, RiskItem } from './types/api'
 
-type Page = 'atlas' | 'architecture' | 'impact' | 'context-builder' | 'ask' | 'changes' | 'decisions' | 'risks' | 'issues' | 'ops' | 'settings'
+type Page = 'atlas' | 'architecture' | 'impact' | 'narrative' | 'context-builder' | 'ask' | 'changes' | 'decisions' | 'risks' | 'issues' | 'ops' | 'settings'
 
 export function App() {
   const [page, setPage] = useState<Page>('atlas')
@@ -122,6 +123,7 @@ export function App() {
         {page === 'atlas' && <AtlasPage overview={overview} changes={changes} risks={risks} decisions={decisions} />}
         {page === 'architecture' && <ArchitecturePage nodes={nodes} edges={edges} />}
         {page === 'impact' && <ImpactSimulatorPage />}
+        {page === 'narrative' && <NarrativePage />}
         {page === 'context-builder' && <ContextBuilderPage />}
         {page === 'ask' && <AskPage onOpenCitation={handleOpenCitation} onNotify={notify} />}
         {page === 'changes' && (
