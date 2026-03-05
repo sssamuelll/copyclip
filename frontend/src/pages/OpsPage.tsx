@@ -45,6 +45,16 @@ export function OpsPage({ onNotify }: { onNotify?: (msg: string) => void }) {
     onNotify?.(res.already_running ? 'Analyze already running' : 'Analyze job started')
   }
 
+  const onResumeAnalyze = async () => {
+    try {
+      const res = await api.resumeAnalyzeJob()
+      await refresh()
+      onNotify?.(res.already_running ? 'Analyze already running' : `Analyze resumed${res.resume_from != null ? ` from ${res.resume_from}` : ''}`)
+    } catch (e: any) {
+      onNotify?.(`Resume failed: ${e?.message || 'unknown error'}`)
+    }
+  }
+
   const onCreateRule = async () => {
     await api.upsertAlertRule({
       ...newRule,
@@ -105,6 +115,9 @@ export function OpsPage({ onNotify }: { onNotify?: (msg: string) => void }) {
   }
 
   const activeJob = analysisJobs.find((j) => j.status === 'running' || j.status === 'queued') || null
+  const latestJob = analysisJobs[0] || null
+  const progressRatio = activeJob && activeJob.total > 0 ? Math.min(1, Math.max(0, activeJob.processed / activeJob.total)) : 0
+  const progressPct = Math.round(progressRatio * 100)
 
   return (
     <section>
@@ -112,8 +125,9 @@ export function OpsPage({ onNotify }: { onNotify?: (msg: string) => void }) {
 
       <div className="panel" style={{ marginBottom: 12 }}>
         <h3 style={{ marginTop: 0 }}>project analyze</h3>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <button onClick={onStartAnalyze}>Start incremental analyze</button>
+          <button onClick={onResumeAnalyze}>Resume last failed job</button>
           {activeJob ? (
             <span>
               {activeJob.status} / {activeJob.phase || 'analyzing'} — {activeJob.processed}/{activeJob.total}
@@ -124,6 +138,36 @@ export function OpsPage({ onNotify }: { onNotify?: (msg: string) => void }) {
             <span className="muted">No active analyze job.</span>
           )}
         </div>
+
+        <div style={{ marginTop: 10 }}>
+          <div style={{ height: 8, width: '100%', borderRadius: 8, background: 'var(--panel-2, #222)', overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${progressPct}%`, background: 'var(--accent, #4f8cff)', transition: 'width 150ms linear' }} />
+          </div>
+          <div className="muted" style={{ marginTop: 6 }}>
+            {activeJob
+              ? `${progressPct}% complete • checkpoint ${activeJob.checkpoint_cursor ?? activeJob.processed} • every ${activeJob.checkpoint_every ?? 500}`
+              : latestJob
+                ? `Last job: ${latestJob.status} (${latestJob.processed}/${latestJob.total}) ${latestJob.finished_at ? `at ${latestJob.finished_at.slice(0, 19)}` : ''}`
+                : 'No analyze jobs yet.'}
+          </div>
+        </div>
+      </div>
+
+      <div className="panel" style={{ marginBottom: 12 }}>
+        <h3 style={{ marginTop: 0 }}>recent analyze jobs</h3>
+        {analysisJobs.length === 0 ? (
+          <div className="muted">No jobs yet.</div>
+        ) : (
+          <ul>
+            {analysisJobs.slice(0, 8).map((j) => (
+              <li key={j.id}>
+                {j.id.slice(0, 8)} — {j.status} / {j.phase || 'n/a'} — {j.processed}/{j.total}
+                {j.checkpoint_cursor != null ? ` • cp:${j.checkpoint_cursor}` : ''}
+                {j.eta_sec != null ? ` • ETA ${j.eta_sec}s` : ''}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <div className="panel" style={{ marginBottom: 12 }}>

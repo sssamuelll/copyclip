@@ -145,6 +145,8 @@ export type AnalyzeJob = {
   processed: number
   total: number
   message?: string
+  checkpoint_cursor?: number
+  checkpoint_every?: number
   started_at?: string
   finished_at?: string | null
   throughput_fps?: number | null

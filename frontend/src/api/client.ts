@@ -60,6 +60,7 @@ export const api = {
   schedulerState: () => getJSON<SchedulerState>('/api/alerts/scheduler'),
   setSchedulerState: (data: Partial<SchedulerState>) => postJSON<{ ok: boolean; scheduler: SchedulerState }>('/api/alerts/scheduler', data),
   startAnalyzeJob: () => postJSON<{ ok: boolean; job_id: string; already_running: boolean }>('/api/analyze/start', {}),
+  resumeAnalyzeJob: () => postJSON<{ ok: boolean; job_id: string; already_running: boolean; resume_from?: number }>('/api/analyze/resume', {}),
   analyzeStatus: () => getJSON<{ items: AnalyzeJob[] }>('/api/analyze/status'),
   upsertAlertRule: (rule: { name: string; kind?: string; severity?: string; min_score?: number; cooldown_min?: number; enabled?: boolean }) => postJSON<{ ok: boolean; name: string }>('/api/alerts/rules', rule),
   updateAlertRule: (id: number, patch: Partial<{ name: string; kind: string; severity: string; min_score: number; cooldown_min: number; enabled: boolean }>) =>
