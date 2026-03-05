@@ -150,8 +150,22 @@ body {
 .sev-row { display: grid; grid-template-columns: 44px 1fr 30px; gap: 8px; align-items: center; margin-bottom: 8px; }
 .sev-track { height: 18px; background: var(--bg-active); }
 
+.arch-body { display: grid; grid-template-columns: 1.5fr 1fr; gap: 12px; }
+.graph-area { border: 1px solid var(--border); background: var(--bg-elevated); padding: 14px; min-height: 420px; }
+.graph-grid { display: grid; grid-template-columns: repeat(3, minmax(120px, 1fr)); gap: 10px; }
+.graph-node {
+  border: 1px solid var(--border);
+  background: rgba(107,114,128,.08);
+  padding: 10px;
+  cursor: pointer;
+}
+.graph-node:hover, .graph-node.active { border-color: var(--accent-cyan); background: rgba(6,182,212,.12); }
+.side-panel { border: 1px solid var(--border); background: var(--panel); }
+.panel-block { padding: 12px; border-bottom: 1px solid var(--border); }
+
 @media (max-width: 1200px) {
   .kpi-row { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
-  .content-columns, .split, .risk-top-row { grid-template-columns: 1fr; }
+  .content-columns, .split, .risk-top-row, .arch-body { grid-template-columns: 1fr; }
   .sidebar { width: 210px; min-width: 210px; }
+  .graph-grid { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
 }
