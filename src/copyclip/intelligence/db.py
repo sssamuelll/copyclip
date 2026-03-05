@@ -290,24 +290,50 @@ def init_schema(conn: sqlite3.Connection) -> None:
 # Brief: get_active_decisions
 
 def get_active_decisions(project_root: str):
+    """Return active human decisions for a project, robustly.
+
+    Includes decision id and optional link patterns when available.
+    Safe fallback: empty list on any error.
+    """
     try:
         root = str(Path(project_root).resolve())
-        db = db_path(root)
-        if not Path(db).exists():
-            return []
-        conn = sqlite3.connect(db)
-        conn.row_factory = sqlite3.Row
+        conn = connect(root)
+        init_schema(conn)
+
         row = conn.execute("SELECT id FROM projects WHERE root_path=?", (root,)).fetchone()
         if not row:
             conn.close()
             return []
-        pid = row[0]
+        pid = int(row[0])
+
         rows = conn.execute(
-            "SELECT title, summary, status FROM decisions WHERE project_id=? AND status IN ('accepted', 'resolved') ORDER BY id DESC",
+            """
+            SELECT id, title, summary, status
+            FROM decisions
+            WHERE project_id=? AND status IN ('accepted', 'resolved')
+            ORDER BY id DESC
+            """,
             (pid,),
         ).fetchall()
-        res = [dict(r) for r in rows]
+
+        out = []
+        for r in rows:
+            did = int(r[0])
+            lrows = conn.execute(
+                "SELECT link_type, target_pattern FROM decision_links WHERE project_id=? AND decision_id=? ORDER BY id DESC",
+                (pid, did),
+            ).fetchall()
+            out.append(
+                {
+                    "id": did,
+                    "title": r[1],
+                    "summary": r[2] or "",
+                    "status": r[3],
+                    "links": [{"link_type": lr[0], "target_pattern": lr[1]} for lr in lrows],
+                }
+            )
+
         conn.close()
-        return res
+        return out
     except Exception:
         return []

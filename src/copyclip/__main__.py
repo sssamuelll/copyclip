@@ -304,16 +304,25 @@ def main():
             if flow_diagrams:
                 output_parts.append("\n\n".join(flow_diagrams))
 
-        # --- Inject Project Decisions ---
+        # --- Inject Project Decisions / Intent Manifesto ---
         if not args.no_decisions:
             decisions = get_active_decisions(base_path)
             if decisions:
-                d_parts = ["# PROJECT RULES & DECISIONS"]
+                d_parts = [
+                    "## 🎯 ACTIVE ARCHITECTURAL INTENT & DECISIONS",
+                    "> Human-defined constraints for this project.",
+                    "",
+                ]
                 for d in decisions:
-                    d_parts.append(f"## {d['title']}")
-                    if d['summary']:
-                        d_parts.append(d['summary'])
-                output_parts.insert(0, "\n\n".join(d_parts))
+                    did = d.get('id', '?')
+                    title = d.get('title', 'Untitled decision')
+                    summary = (d.get('summary') or '').strip()
+                    line = f"- [{did}] {title}: {summary or '(no summary)'}"
+                    d_parts.append(line)
+                    links = d.get('links') or []
+                    for l in links[:6]:
+                        d_parts.append(f"  - link: {l.get('link_type')} => {l.get('target_pattern')}")
+                output_parts.insert(0, "\n".join(d_parts).strip())
 
         final_output = "\n\n".join(output_parts)
 
