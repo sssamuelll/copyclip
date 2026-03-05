@@ -209,7 +209,16 @@ class CopyClipAgent:
     async def _fetch_artifact_data(self, name: str) -> Any:
         """Fetch raw data for UI components based on tool usage."""
         conn = connect(self.root)
-        pid = conn.execute("SELECT id FROM projects WHERE root_path=?", (str(Path(self.root).resolve()),)).fetchone()[0]
+        row = conn.execute("SELECT id FROM projects WHERE root_path=?", (str(Path(self.root).resolve()),)).fetchone()
+        if not row:
+            # Try by just the folder name as fallback or current working directory
+            row = conn.execute("SELECT id FROM projects ORDER BY id DESC LIMIT 1").fetchone()
+        
+        if not row:
+            conn.close()
+            return {"error": "Project not found in intelligence database."}
+            
+        pid = row[0]
         
         if name == "architecture":
             nodes = [{"name": r[0]} for r in conn.execute("SELECT name FROM modules WHERE project_id=? ORDER BY name", (pid,)).fetchall()]
