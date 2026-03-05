@@ -427,6 +427,65 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 }))
                 return
 
+            if parsed.path == "/api/story/timeline":
+                if not pid:
+                    self._json(with_meta({"items": [], "total": 0, "range_days": 30}))
+                    return
+
+                q = parse_qs(parsed.query or "")
+                raw_range = (q.get("range", ["30d"])[0] or "30d").strip().lower()
+                m = re.match(r"^(\d+)(d)?$", raw_range)
+                range_days = int(m.group(1)) if m else 30
+                range_days = max(1, min(range_days, 365))
+
+                rows = conn.execute(
+                    """
+                    SELECT id, generated_at, focus_areas_json, major_changes_json, open_questions_json, summary_json
+                    FROM story_snapshots
+                    WHERE project_id=? AND datetime(generated_at) >= datetime('now', ?)
+                    ORDER BY datetime(generated_at) DESC
+                    LIMIT 200
+                    """,
+                    (pid, f"-{range_days} days"),
+                ).fetchall()
+
+                items = []
+                for r in rows:
+                    try:
+                        focus_areas = json.loads(r[2] or "[]")
+                    except Exception:
+                        focus_areas = []
+                    try:
+                        major_changes = json.loads(r[3] or "[]")
+                    except Exception:
+                        major_changes = []
+                    try:
+                        open_questions = json.loads(r[4] or "[]")
+                    except Exception:
+                        open_questions = []
+                    try:
+                        summary = json.loads(r[5] or "{}")
+                    except Exception:
+                        summary = {}
+
+                    items.append(
+                        {
+                            "id": int(r[0]),
+                            "generated_at": r[1],
+                            "focus_areas": focus_areas,
+                            "major_changes": major_changes,
+                            "open_questions": open_questions,
+                            "summary": summary,
+                        }
+                    )
+
+                self._json(with_meta({
+                    "items": items,
+                    "total": len(items),
+                    "range_days": range_days,
+                }))
+                return
+
             if parsed.path == "/api/overview":
                 if not pid:
                     self._json(with_meta({"files": 0, "commits": 0, "decisions": 0, "modules": 0, "risks": 0, "issues": 0, "pulls": 0, "story": ""}))
