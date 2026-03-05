@@ -8,6 +8,7 @@ import threading
 import time
 import uuid
 import subprocess
+from fnmatch import fnmatch
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -839,6 +840,88 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     (decision_id,),
                 ).fetchall()
                 self._json(with_meta({"items": [{"ref_type": r[0], "ref_value": r[1]} for r in rows]}))
+                return
+
+            if parsed.path.startswith("/api/decisions/") and parsed.path.endswith("/links"):
+                if not pid:
+                    self._json(with_meta({"items": []}))
+                    return
+                parts = parsed.path.strip("/").split("/")
+                if len(parts) != 4:
+                    self._json({"error": "invalid_path"}, 400)
+                    return
+                try:
+                    decision_id = int(parts[2])
+                except Exception:
+                    self._json({"error": "invalid_decision_id"}, 400)
+                    return
+
+                rows = conn.execute(
+                    """
+                    SELECT id, link_type, target_pattern, created_at
+                    FROM decision_links
+                    WHERE project_id=? AND decision_id=?
+                    ORDER BY id DESC
+                    """,
+                    (pid, decision_id),
+                ).fetchall()
+                self._json(with_meta({
+                    "items": [
+                        {
+                            "id": int(r[0]),
+                            "link_type": r[1],
+                            "target_pattern": r[2],
+                            "created_at": r[3],
+                        }
+                        for r in rows
+                    ]
+                }))
+                return
+
+            if parsed.path == "/api/decision-links":
+                if not pid:
+                    self._json(with_meta({"items": []}))
+                    return
+                q = parse_qs(parsed.query or "")
+                path = (q.get("path", [""])[0] or "").strip()
+                module = (q.get("module", [""])[0] or "").strip()
+
+                rows = conn.execute(
+                    """
+                    SELECT dl.id, dl.decision_id, d.title, d.status, dl.link_type, dl.target_pattern, dl.created_at
+                    FROM decision_links dl
+                    JOIN decisions d ON d.id = dl.decision_id
+                    WHERE dl.project_id=?
+                    ORDER BY dl.id DESC
+                    """,
+                    (pid,),
+                ).fetchall()
+
+                items = []
+                for r in rows:
+                    link_type = (r[4] or "").strip()
+                    target_pattern = (r[5] or "").strip()
+                    matched = False
+                    if link_type == "file_glob" and path:
+                        matched = fnmatch(path, target_pattern)
+                    elif link_type == "module" and module:
+                        matched = module == target_pattern
+
+                    if path or module:
+                        if not matched:
+                            continue
+
+                    items.append({
+                        "id": int(r[0]),
+                        "decision_id": int(r[1]),
+                        "decision_title": r[2],
+                        "decision_status": r[3],
+                        "link_type": link_type,
+                        "target_pattern": target_pattern,
+                        "created_at": r[6],
+                    })
+
+                self._json(with_meta({"items": items, "total": len(items)}))
                 return
 
             if parsed.path.startswith("/api/decisions/") and parsed.path.endswith("/history"):
@@ -1838,6 +1921,46 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 conn.commit()
                 publish_event("decision.ref_added", {"decision_id": decision_id, "ref_type": ref_type, "ref_value": ref_value})
                 self._json({"ok": True, "decision_id": decision_id, "ref_type": ref_type, "ref_value": ref_value})
+                return
+
+            if parsed.path.startswith("/api/decisions/") and parsed.path.endswith("/links"):
+                parts = parsed.path.strip("/").split("/")
+                if len(parts) != 4:
+                    self._json({"error": "invalid_path"}, 400)
+                    return
+                try:
+                    decision_id = int(parts[2])
+                except Exception:
+                    self._json({"error": "invalid_decision_id"}, 400)
+                    return
+
+                length = int(self.headers.get("Content-Length", "0"))
+                raw = self.rfile.read(length) if length else b"{}"
+                data = json.loads(raw.decode("utf-8"))
+                link_type = (data.get("link_type") or "file_glob").strip()
+                target_pattern = (data.get("target_pattern") or "").strip()
+                allowed = {"file_glob", "module"}
+                if link_type not in allowed:
+                    self._json({"error": "invalid_link_type", "allowed": sorted(allowed)}, 400)
+                    return
+                if not target_pattern:
+                    self._json({"error": "target_pattern_required"}, 400)
+                    return
+
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO decision_links(project_id,decision_id,link_type,target_pattern)
+                    VALUES(?,?,?,?)
+                    """,
+                    (pid, decision_id, link_type, target_pattern),
+                )
+                conn.execute(
+                    "INSERT INTO decision_history(decision_id,action,from_status,to_status,note) VALUES(?,?,?,?,?)",
+                    (decision_id, "link_added", None, None, f"{link_type}: {target_pattern}"),
+                )
+                conn.commit()
+                publish_event("decision.link_added", {"decision_id": decision_id, "link_type": link_type, "target_pattern": target_pattern})
+                self._json({"ok": True, "decision_id": decision_id, "link_type": link_type, "target_pattern": target_pattern})
                 return
 
             self._json({"error": "not_found"}, 404)

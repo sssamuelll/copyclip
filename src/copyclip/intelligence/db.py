@@ -97,6 +97,16 @@ def init_schema(conn: sqlite3.Connection) -> None:
             ref_value TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS decision_links (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            decision_id INTEGER NOT NULL,
+            link_type TEXT NOT NULL,
+            target_pattern TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(project_id, decision_id, link_type, target_pattern)
+        );
+
         CREATE TABLE IF NOT EXISTS decision_history (
             id INTEGER PRIMARY KEY,
             decision_id INTEGER NOT NULL,
