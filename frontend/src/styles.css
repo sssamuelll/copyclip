@@ -129,7 +129,7 @@ body {
 
 .commit-sha { color: var(--accent-green); font-size: 12px; }
 .commit-msg { font-size: 12px; flex: 1; }
-.commit-meta { font-size: 11px; color: var(--text-tertiary); }
+.commit-meta { font-size: 11px; color: #8b95a7; }
 
 .badge {
   font-size: 10px;
@@ -147,7 +147,7 @@ body {
 .status-accepted { color: var(--accent-green); border-color: var(--accent-green); background: rgba(16,185,129,.12); }
 .status-resolved, .status-superseded { color: var(--text-secondary); border-color: var(--text-secondary); background: rgba(107,114,128,.12); }
 
-.table { border: 1px solid var(--border); }
+.table { border: 1px solid var(--border); overflow: auto; max-height: 62vh; }
 .table-header, .table-row {
   display: grid;
   grid-template-columns: 90px 1fr 130px 90px;
@@ -155,8 +155,17 @@ body {
   align-items: center;
   padding: 10px 14px;
 }
-.table-header { font-size: 10px; color: var(--text-tertiary); border-bottom: 1px solid var(--border); background: var(--bg-elevated); }
+.table-header {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
 .table-row { border-bottom: 1px solid var(--border); cursor: pointer; transition: background .14s ease; }
+.table-row:nth-child(even) { background: rgba(255,255,255,0.015); }
 .table-row:hover, .table-row.selected { background: var(--bg-active); }
 
 .split { display: grid; grid-template-columns: 1.2fr 1fr; gap: 12px; }
@@ -178,7 +187,7 @@ body {
 .btn.primary:hover { filter: brightness(1.04); }
 
 .error { border: 1px solid #7f1d1d; background: #2a1111; color: #fecaca; padding: 10px; }
-.muted { color: var(--text-secondary); }
+.muted { color: #a1a8b5; }
 
 .risk-top-row { display: grid; grid-template-columns: 1.2fr 1fr; gap: 12px; }
 .severity-panel, .escalated-panel { border: 1px solid var(--border); background: var(--panel); padding: 14px; }
