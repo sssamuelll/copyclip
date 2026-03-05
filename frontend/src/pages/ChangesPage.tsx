@@ -2,7 +2,15 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 import type { ArchaeologyResponse, ChangeItem, FileItem } from '../types/api'
 
-export function ChangesPage({ items, focusCommitId }: { items: ChangeItem[]; focusCommitId?: string | null }) {
+export function ChangesPage({
+  items,
+  focusCommitId,
+  onOpenDecision,
+}: {
+  items: ChangeItem[]
+  focusCommitId?: string | null
+  onOpenDecision?: (id: number) => void
+}) {
   const sorted = [...items]
   const highImpact = sorted.slice(0, 3)
   const latest = sorted[0]
@@ -112,9 +120,10 @@ export function ChangesPage({ items, focusCommitId }: { items: ChangeItem[]; foc
                 <div style={{ display: 'grid', gap: 8 }}>
                   {arch.related_decisions.length ? arch.related_decisions.map((d) => (
                     <div key={d.id} className="row-item" style={{ margin: 0, border: '1px solid var(--border)', flexDirection: 'column', alignItems: 'flex-start' }}>
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%' }}>
                         <span className={`status-badge status-${normalizeStatus(d.status)}`}>{d.status}</span>
                         <span className="muted" style={{ fontSize: 11 }}>#dec-{String(d.id).padStart(3, '0')}</span>
+                        <button className="btn" style={{ marginLeft: 'auto' }} onClick={() => onOpenDecision?.(d.id)}>open</button>
                       </div>
                       <div style={{ fontSize: 12 }}>{d.title}</div>
                       <div className="muted" style={{ fontSize: 11 }}>refs: {d.matched_refs.map((r) => `${r.ref_type}:${r.ref_value}`).join(', ')}</div>

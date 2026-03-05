@@ -124,7 +124,18 @@ export function App() {
         {page === 'impact' && <ImpactSimulatorPage />}
         {page === 'context-builder' && <ContextBuilderPage />}
         {page === 'ask' && <AskPage onOpenCitation={handleOpenCitation} onNotify={notify} />}
-        {page === 'changes' && <ChangesPage items={changes} focusCommitId={focusCommitId} />}
+        {page === 'changes' && (
+          <ChangesPage
+            items={changes}
+            focusCommitId={focusCommitId}
+            onOpenDecision={(id) => {
+              setFocusDecisionId(id)
+              setFocusRiskArea(null)
+              setFocusCommitId(null)
+              setPage('decisions')
+            }}
+          />
+        )}
         {page === 'decisions' && <DecisionsPage items={decisions} focusDecisionId={focusDecisionId} />}
         {page === 'risks' && <RisksPage items={risks} focusRiskArea={focusRiskArea} />}
         {page === 'issues' && <IssuesPage items={issues} />}
