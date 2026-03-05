@@ -11,9 +11,7 @@ import { ImpactSimulatorPage } from './pages/ImpactSimulatorPage'
 
 import { Atlas3DPage } from './pages/Atlas3DPage'
 import { TimelinePage } from './pages/TimelinePage'
-
-// Placeholders for new pages
-const PlanningPage = () => <div className="page-container"><h1>Planning Kanban</h1><p className="muted">Task and intent management board.</p></div>
+import { PlanningPage } from './pages/PlanningPage'
 
 import type { ArchEdge, ArchNode, DecisionItem, Overview, RiskItem } from './types/api'
 
