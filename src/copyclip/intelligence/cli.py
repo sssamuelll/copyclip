@@ -9,7 +9,7 @@ from .db import connect, init_schema
 from .server import run_server
 
 
-COMMANDS = {"analyze", "serve", "start", "decision", "report", "issue"}
+COMMANDS = {"analyze", "serve", "start", "decision", "report", "issue", "audit"}
 
 
 def _use_color() -> bool:
@@ -150,6 +150,12 @@ def maybe_handle(argv) -> bool:
         resolve.add_argument("id", type=int)
         resolve.add_argument("--path", default=".")
 
+        link = sub.add_parser("link")
+        link.add_argument("id", type=int)
+        link.add_argument("--path", default=".")
+        link.add_argument("--type", dest="link_type", choices=["file_glob", "module"], default="file_glob")
+        link.add_argument("--target", required=True, help="Glob or module name to anchor this decision to")
+
         args = p.parse_args(argv[2:])
         root = os.path.abspath(args.path)
         conn = connect(root)
@@ -189,6 +195,23 @@ def maybe_handle(argv) -> bool:
             print(f"[INFO] Decision #{args.id} resolved")
             return True
 
+        if args.action == "link":
+            did_row = conn.execute("SELECT id, title FROM decisions WHERE id=? AND project_id=?", (args.id, pid)).fetchone()
+            if not did_row:
+                print(f"[ERROR] Decision #{args.id} not found")
+                return True
+            conn.execute(
+                "INSERT OR IGNORE INTO decision_links(project_id,decision_id,link_type,target_pattern) VALUES(?,?,?,?)",
+                (pid, args.id, args.link_type, args.target),
+            )
+            conn.execute(
+                "INSERT INTO decision_history(decision_id,action,from_status,to_status,note) VALUES(?,?,?,?,?)",
+                (args.id, "link_added", None, None, f"{args.link_type}: {args.target}"),
+            )
+            conn.commit()
+            print(f"[INFO] Linked Decision #{args.id} ({did_row['title']}) -> {args.link_type}:{args.target}")
+            return True
+
     if cmd == "report":
         p = argparse.ArgumentParser("copyclip report")
         p.add_argument("--path", default=".")
@@ -213,6 +236,73 @@ def maybe_handle(argv) -> bool:
         print(f"- Modules mapped: {modules}")
         print(f"- Risks detected: {risks}")
         print(f"- Decisions tracked: {decisions}")
+        return True
+
+    if cmd == "audit":
+        p = argparse.ArgumentParser("copyclip audit")
+        p.add_argument("--path", default=".")
+        p.add_argument("--json", action="store_true", dest="as_json")
+        p.add_argument("--limit", type=int, default=20)
+        args = p.parse_args(argv[2:])
+
+        root = os.path.abspath(args.path)
+        conn = connect(root)
+        init_schema(conn)
+        row = conn.execute("SELECT id FROM projects WHERE root_path=?", (root,)).fetchone()
+        if not row:
+            print("[ERROR] Run 'copyclip analyze' first")
+            return True
+        pid = row[0]
+
+        link_count = conn.execute("SELECT COUNT(*) FROM decision_links WHERE project_id=?", (pid,)).fetchone()[0]
+        decision_count = conn.execute("SELECT COUNT(*) FROM decisions WHERE project_id=?", (pid,)).fetchone()[0]
+        intent_risks = conn.execute(
+            """
+            SELECT area, severity, score, rationale, created_at
+            FROM risks
+            WHERE project_id=? AND kind='intent_drift'
+            ORDER BY score DESC, id DESC
+            LIMIT ?
+            """,
+            (pid, max(1, min(args.limit, 200))),
+        ).fetchall()
+
+        unresolved = conn.execute(
+            "SELECT COUNT(*) FROM decisions WHERE project_id=? AND status IN ('proposed','unresolved')",
+            (pid,),
+        ).fetchone()[0]
+
+        payload = {
+            "decision_links": int(link_count),
+            "decisions_total": int(decision_count),
+            "decisions_unresolved": int(unresolved),
+            "intent_drift_risks": [
+                {
+                    "area": r[0],
+                    "severity": r[1],
+                    "score": int(r[2] or 0),
+                    "rationale": r[3] or "",
+                    "created_at": r[4],
+                }
+                for r in intent_risks
+            ],
+        }
+
+        if args.as_json:
+            print(json.dumps(payload))
+            return True
+
+        print(_ok("Intent Audit"))
+        print(_info(f"Decision links: {payload['decision_links']} | Decisions: {payload['decisions_total']} | Unresolved: {payload['decisions_unresolved']}"))
+        if not payload["intent_drift_risks"]:
+            print(_ok("No intent-drift risks detected."))
+            return True
+
+        print(_warn(f"Detected {len(payload['intent_drift_risks'])} intent-drift risk signals:"))
+        for i, r in enumerate(payload["intent_drift_risks"], start=1):
+            print(f"{i:02d}. [{r['severity']}] score={r['score']} area={r['area']}")
+            if r.get("rationale"):
+                print(f"    ↳ {r['rationale'][:180]}")
         return True
 
     if cmd == "issue":
