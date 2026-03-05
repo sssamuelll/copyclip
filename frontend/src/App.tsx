@@ -109,7 +109,11 @@ export function App() {
 
   return (
     <div className="app">
-      <Sidebar page={page} setPage={(v) => setPage(v as Page)} />
+      <Sidebar
+        page={page}
+        setPage={(v) => setPage(v as Page)}
+        lastIndexedText={overview?.meta?.generated_at ? `last indexed ${overview.meta.generated_at.replace('T', ' ').slice(0, 19)}` : 'last indexed n/a'}
+      />
       <main className="main">
         {error && <div className="error">API error: {error}. Make sure `copyclip start` is running.</div>}
         <div className="muted" style={{ fontSize: '0.75rem' }}>
