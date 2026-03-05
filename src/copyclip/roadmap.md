@@ -57,13 +57,14 @@
 1. README + GIF demo
 2. PyPI release
 3. Cache + telemetry + cost report
-4. Blog post / thread → adoption
+4. Intent Anchoring (Phase 1: Decision-to-Code linkage)
 
 ---
 
-# 🏆 10/10 Milestones
+# 🏆 10/10 Milestones: The "Intent Engine"
 
-- VSCode extension released
-- GitHub Action used in real PRs
-- First contributors onboarded
-- Active community adoption
+- **Cognitive Load Heatmap:** Visualizing "Fog of War" (unreviewed/agentic code) in the dashboard.
+- **Narrative Evolution UI:** Timeline of "Logic Story" instead of just Git diffs.
+- **Drift Detector (Audit):** Automatic detection of code changes that violate human architectural decisions.
+- **VSCode Extension:** Integrated intent-aware handoffs.
+- **Agent Constraints Generator:** Exportable `.copyclip/constraints.json` for external agents.
