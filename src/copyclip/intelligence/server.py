@@ -924,6 +924,67 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 self._json(with_meta({"items": items, "total": len(items)}))
                 return
 
+            if parsed.path == "/api/intent/manifesto":
+                if not pid:
+                    self._json(with_meta({"manifesto": "", "decisions": [], "constraints": []}))
+                    return
+
+                drows = conn.execute(
+                    """
+                    SELECT id, title, summary, status
+                    FROM decisions
+                    WHERE project_id=? AND status IN ('accepted','resolved')
+                    ORDER BY id DESC
+                    LIMIT 80
+                    """,
+                    (pid,),
+                ).fetchall()
+
+                decisions = []
+                for dr in drows:
+                    did = int(dr[0])
+                    lrows = conn.execute(
+                        "SELECT link_type, target_pattern FROM decision_links WHERE project_id=? AND decision_id=? ORDER BY id DESC",
+                        (pid, did),
+                    ).fetchall()
+                    links = [{"link_type": lr[0], "target_pattern": lr[1]} for lr in lrows]
+                    decisions.append({
+                        "id": did,
+                        "title": dr[1],
+                        "summary": dr[2] or "",
+                        "status": dr[3],
+                        "links": links,
+                    })
+
+                constraints = []
+                for d in decisions:
+                    if d.get("links"):
+                        link_txt = ", ".join([f"{l['link_type']}:{l['target_pattern']}" for l in d["links"][:8]])
+                        constraints.append(f"Decision #{d['id']} applies to {link_txt}")
+                    else:
+                        constraints.append(f"Decision #{d['id']} has no explicit link patterns yet")
+
+                lines = ["## INTENT MANIFESTO", ""]
+                if decisions:
+                    for d in decisions:
+                        lines.append(f"### Decision #{d['id']}: {d['title']}")
+                        if d.get("summary"):
+                            lines.append(d["summary"])
+                        if d.get("links"):
+                            for l in d["links"][:10]:
+                                lines.append(f"- link: {l['link_type']} => {l['target_pattern']}")
+                        lines.append("")
+                else:
+                    lines.append("No active accepted/resolved decisions found.")
+
+                manifesto = "\n".join(lines).strip()
+                self._json(with_meta({
+                    "manifesto": manifesto,
+                    "decisions": decisions,
+                    "constraints": constraints,
+                }))
+                return
+
             if parsed.path.startswith("/api/decisions/") and parsed.path.endswith("/history"):
                 if not pid:
                     self._json(with_meta({"items": [], "total": 0, "limit": 0, "offset": 0}))
@@ -1770,8 +1831,38 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     compact_bundle = build_context_bundle(conn, pid, compact_query, max_files=25)
                     selected_files = compact_bundle.get("selected_files", [])
 
-                # 1. Decisions
+                # 1. Intent Manifesto + Decisions
                 if include_decisions:
+                    drows = conn.execute(
+                        """
+                        SELECT id, title, summary, status
+                        FROM decisions
+                        WHERE project_id=? AND status IN ('accepted','resolved')
+                        ORDER BY id DESC
+                        LIMIT 80
+                        """,
+                        (pid,),
+                    ).fetchall()
+
+                    if drows:
+                        lines = ["## INTENT MANIFESTO", ""]
+                        for dr in drows:
+                            did = int(dr[0])
+                            title = dr[1]
+                            summary = dr[2] or ""
+                            lines.append(f"### Decision #{did}: {title}")
+                            if summary:
+                                lines.append(summary)
+                            lrows = conn.execute(
+                                "SELECT link_type, target_pattern FROM decision_links WHERE project_id=? AND decision_id=? ORDER BY id DESC",
+                                (pid, did),
+                            ).fetchall()
+                            for lr in lrows[:10]:
+                                lines.append(f"- link: {lr[0]} => {lr[1]}")
+                            lines.append("")
+                        prompt_parts.append("\n".join(lines).strip())
+
+                    # Keep legacy header for compatibility with existing prompts/tools.
                     decs = get_active_decisions(root)
                     if decs:
                         d_p = ["# PROJECT RULES & DECISIONS"]
