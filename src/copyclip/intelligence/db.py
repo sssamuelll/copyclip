@@ -249,6 +249,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             module TEXT,
             imports_json TEXT,
             complexity INTEGER DEFAULT 0,
+            cognitive_debt REAL DEFAULT 0,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(project_id, path)
         );
@@ -281,6 +282,14 @@ def init_schema(conn: sqlite3.Connection) -> None:
                 conn.execute("ALTER TABLE analysis_jobs ADD COLUMN checkpoint_cursor INTEGER DEFAULT 0")
             if "checkpoint_every" not in job_cols:
                 conn.execute("ALTER TABLE analysis_jobs ADD COLUMN checkpoint_every INTEGER DEFAULT 500")
+    except Exception:
+        pass
+
+    # Backfill cognitive debt for file insights (CCIA module-2).
+    try:
+        afi_cols = {row[1] for row in conn.execute("PRAGMA table_info(analysis_file_insights)").fetchall()}
+        if afi_cols and "cognitive_debt" not in afi_cols:
+            conn.execute("ALTER TABLE analysis_file_insights ADD COLUMN cognitive_debt REAL DEFAULT 0")
     except Exception:
         pass
 

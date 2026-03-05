@@ -3,6 +3,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from fnmatch import fnmatch
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -30,6 +31,8 @@ DRIFT_THRESHOLDS = {
     "risk_concentration_high": 65.0,
 }
 DRIFT_CALIBRATION_VERSION = "v1.1"
+
+AGENT_SIGNATURES = ["cursor", "windsurf", "agent", "github-actions", "bot"]
 
 
 class AnalysisCanceled(Exception):
@@ -428,7 +431,7 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
         for row in prev_state_rows
     }
     prev_insight_rows = conn.execute(
-        "SELECT path, module, imports_json, complexity FROM analysis_file_insights WHERE project_id=?",
+        "SELECT path, module, imports_json, complexity, COALESCE(cognitive_debt,0) FROM analysis_file_insights WHERE project_id=?",
         (project_id,),
     ).fetchall()
     prev_insights = {}
@@ -443,6 +446,7 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
             "module": row[1] or "root",
             "imports": imports,
             "complexity": int(row[3] or 0),
+            "cognitive_debt": float(row[4] or 0),
         }
 
     next_state = {}
@@ -569,6 +573,7 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
                             "module": cached_mod,
                             "imports": list(cached_imports),
                             "complexity": int(cached.get("complexity") or 0),
+                            "cognitive_debt": float(cached.get("cognitive_debt") or 0),
                         }
                         reused_insight = True
                         skipped_parse_files += 1
@@ -586,6 +591,7 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
                         "module": mod,
                         "imports": imports,
                         "complexity": cscore,
+                        "cognitive_debt": 0.0,
                     }
                 except Exception:
                     pass
@@ -651,6 +657,70 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
                 "INSERT INTO file_changes(project_id,commit_sha,file_path,additions,deletions) VALUES(?,?,?,?,?)",
                 (project_id, current_sha, line, 0, 0),
             )
+
+    # Cognitive debt scoring (CCIA module-2):
+    # Score = (Agent_Lines / Total_Lines) * 100 * TimeSinceLastHumanReviewFactor
+    # Agent lines detected by author signatures from git blame.
+    now_ts = time.time()
+    debt_values = []
+    blame_candidates = {p for p, _ in churn.most_common(25)}
+
+    for rel, ins in next_insights.items():
+        _check_canceled()
+        if not rel:
+            continue
+
+        # Keep analysis fast: only recompute blame for churn-active files.
+        if rel not in blame_candidates:
+            ins["cognitive_debt"] = float(ins.get("cognitive_debt") or 0.0)
+            debt_values.append(float(ins.get("cognitive_debt") or 0.0))
+            continue
+
+        blame = _safe_git(root, ["blame", "--line-porcelain", "--", rel])
+        if not blame:
+            ins["cognitive_debt"] = float(ins.get("cognitive_debt") or 0.0)
+            debt_values.append(float(ins.get("cognitive_debt") or 0.0))
+            continue
+
+        total_lines = 0
+        agent_lines = 0
+        current_author = ""
+        current_author_time = 0
+        last_human_ts = 0
+
+        for bline in blame.splitlines():
+            if bline.startswith("author "):
+                current_author = (bline[7:] or "").strip().lower()
+            elif bline.startswith("author-time "):
+                try:
+                    current_author_time = int((bline.split(" ", 1)[1] or "0").strip())
+                except Exception:
+                    current_author_time = 0
+            elif bline.startswith("\t"):
+                total_lines += 1
+                is_agent = any(sig in current_author for sig in AGENT_SIGNATURES)
+                if is_agent:
+                    agent_lines += 1
+                else:
+                    if current_author_time > last_human_ts:
+                        last_human_ts = current_author_time
+
+        if total_lines <= 0:
+            score = 0.0
+        else:
+            ratio = agent_lines / float(total_lines)
+            if last_human_ts > 0:
+                days_since_human = max(0.0, (now_ts - float(last_human_ts)) / 86400.0)
+            else:
+                # If we cannot find human lines, treat as high review staleness.
+                days_since_human = 120.0
+            time_factor = 1.0 + min(1.5, days_since_human / 30.0)
+            score = min(100.0, (ratio * 100.0) * time_factor)
+
+        ins["cognitive_debt"] = round(float(score), 2)
+        debt_values.append(ins["cognitive_debt"])
+
+    avg_cognitive_debt = round((sum(debt_values) / max(1, len(debt_values))), 2)
 
     if progress_cb:
         progress_cb(PHASE_RISK_SIGNALS, indexed, total_files, "computing risk signals")
@@ -791,8 +861,15 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
     conn.execute("DELETE FROM analysis_file_insights WHERE project_id=?", (project_id,))
     for rel, ins in next_insights.items():
         conn.execute(
-            "INSERT INTO analysis_file_insights(project_id,path,module,imports_json,complexity,updated_at) VALUES(?,?,?,?,?,CURRENT_TIMESTAMP)",
-            (project_id, rel, ins.get("module") or "root", json.dumps(ins.get("imports") or []), int(ins.get("complexity") or 0)),
+            "INSERT INTO analysis_file_insights(project_id,path,module,imports_json,complexity,cognitive_debt,updated_at) VALUES(?,?,?,?,?,?,CURRENT_TIMESTAMP)",
+            (
+                project_id,
+                rel,
+                ins.get("module") or "root",
+                json.dumps(ins.get("imports") or []),
+                int(ins.get("complexity") or 0),
+                float(ins.get("cognitive_debt") or 0),
+            ),
         )
 
     summary = {
@@ -808,6 +885,7 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
         "skipped_parse_files": skipped_parse_files,
         "resume_start_cursor": int(start_cursor or 0),
         "git_stats": git_stats,
+        "average_cognitive_debt": avg_cognitive_debt,
     }
 
     risk_breakdown_rows = conn.execute(
