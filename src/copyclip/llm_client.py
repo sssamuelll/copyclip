@@ -59,6 +59,7 @@ class LLMClient(Protocol):
     async def describe_functions(self, snippets: List[str], lang: str, system_prompt: Optional[str] = None) -> List[str]: ...
     async def minimize_code_contextually(self, code: str, file_ext: str, language: str = "en", system_prompt: Optional[str] = None) -> str: ...
     async def select_relevant_files(self, files: List[str], intent: str) -> List[str]: ...
+    async def chat(self, messages: List[Dict[str, str]]) -> str: ...
 
 
 # --------------------------- helpers ---------------------------
@@ -369,6 +370,23 @@ class OpenAIClient:
             )
             raise
 
+    async def chat(self, messages: List[Dict[str, str]]) -> str:
+        """Generic multi-turn chat call."""
+        aiohttp = _need("aiohttp", "Install aiohttp")
+        url = self._endpoint("chat/completions")
+        
+        base_payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.7,
+        }
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json", **self.extra_headers}
+
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout)) as sess:
+            data = await self._post(sess, url, base_payload, headers)
+        
+        return (data.get("choices", [{}])[0].get("message", {}).get("content", "") or "").strip()
+
     async def select_relevant_files(self, files: List[str], intent: str) -> List[str]:
         """Select relevant files from a list based on user intent."""
         aiohttp = _need("aiohttp", "Install aiohttp: pip install aiohttp")
@@ -546,6 +564,36 @@ class AnthropicClient:
             )
             raise
 
+    async def chat(self, messages: List[Dict[str, str]]) -> str:
+        """Generic multi-turn chat call for Anthropic."""
+        aiohttp = _need("aiohttp", "Install aiohttp")
+        url = f"{self.base}/v1/messages"
+        
+        # Pull system prompt from first message if present, or keep as user
+        system = ""
+        user_msgs = []
+        for m in messages:
+            if m["role"] == "system":
+                system = m["content"]
+            else:
+                user_msgs.append(m)
+
+        payload = {
+            "model": self.model,
+            "system": system,
+            "messages": user_msgs,
+            "temperature": 0.7,
+            "max_tokens": _MAX_TOKENS,
+        }
+        headers = {"x-api-key": self.api_key, "Content-Type": "application/json", **self.extra_headers}
+
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout)) as sess:
+            async with sess.post(url, json=payload, headers=headers) as resp:
+                resp.raise_for_status()
+                data = await resp.json()
+        
+        return "".join([c.get("text", "") for c in data.get("content", [])]).strip()
+
 
 # --------------------------- DeepSeek ---------------------------
 
@@ -721,6 +769,26 @@ class DeepSeekClient:
         )
         raise last_exc
 
+    async def chat(self, messages: List[Dict[str, str]]) -> str:
+        """Generic multi-turn chat call for DeepSeek."""
+        aiohttp = _need("aiohttp", "Install aiohttp")
+        url = f"{self.base}/chat/completions"
+        
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.7,
+            "max_tokens": _MAX_TOKENS,
+        }
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json", **self.extra_headers}
+
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout)) as sess:
+            async with sess.post(url, json=payload, headers=headers) as resp:
+                resp.raise_for_status()
+                data = await resp.json()
+        
+        return (data.get("choices", [{}])[0].get("message", {}).get("content", "") or "").strip()
+
 
 # --------------------------- Gemini (Google) ---------------------------
 
@@ -787,6 +855,30 @@ class GeminiClient:
                 "parts": [{"text": f"{system_content}\n\nMinimize this {file_ext} code contextually:\n\n{code}"}]
             }],
             "generationConfig": {"temperature": 0.3}
+        }
+
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout)) as sess:
+            data = await self._post(sess, url, payload)
+        
+        return data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
+
+    async def chat(self, messages: List[Dict[str, str]]) -> str:
+        """Generic multi-turn chat call for Gemini."""
+        aiohttp = _need("aiohttp", "Install aiohttp")
+        url = f"{self.base}/models/{self.model}:generateContent"
+        
+        contents = []
+        for m in messages:
+            role = "model" if m["role"] == "assistant" else "user"
+            # Gemini beta supports system instructions separately, but for generic we use user/model
+            contents.append({
+                "role": role,
+                "parts": [{"text": m["content"]}]
+            })
+
+        payload = {
+            "contents": contents,
+            "generationConfig": {"temperature": 0.7}
         }
 
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout)) as sess:

@@ -179,7 +179,7 @@ class CopyClipAgent:
 
         # Simple ReAct loop (max 3 turns)
         for _ in range(3):
-            response = await client.minimize_code_contextually(json.dumps(messages), "json", "en")
+            response = await client.chat(messages)
             
             try:
                 action = json.loads(response)
