@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
-import type { ArchaeologyResponse, ChangeItem, FileItem } from '../types/api'
+import type { ArchaeologyResponse, ChangeItem, FileItem, RiskItem } from '../types/api'
 
 export function ChangesPage({
   items,
+  risks,
   focusCommitId,
   onOpenDecision,
+  onOpenRisk,
 }: {
   items: ChangeItem[]
+  risks: RiskItem[]
   focusCommitId?: string | null
   onOpenDecision?: (id: number) => void
+  onOpenRisk?: (area: string) => void
 }) {
   const sorted = [...items]
   const highImpact = sorted.slice(0, 3)
@@ -26,6 +30,14 @@ export function ChangesPage({
   }, [])
 
   const suggestions = useMemo(() => files.filter((f) => f.path.toLowerCase().includes(fileQuery.toLowerCase())).slice(0, 20), [files, fileQuery])
+  const relatedRisks = useMemo(() => {
+    if (!arch?.file) return []
+    const f = arch.file.toLowerCase()
+    return risks
+      .filter((r) => r.area.toLowerCase() === f || r.area.toLowerCase().includes(f) || f.includes(r.area.toLowerCase()))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 6)
+  }, [arch, risks])
 
   const runArchaeology = async () => {
     if (!fileQuery.trim()) return
@@ -131,20 +143,38 @@ export function ChangesPage({
                 </div>
               </div>
 
-              <div className="panel" style={{ padding: 10 }}>
-                <div className="section-title" style={{ marginBottom: 8 }}>// related_decisions</div>
-                <div style={{ display: 'grid', gap: 8 }}>
-                  {arch.related_decisions.length ? arch.related_decisions.map((d) => (
-                    <div key={d.id} className="row-item" style={{ margin: 0, border: '1px solid var(--border)', flexDirection: 'column', alignItems: 'flex-start' }}>
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%' }}>
-                        <span className={`status-badge status-${normalizeStatus(d.status)}`}>{d.status}</span>
-                        <span className="muted" style={{ fontSize: 11 }}>#dec-{String(d.id).padStart(3, '0')}</span>
-                        <button className="btn" style={{ marginLeft: 'auto' }} onClick={() => onOpenDecision?.(d.id)}>open</button>
+              <div className="panel" style={{ padding: 10, display: 'grid', gap: 10 }}>
+                <div>
+                  <div className="section-title" style={{ marginBottom: 8 }}>// related_decisions</div>
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    {arch.related_decisions.length ? arch.related_decisions.map((d) => (
+                      <div key={d.id} className="row-item" style={{ margin: 0, border: '1px solid var(--border)', flexDirection: 'column', alignItems: 'flex-start' }}>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%' }}>
+                          <span className={`status-badge status-${normalizeStatus(d.status)}`}>{d.status}</span>
+                          <span className="muted" style={{ fontSize: 11 }}>#dec-{String(d.id).padStart(3, '0')}</span>
+                          <button className="btn" style={{ marginLeft: 'auto' }} onClick={() => onOpenDecision?.(d.id)}>open</button>
+                        </div>
+                        <div style={{ fontSize: 12 }}>{d.title}</div>
+                        <div className="muted" style={{ fontSize: 11 }}>refs: {d.matched_refs.map((r) => `${r.ref_type}:${r.ref_value}`).join(', ')}</div>
                       </div>
-                      <div style={{ fontSize: 12 }}>{d.title}</div>
-                      <div className="muted" style={{ fontSize: 11 }}>refs: {d.matched_refs.map((r) => `${r.ref_type}:${r.ref_value}`).join(', ')}</div>
-                    </div>
-                  )) : <div className="muted">No linked decisions found for this file/commit history.</div>}
+                    )) : <div className="muted">No linked decisions found for this file/commit history.</div>}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="section-title" style={{ marginBottom: 8 }}>// related_risks</div>
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    {relatedRisks.length ? relatedRisks.map((r, idx) => (
+                      <div key={`${r.area}-${idx}`} className="row-item" style={{ margin: 0, border: '1px solid var(--border)', justifyContent: 'space-between' }}>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <span className={`badge badge-${r.severity}`}>{r.severity}</span>
+                          <span style={{ fontSize: 12 }}>{r.area}</span>
+                          <span className="muted" style={{ fontSize: 11 }}>{r.score}</span>
+                        </div>
+                        <button className="btn" onClick={() => onOpenRisk?.(r.area)}>open</button>
+                      </div>
+                    )) : <div className="muted">No risk entries matched this file path.</div>}
+                  </div>
                 </div>
               </div>
             </div>

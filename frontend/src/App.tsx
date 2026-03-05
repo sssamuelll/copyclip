@@ -127,12 +127,19 @@ export function App() {
         {page === 'changes' && (
           <ChangesPage
             items={changes}
+            risks={risks}
             focusCommitId={focusCommitId}
             onOpenDecision={(id) => {
               setFocusDecisionId(id)
               setFocusRiskArea(null)
               setFocusCommitId(null)
               setPage('decisions')
+            }}
+            onOpenRisk={(area) => {
+              setFocusRiskArea(area)
+              setFocusDecisionId(null)
+              setFocusCommitId(null)
+              setPage('risks')
             }}
           />
         )}
