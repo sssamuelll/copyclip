@@ -1377,6 +1377,99 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     self._json({"error": "github_sync_failed", "message": str(e)}, 500)
                 return
 
+            if parsed.path == "/api/decision-advisor/check":
+                length = int(self.headers.get("Content-Length", "0"))
+                raw = self.rfile.read(length) if length else b"{}"
+                data = json.loads(raw.decode("utf-8"))
+
+                intent = (data.get("intent") or data.get("question") or "").strip()
+                selected_files = [str(f) for f in (data.get("files") or [])]
+                if not intent and not selected_files:
+                    self._json({"error": "intent_or_files_required"}, 400)
+                    return
+
+                tokens = [
+                    t
+                    for t in re.findall(r"[a-zA-Z0-9_\-]{3,}", intent.lower())
+                    if t not in {"the", "and", "for", "with", "that", "this", "what", "how", "from", "into"}
+                ]
+                file_text = " ".join(selected_files).lower()
+
+                rows = conn.execute(
+                    "SELECT id,title,summary,status FROM decisions WHERE project_id=? ORDER BY id DESC LIMIT 300",
+                    (pid,),
+                ).fetchall()
+
+                conflicts = []
+                for r in rows:
+                    did, title, summary, status = int(r[0]), (r[1] or ""), (r[2] or ""), (r[3] or "")
+                    decision_text = f"{title} {summary} {status}".lower()
+                    lexical_hits = [t for t in tokens if t in decision_text]
+
+                    ref_rows = conn.execute(
+                        "SELECT ref_type, ref_value FROM decision_refs WHERE decision_id=? ORDER BY id DESC LIMIT 20",
+                        (did,),
+                    ).fetchall()
+
+                    ref_match = False
+                    matched_refs = []
+                    for rr in ref_rows:
+                        rtype = rr[0] or ""
+                        rval = (rr[1] or "")
+                        rval_l = rval.lower()
+                        if rtype == "file" and any(f == rval for f in selected_files):
+                            ref_match = True
+                            matched_refs.append({"ref_type": rtype, "ref_value": rval})
+                        elif rtype == "file" and file_text and (rval_l in file_text or file_text in rval_l):
+                            ref_match = True
+                            matched_refs.append({"ref_type": rtype, "ref_value": rval})
+                        elif rtype == "doc" and tokens and any(t in rval_l for t in tokens):
+                            ref_match = True
+                            matched_refs.append({"ref_type": rtype, "ref_value": rval})
+
+                    signal = len(lexical_hits) + (2 if ref_match else 0)
+                    if signal <= 0:
+                        continue
+
+                    # lightweight contradiction heuristic
+                    negative_markers = ["avoid", "do not", "never", "deprecated", "forbid", "forbidden", "must not"]
+                    positive_markers = ["introduce", "add", "enable", "migrate", "adopt", "use"]
+                    intent_negative = any(m in intent.lower() for m in negative_markers)
+                    decision_negative = any(m in decision_text for m in negative_markers)
+                    contradiction = (intent_negative and not decision_negative) or (decision_negative and not intent_negative)
+
+                    confidence = min(0.95, 0.4 + (0.08 * len(lexical_hits)) + (0.2 if ref_match else 0.0) + (0.1 if contradiction else 0.0))
+
+                    if contradiction or signal >= 2:
+                        why = (
+                            f"Intent overlaps with decision #{did} on {', '.join(lexical_hits[:4])}."
+                            + (" Referenced files/docs also overlap." if ref_match else "")
+                        )
+                        if contradiction:
+                            why += " Direction markers appear inconsistent with the decision narrative."
+
+                        conflicts.append({
+                            "decision_id": did,
+                            "title": title,
+                            "status": status,
+                            "why_conflict": why,
+                            "confidence": round(confidence, 2),
+                            "suggested_alternative": f"Align implementation with decision #{did} ({status}) or supersede it explicitly before proceeding.",
+                            "matched_refs": matched_refs,
+                        })
+
+                conflicts.sort(key=lambda c: (c.get("confidence", 0), c.get("decision_id", 0)), reverse=True)
+                conflicts = conflicts[:6]
+
+                self._json(with_meta({
+                    "ok": True,
+                    "conflicts": conflicts,
+                    "has_conflicts": len(conflicts) > 0,
+                    "intent": intent,
+                    "checked_files": selected_files,
+                }))
+                return
+
             if parsed.path == "/api/ask":
                 length = int(self.headers.get("Content-Length", "0"))
                 raw = self.rfile.read(length) if length else b"{}"
