@@ -4,6 +4,7 @@ import os
 import re
 import subprocess
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, Iterable, List, Set, Tuple
 
@@ -17,6 +18,10 @@ from .phases import (
     PHASE_RISK_SIGNALS,
     PHASE_SNAPSHOTS,
 )
+
+STAGE_METADATA_HASH = 1
+STAGE_IMPORT_GRAPH = 2
+STAGE_RISK_SIGNALS = 4
 
 
 # Brief: _generate_project_story
@@ -203,6 +208,14 @@ def _complexity_score(content: str, language: str) -> int:
     return keyword_hits + fn_hits
 
 
+# Brief: _is_dependency_impacted
+
+def _is_dependency_impacted(changed_modules: Set[str], module_name: str, imports: List[str]) -> bool:
+    if module_name in changed_modules:
+        return True
+    return any(str(t) in changed_modules for t in imports)
+
+
 # Brief: _fetch_github_issues
 
 def _fetch_github_issues(project_root: str, project_id: int, conn) -> int:
@@ -222,7 +235,7 @@ def _fetch_github_issues(project_root: str, project_id: int, conn) -> int:
         issues = json.loads(out)
         for issue in issues:
             conn.execute(
-                "INSERT INTO issues(project_id, external_id, title, body, status, labels, author, url, created_at, updated_at, source) "
+                "INSERT OR REPLACE INTO issues(project_id, external_id, title, body, status, labels, author, url, created_at, updated_at, source) "
                 "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     project_id,
@@ -262,7 +275,7 @@ def _fetch_github_pull_requests(project_root: str, project_id: int, conn) -> int
         pulls = json.loads(out)
         for pr in pulls:
             conn.execute(
-                "INSERT INTO pulls(project_id, external_id, title, body, status, merged, labels, author, url, created_at, updated_at, source) "
+                "INSERT OR REPLACE INTO pulls(project_id, external_id, title, body, status, merged, labels, author, url, created_at, updated_at, source) "
                 "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     project_id,
@@ -314,7 +327,7 @@ def _analyze_git_folder(project_root: str, project_id: int, conn) -> Dict:
 
 # Brief: analyze
 
-async def analyze(project_root: str, progress_cb=None) -> Dict[str, int]:
+async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, checkpoint_every: int = 500, checkpoint_cb=None) -> Dict[str, int]:
     root = os.path.abspath(project_root)
     conn = connect(root)
     init_schema(conn)
@@ -339,8 +352,13 @@ async def analyze(project_root: str, progress_cb=None) -> Dict[str, int]:
             (project_id, name_r, kind_r, sev_r, score_r, cooldown_r),
         )
 
-    for table in ("files", "commits", "file_changes", "modules", "dependencies", "risks", "issues", "pulls"):
-        conn.execute(f"DELETE FROM {table} WHERE project_id=?", (project_id,))
+    if int(start_cursor or 0) <= 0:
+        for table in ("files", "commits", "file_changes", "modules", "dependencies", "risks", "issues", "pulls"):
+            conn.execute(f"DELETE FROM {table} WHERE project_id=?", (project_id,))
+    else:
+        # Resume mode: keep already indexed files, rebuild downstream derived artifacts deterministically.
+        for table in ("commits", "file_changes", "modules", "dependencies", "risks", "issues", "pulls"):
+            conn.execute(f"DELETE FROM {table} WHERE project_id=?", (project_id,))
 
     # GitHub Issues + PRs
     issue_count = _fetch_github_issues(root, project_id, conn)
@@ -355,42 +373,204 @@ async def analyze(project_root: str, progress_cb=None) -> Dict[str, int]:
     repo_files: Set[str] = set()
     complexity_by_file: Dict[str, int] = {}
 
+    if int(start_cursor or 0) > 0:
+        indexed = conn.execute("SELECT COUNT(*) FROM files WHERE project_id=?", (project_id,)).fetchone()[0]
+        for r in conn.execute("SELECT name FROM modules WHERE project_id=?", (project_id,)).fetchall():
+            modules_seen[r[0]] += 1
+        for r in conn.execute(
+            "SELECT from_module,to_module FROM dependencies WHERE project_id=?",
+            (project_id,),
+        ).fetchall():
+            dep_edges.add((r[0], r[1]))
+        for r in conn.execute("SELECT path FROM files WHERE project_id=?", (project_id,)).fetchall():
+            repo_files.add(r[0])
+
     if progress_cb:
         progress_cb(PHASE_DISCOVERY, 0, 0, "discovering project files")
 
-    total_files = 0
-    for _p, _rel in _iter_repo_files(root):
-        total_files += 1
+    discovered = sorted(list(_iter_repo_files(root)), key=lambda x: x[1])
+    total_files = len(discovered)
 
-    if progress_cb:
-        progress_cb(PHASE_METADATA_HASH, 0, total_files, "computing file metadata and hashes")
+    prev_state_rows = conn.execute(
+        "SELECT path, hash, mtime, size_bytes, stage_mask FROM analysis_file_state WHERE project_id=?",
+        (project_id,),
+    ).fetchall()
+    prev_state = {
+        row[0]: {
+            "hash": row[1],
+            "mtime": float(row[2] or 0),
+            "size_bytes": int(row[3] or 0),
+            "stage_mask": int(row[4] or 0),
+        }
+        for row in prev_state_rows
+    }
+    prev_insight_rows = conn.execute(
+        "SELECT path, module, imports_json, complexity FROM analysis_file_insights WHERE project_id=?",
+        (project_id,),
+    ).fetchall()
+    prev_insights = {}
+    for row in prev_insight_rows:
+        imports = []
+        if row[2]:
+            try:
+                imports = list(json.loads(row[2]))
+            except Exception:
+                imports = []
+        prev_insights[row[0]] = {
+            "module": row[1] or "root",
+            "imports": imports,
+            "complexity": int(row[3] or 0),
+        }
 
-    for p, rel in _iter_repo_files(root):
+    next_state = {}
+    next_insights = {}
+    changed_files = 0
+    skipped_hash_files = 0
+    skipped_parse_files = 0
+
+    changed_modules: Set[str] = set()
+    for p, rel in discovered:
         try:
             st = p.stat()
             if st.st_size > 2_000_000:
                 continue
-            language = _lang_from_ext(rel)
+            prev = prev_state.get(rel)
+            is_unchanged_fast = bool(
+                prev
+                and abs(float(prev.get("mtime") or 0) - float(st.st_mtime)) < 1e-6
+                and int(prev.get("size_bytes") or 0) == int(st.st_size)
+                and prev.get("hash")
+            )
+            if not is_unchanged_fast:
+                changed_modules.add(_module_from_relpath(rel))
+        except Exception:
+            continue
+
+    if progress_cb:
+        progress_cb(PHASE_METADATA_HASH, 0, total_files, "computing file metadata and hashes")
+
+    workers = max(1, min(int(os.getenv("COPYCLIP_ANALYZE_WORKERS", "4") or 4), 16))
+
+    queued = [
+        (cursor, p, rel)
+        for cursor, (p, rel) in enumerate(discovered)
+        if not (int(start_cursor or 0) > 0 and cursor < int(start_cursor or 0))
+    ]
+
+    def _scan_item(item):
+        cursor, p, rel = item
+        try:
+            st = p.stat()
+            if st.st_size > 2_000_000:
+                return {"skip": True, "cursor": cursor, "rel": rel}
+            prev = prev_state.get(rel)
+            is_unchanged = bool(
+                prev
+                and abs(float(prev.get("mtime") or 0) - float(st.st_mtime)) < 1e-6
+                and int(prev.get("size_bytes") or 0) == int(st.st_size)
+                and prev.get("hash")
+            )
+            if is_unchanged:
+                file_hash = str(prev.get("hash"))
+            else:
+                file_hash = _hash_file(p)
+            return {
+                "skip": False,
+                "cursor": cursor,
+                "path": p,
+                "rel": rel,
+                "st_size": int(st.st_size),
+                "st_mtime": float(st.st_mtime),
+                "language": _lang_from_ext(rel),
+                "is_unchanged": is_unchanged,
+                "file_hash": file_hash,
+            }
+        except Exception:
+            return {"skip": True, "cursor": cursor, "rel": rel}
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        scanned_items = list(pool.map(_scan_item, queued))
+
+    for scanned in scanned_items:
+        if scanned.get("skip"):
+            continue
+        try:
+            p = scanned["path"]
+            rel = scanned["rel"]
+            st_size = int(scanned["st_size"])
+            st_mtime = float(scanned["st_mtime"])
+            language = scanned["language"]
+            is_unchanged = bool(scanned["is_unchanged"])
+            file_hash = scanned["file_hash"]
+
+            if is_unchanged:
+                skipped_hash_files += 1
+            else:
+                changed_files += 1
+
             conn.execute(
                 "INSERT OR REPLACE INTO files(project_id,path,language,size_bytes,mtime,hash) VALUES(?,?,?,?,?,?)",
-                (project_id, rel, language, st.st_size, st.st_mtime, _hash_file(p)),
+                (project_id, rel, language, st_size, st_mtime, file_hash),
             )
+
+            stage_mask = int(prev.get("stage_mask") or 0) if prev else 0
+            stage_mask |= STAGE_METADATA_HASH
+
             indexed += 1
             repo_files.add(rel)
+            if checkpoint_cb and checkpoint_every > 0 and indexed % int(checkpoint_every) == 0:
+                try:
+                    checkpoint_cb(indexed)
+                except Exception:
+                    pass
             if progress_cb and indexed % 200 == 0:
                 progress_cb(PHASE_METADATA_HASH, indexed, total_files, f"processed {indexed} files")
 
             mod = _module_from_relpath(rel)
             modules_seen[mod] += 1
 
-            if language in {"python", "javascript", "typescript"} and st.st_size < 300_000:
+            reused_insight = False
+            if is_unchanged and (stage_mask & STAGE_IMPORT_GRAPH):
+                cached = prev_insights.get(rel)
+                if cached:
+                    cached_mod = cached.get("module") or mod
+                    cached_imports = [str(t) for t in (cached.get("imports") or [])]
+                    dependency_impacted = _is_dependency_impacted(changed_modules, cached_mod, cached_imports)
+                    if not dependency_impacted:
+                        complexity_by_file[rel] = int(cached.get("complexity") or 0)
+                        for t in cached_imports:
+                            dep_edges.add((cached_mod, t))
+                        next_insights[rel] = {
+                            "module": cached_mod,
+                            "imports": list(cached_imports),
+                            "complexity": int(cached.get("complexity") or 0),
+                        }
+                        reused_insight = True
+                        skipped_parse_files += 1
+
+            if (not reused_insight) and language in {"python", "javascript", "typescript"} and st_size < 300_000:
                 try:
                     content = p.read_text(encoding="utf-8", errors="ignore")
-                    complexity_by_file[rel] = _complexity_score(content, language)
-                    for t in _extract_import_targets(content, language):
+                    cscore = _complexity_score(content, language)
+                    imports = sorted(_extract_import_targets(content, language))
+                    complexity_by_file[rel] = cscore
+                    for t in imports:
                         dep_edges.add((mod, t))
+                    stage_mask |= STAGE_IMPORT_GRAPH | STAGE_RISK_SIGNALS
+                    next_insights[rel] = {
+                        "module": mod,
+                        "imports": imports,
+                        "complexity": cscore,
+                    }
                 except Exception:
-                    continue
+                    pass
+
+            next_state[rel] = {
+                "hash": file_hash,
+                "mtime": st_mtime,
+                "size_bytes": st_size,
+                "stage_mask": stage_mask,
+            }
         except Exception:
             continue
 
@@ -505,6 +685,21 @@ async def analyze(project_root: str, progress_cb=None) -> Dict[str, int]:
         )
         risk_count += 1
 
+    # Persist incremental file-state snapshot for next run.
+    conn.execute("DELETE FROM analysis_file_state WHERE project_id=?", (project_id,))
+    for rel, stt in next_state.items():
+        conn.execute(
+            "INSERT INTO analysis_file_state(project_id,path,hash,mtime,size_bytes,last_processed_at,stage_mask) VALUES(?,?,?,?,?,CURRENT_TIMESTAMP,?)",
+            (project_id, rel, stt["hash"], stt["mtime"], stt["size_bytes"], int(stt["stage_mask"] or 0)),
+        )
+
+    conn.execute("DELETE FROM analysis_file_insights WHERE project_id=?", (project_id,))
+    for rel, ins in next_insights.items():
+        conn.execute(
+            "INSERT INTO analysis_file_insights(project_id,path,module,imports_json,complexity,updated_at) VALUES(?,?,?,?,?,CURRENT_TIMESTAMP)",
+            (project_id, rel, ins.get("module") or "root", json.dumps(ins.get("imports") or []), int(ins.get("complexity") or 0)),
+        )
+
     summary = {
         "files": indexed,
         "commits": commits,
@@ -513,6 +708,10 @@ async def analyze(project_root: str, progress_cb=None) -> Dict[str, int]:
         "risks": risk_count,
         "issues": issue_count,
         "pulls": pull_count,
+        "changed_files": changed_files,
+        "skipped_hash_files": skipped_hash_files,
+        "skipped_parse_files": skipped_parse_files,
+        "resume_start_cursor": int(start_cursor or 0),
         "git_stats": git_stats,
     }
 

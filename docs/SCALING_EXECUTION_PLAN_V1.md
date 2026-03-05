@@ -133,6 +133,26 @@ Goal: make CopyClip handle very large repositories (10k+ files) without reducing
 
 ## Step-by-step Implementation Sequence
 
+Status snapshot (updated):
+- ✅ Step 1 complete (phase constants, monotonic transitions, SSE progress events).
+- ✅ Step 2 complete:
+  - ✅ `analysis_file_state` implemented.
+  - ✅ Delta detector using mtime+size with hash reuse for unchanged files.
+  - ✅ Incremental parse/import reuse via `analysis_file_insights` cache.
+  - ✅ Dependency-aware invalidation (module/import impacted files re-parse).
+- ✅ Step 3 complete:
+  - ✅ checkpoint cursor persisted on analyze jobs.
+  - ✅ resume endpoint (`/api/analyze/resume`) starts from last checkpoint.
+  - ✅ deterministic worker queue for metadata/hash scan (`ThreadPoolExecutor`) with stable ordering.
+  - ✅ hardened resume semantics: downstream derived tables rebuild deterministically to avoid duplicates.
+- ✅ Step 4 complete:
+  - ✅ deterministic compact bundle builder (`context_bundle_builder`) with explainable manifest.
+  - ✅ `/api/context-bundle` endpoint for inspecting selected files + reasons.
+  - ✅ ask/context assembly paths now surface `bundle_manifest`.
+  - ✅ compact bundle integrated into LLM generation flow for intelligence agents (manifest + snippets in prompt).
+- 🟡 Step 5 next:
+  - UI cancel/resume controls + richer progress card.
+
 ## Step 1 (Start now)
 - Freeze pipeline phase constants + job schema extensions.
 - Add explicit phase transition helper.

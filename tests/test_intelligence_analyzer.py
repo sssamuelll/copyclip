@@ -1,4 +1,4 @@
-from copyclip.intelligence.analyzer import _complexity_score, _is_test_path
+from copyclip.intelligence.analyzer import _complexity_score, _is_dependency_impacted, _is_test_path
 
 
 def test_is_test_path_variants():
@@ -25,3 +25,10 @@ def y(a):
 """
     assert _complexity_score(high, "python") > _complexity_score(low, "python")
     assert _complexity_score(low, "python") >= 1
+
+
+def test_dependency_impact_detection():
+    changed = {"api", "auth"}
+    assert _is_dependency_impacted(changed, "api", [])
+    assert _is_dependency_impacted(changed, "ui", ["auth", "react"])
+    assert not _is_dependency_impacted(changed, "ui", ["react", "lodash"])

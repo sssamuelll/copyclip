@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from .context_bundle_builder import build_context_bundle
 from .db import connect, init_schema
 from .phases import (
     PHASE_COMPLETED,
@@ -142,10 +143,10 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 return None
 
     def _job_payload(row):
-        # row: id,status,phase,processed,total,message,started_at,finished_at
+        # row: id,status,phase,processed,total,message,checkpoint_cursor,checkpoint_every,started_at,finished_at
         processed = int(row[3] or 0)
         total = int(row[4] or 0)
-        started_at = row[6]
+        started_at = row[8]
         elapsed = None
         throughput = None
         eta_sec = None
@@ -164,8 +165,10 @@ def run_server(project_root: str, port: int = 4310) -> None:
             "processed": processed,
             "total": total,
             "message": row[5],
+            "checkpoint_cursor": int(row[6] or 0),
+            "checkpoint_every": int(row[7] or 0),
             "started_at": started_at,
-            "finished_at": row[7],
+            "finished_at": row[9],
             "throughput_fps": round(throughput, 2) if throughput is not None else None,
             "eta_sec": eta_sec,
         }
@@ -245,14 +248,14 @@ def run_server(project_root: str, port: int = 4310) -> None:
             except Exception:
                 pass
 
-    def _start_analysis_job(pid: int):
+    def _start_analysis_job(pid: int, resume_from: int = 0, checkpoint_every: int = 500):
         job_id = str(uuid.uuid4())
         total = _count_project_files(root)
         conn_j = connect(root)
         init_schema(conn_j)
         conn_j.execute(
-            "INSERT INTO analysis_jobs(id,project_id,status,phase,processed,total,message) VALUES(?,?,?,?,?,?,?)",
-            (job_id, pid, "queued", "queued", 0, total, "queued"),
+            "INSERT INTO analysis_jobs(id,project_id,status,phase,processed,total,message,checkpoint_cursor,checkpoint_every) VALUES(?,?,?,?,?,?,?,?,?)",
+            (job_id, pid, "queued", "queued", int(resume_from or 0), total, "queued", int(resume_from or 0), int(checkpoint_every or 500)),
         )
         conn_j.commit()
         conn_j.close()
@@ -262,12 +265,12 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 conn_r = connect(root)
                 init_schema(conn_r)
                 conn_r.execute(
-                    "UPDATE analysis_jobs SET status='running', phase=?, message=? WHERE id=?",
-                    (PHASE_DISCOVERY, "analyzing project", job_id),
+                    "UPDATE analysis_jobs SET status='running', phase=?, processed=?, checkpoint_cursor=?, message=? WHERE id=?",
+                    (PHASE_DISCOVERY, int(resume_from or 0), int(resume_from or 0), "analyzing project", job_id),
                 )
                 conn_r.commit()
                 conn_r.close()
-                publish_event("analyze.progress", {"job_id": job_id, "status": "running", "phase": "analyzing", "processed": 0, "total": total})
+                publish_event("analyze.progress", {"job_id": job_id, "status": "running", "phase": "analyzing", "processed": int(resume_from or 0), "total": total})
 
                 try:
                     from .analyzer import analyze
@@ -286,12 +289,30 @@ def run_server(project_root: str, port: int = 4310) -> None:
                             },
                         )
 
-                    summary = asyncio.run(analyze(root, progress_cb=_on_progress))
+                    def _on_checkpoint(cursor_value):
+                        conn_cp = connect(root)
+                        init_schema(conn_cp)
+                        conn_cp.execute(
+                            "UPDATE analysis_jobs SET checkpoint_cursor=? WHERE id=?",
+                            (int(cursor_value or 0), job_id),
+                        )
+                        conn_cp.commit()
+                        conn_cp.close()
+
+                    summary = asyncio.run(
+                        analyze(
+                            root,
+                            progress_cb=_on_progress,
+                            start_cursor=int(resume_from or 0),
+                            checkpoint_every=int(checkpoint_every or 500),
+                            checkpoint_cb=_on_checkpoint,
+                        )
+                    )
                     conn_d = connect(root)
                     init_schema(conn_d)
                     conn_d.execute(
-                        "UPDATE analysis_jobs SET status='completed', phase=?, processed=?, total=?, message=?, finished_at=CURRENT_TIMESTAMP WHERE id=?",
-                        (PHASE_COMPLETED, total, total, "analysis completed", job_id),
+                        "UPDATE analysis_jobs SET status='completed', phase=?, processed=?, total=?, checkpoint_cursor=?, message=?, finished_at=CURRENT_TIMESTAMP WHERE id=?",
+                        (PHASE_COMPLETED, total, total, total, "analysis completed", job_id),
                     )
                     conn_d.commit()
                     conn_d.close()
@@ -471,6 +492,20 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     "limit": limit,
                     "offset": offset,
                 }))
+                return
+
+            if parsed.path == "/api/context-bundle":
+                if not pid:
+                    self._json(with_meta({"selected_files": [], "manifest": [], "total_candidates": 0}))
+                    return
+                q = parse_qs(parsed.query or "")
+                question = (q.get("q", [""])[0] or "").strip()
+                try:
+                    max_files = max(1, min(int((q.get("max_files", ["20"])[0])), 100))
+                except Exception:
+                    max_files = 20
+                bundle = build_context_bundle(conn, pid, question, max_files=max_files)
+                self._json(with_meta(bundle))
                 return
 
             if parsed.path == "/api/impact":
@@ -907,7 +942,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     self._json(with_meta({"items": []}))
                     return
                 rows = conn.execute(
-                    "SELECT id,status,phase,processed,total,message,started_at,finished_at FROM analysis_jobs WHERE project_id=? ORDER BY started_at DESC LIMIT 20",
+                    "SELECT id,status,phase,processed,total,message,checkpoint_cursor,checkpoint_every,started_at,finished_at FROM analysis_jobs WHERE project_id=? ORDER BY started_at DESC LIMIT 20",
                     (pid,),
                 ).fetchall()
                 self._json(with_meta({
@@ -921,7 +956,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     return
                 job_id = parsed.path.rsplit("/", 1)[-1]
                 row = conn.execute(
-                    "SELECT id,status,phase,processed,total,message,started_at,finished_at FROM analysis_jobs WHERE id=? AND project_id=?",
+                    "SELECT id,status,phase,processed,total,message,checkpoint_cursor,checkpoint_every,started_at,finished_at FROM analysis_jobs WHERE id=? AND project_id=?",
                     (job_id, pid),
                 ).fetchone()
                 if not row:
@@ -1080,6 +1115,33 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 self._json(with_meta({"ok": True, "job_id": job_id, "already_running": False}))
                 return
 
+            if parsed.path == "/api/analyze/resume":
+                running = conn.execute(
+                    "SELECT id FROM analysis_jobs WHERE project_id=? AND status IN ('queued','running') ORDER BY started_at DESC LIMIT 1",
+                    (pid,),
+                ).fetchone()
+                if running:
+                    self._json(with_meta({"ok": True, "job_id": running[0], "already_running": True}))
+                    return
+
+                last = conn.execute(
+                    "SELECT checkpoint_cursor,total FROM analysis_jobs WHERE project_id=? AND status IN ('failed','queued','running') ORDER BY started_at DESC LIMIT 1",
+                    (pid,),
+                ).fetchone()
+                if not last:
+                    self._json({"error": "no_resumable_job"}, 404)
+                    return
+
+                resume_from = int(last[0] or 0)
+                total = int(last[1] or 0)
+                if total > 0 and resume_from >= total:
+                    self._json({"error": "resume_cursor_at_end"}, 409)
+                    return
+
+                job_id = _start_analysis_job(pid, resume_from=resume_from)
+                self._json(with_meta({"ok": True, "job_id": job_id, "already_running": False, "resume_from": resume_from}))
+                return
+
             if parsed.path == "/api/alerts/scheduler":
                 length = int(self.headers.get("Content-Length", "0"))
                 raw = self.rfile.read(length) if length else b"{}"
@@ -1134,8 +1196,9 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     self._json({"error": "question_required"}, 400)
                     return
 
-                # Lightweight retrieval over indexed artifacts.
+                # Lightweight retrieval over indexed artifacts + deterministic compact bundle.
                 terms = [t for t in re.findall(r"[a-zA-Z0-9_\-]{3,}", question.lower()) if t not in {"the", "and", "for", "with", "that", "this", "what", "how"}]
+                bundle = build_context_bundle(conn, pid, question, max_files=20)
 
                 evidence = []
 
@@ -1187,8 +1250,18 @@ def run_server(project_root: str, port: int = 4310) -> None:
                             "snippet": f"commit {r[0][:7]} on {(r[2] or '')[:10]}",
                         })
 
+                # Compact-bundle file evidence (deterministic + explainable).
+                for item in bundle.get("manifest", [])[:10]:
+                    evidence.append({
+                        "score": max(1, int(item.get("score") or 0) // 20),
+                        "type": "file",
+                        "id": item.get("path"),
+                        "title": item.get("path"),
+                        "snippet": ", ".join(item.get("reasons") or []),
+                    })
+
                 # Prefer governance artifacts over raw activity noise.
-                type_boost = {"decision": 1000, "risk": 500, "commit": 100}
+                type_boost = {"decision": 1000, "risk": 500, "commit": 100, "file": 50}
                 for e in evidence:
                     e["rank"] = type_boost.get(e["type"], 0) + e["score"]
 
@@ -1211,6 +1284,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                         "answer": "I don’t have enough indexed evidence to answer that yet. Re-run analyze or ask with more specific entities (module/file/decision).",
                         "citations": [],
                         "grounded": False,
+                        "bundle_manifest": bundle.get("manifest", []),
                     }))
                     return
 
@@ -1226,6 +1300,9 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     elif e["type"] == "commit":
                         citations.append({"type": "commit", "id": e["id"], "label": f"commit {e['id'][:7]}"})
                         lines.append(f"Recent commit: {e['title']}")
+                    elif e["type"] == "file":
+                        citations.append({"type": "file", "id": e["id"], "label": e["title"]})
+                        lines.append(f"Relevant file: {e['title']}")
 
                 answer = "Based on indexed project evidence, here are the strongest signals:\n- " + "\n- ".join(lines)
 
@@ -1238,6 +1315,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     "answer": answer,
                     "citations": citations,
                     "grounded": True,
+                    "bundle_manifest": bundle.get("manifest", []),
                 }))
                 return
 
@@ -1254,9 +1332,25 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 selected_issues = data.get("issues", [])
                 include_decisions = data.get("include_decisions", True)
                 minimize_mode = data.get("minimize", "basic")
+                question = (data.get("question") or "").strip()
 
                 prompt_parts = []
                 
+                # Auto-compact bundle when no explicit file list was provided.
+                compact_bundle = {"manifest": [], "selected_files": []}
+                if not selected_files:
+                    issue_titles = []
+                    for iid in selected_issues:
+                        row_i = conn.execute(
+                            "SELECT title FROM issues WHERE project_id=? AND external_id=?",
+                            (pid, str(iid)),
+                        ).fetchone()
+                        if row_i and row_i[0]:
+                            issue_titles.append(str(row_i[0]))
+                    compact_query = question or " ".join(issue_titles)
+                    compact_bundle = build_context_bundle(conn, pid, compact_query, max_files=25)
+                    selected_files = compact_bundle.get("selected_files", [])
+
                 # 1. Decisions
                 if include_decisions:
                     decs = get_active_decisions(root)
@@ -1333,7 +1427,12 @@ def run_server(project_root: str, port: int = 4310) -> None:
                             pass
 
                 final_context = "\n\n".join(prompt_parts)
-                self._json({"context": final_context, "warnings": warnings})
+                self._json({
+                    "context": final_context,
+                    "warnings": warnings,
+                    "bundle_manifest": compact_bundle.get("manifest", []),
+                    "bundle_files": compact_bundle.get("selected_files", []),
+                })
                 return
 
             if parsed.path in {"/api/config", "/api/settings"}:

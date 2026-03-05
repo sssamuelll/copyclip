@@ -77,3 +77,17 @@ def test_get_active_decisions(tmp_path):
     assert "D1" in titles
     assert "D3" in titles
     assert "D2" not in titles
+
+
+def test_analysis_file_state_schema_exists(tmp_path):
+    root = str(tmp_path)
+    conn = connect(root)
+    init_schema(conn)
+    state_cols = {r[1] for r in conn.execute("PRAGMA table_info(analysis_file_state)").fetchall()}
+    insight_cols = {r[1] for r in conn.execute("PRAGMA table_info(analysis_file_insights)").fetchall()}
+    job_cols = {r[1] for r in conn.execute("PRAGMA table_info(analysis_jobs)").fetchall()}
+    conn.close()
+
+    assert {"project_id", "path", "hash", "mtime", "size_bytes", "stage_mask"}.issubset(state_cols)
+    assert {"project_id", "path", "module", "imports_json", "complexity"}.issubset(insight_cols)
+    assert {"checkpoint_cursor", "checkpoint_every"}.issubset(job_cols)

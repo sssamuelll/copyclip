@@ -8,6 +8,7 @@ from typing import List, Dict, Any, Optional
 from ..llm_client import LLMClientFactory
 from ..llm.config import load_config
 from ..llm.provider_config import resolve_provider
+from .context_bundle_builder import build_context_bundle
 from .db import db_path, connect
 
 class AgentTool:
@@ -80,6 +81,33 @@ class CopyClipAgent:
         except Exception as e:
             return f"Error listing files: {e}"
 
+    def _build_compact_context(self, user_input: str) -> Dict[str, Any]:
+        try:
+            conn = connect(self.root)
+            row = conn.execute("SELECT id FROM projects WHERE root_path=?", (str(Path(self.root).resolve()),)).fetchone()
+            if not row:
+                conn.close()
+                return {"manifest": [], "snippets": []}
+            pid = int(row[0])
+            bundle = build_context_bundle(conn, pid, user_input, max_files=8)
+            conn.close()
+
+            root_path = Path(self.root).resolve()
+            snippets = []
+            for rel in bundle.get("selected_files", [])[:8]:
+                try:
+                    p = (root_path / rel).resolve()
+                    if not p.is_relative_to(root_path) or not p.exists() or not p.is_file():
+                        continue
+                    content = p.read_text(encoding="utf-8", errors="ignore")[:1200]
+                    snippets.append({"path": rel, "content": content})
+                except Exception:
+                    continue
+
+            return {"manifest": bundle.get("manifest", []), "snippets": snippets}
+        except Exception:
+            return {"manifest": [], "snippets": []}
+
     async def chat(self, user_input: str) -> str:
         cfg = load_config(os.getenv("COPYCLIP_LLM_CONFIG"))
         cli_p = os.getenv("COPYCLIP_LLM_PROVIDER")
@@ -94,21 +122,34 @@ class CopyClipAgent:
         )
 
         tools_desc = "\n".join([f"- {t.name}: {t.description}" for t in self.tools.values()])
-        
+        compact = self._build_compact_context(user_input)
+        manifest_text = "\n".join(
+            [f"- {m.get('path')} :: score={m.get('score')} :: reasons={','.join(m.get('reasons', []))}" for m in compact.get("manifest", [])]
+        )
+        snippets_text = "\n\n".join(
+            [f"### {s.get('path')}\n{s.get('content')}" for s in compact.get("snippets", [])]
+        )
+
         system_prompt = f"""
         You are {self.name}, the {self.role} for this software project.
         Your goal is to help the human developer understand and operate the project.
-        
+
         Available Tools:
         {tools_desc}
-        
+
         Instruction for Tool Usage:
-        If you need to use a tool, reply with a JSON object: 
+        If you need to use a tool, reply with a JSON object:
         {{"tool": "tool_name", "args": {{"arg_name": "value"}}}}
-        
+
         The human will provide the tool output. Repeat until you have the final answer.
         If you have the final answer, just reply with text.
-        
+
+        Deterministic compact context manifest (top files):
+        {manifest_text or 'none'}
+
+        Compact snippets:
+        {snippets_text or 'none'}
+
         Context: Project Root is {self.root}
         """
 

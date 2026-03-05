@@ -193,8 +193,33 @@ def init_schema(conn: sqlite3.Connection) -> None:
             processed INTEGER DEFAULT 0,
             total INTEGER DEFAULT 0,
             message TEXT,
+            checkpoint_cursor INTEGER DEFAULT 0,
+            checkpoint_every INTEGER DEFAULT 500,
             started_at TEXT DEFAULT CURRENT_TIMESTAMP,
             finished_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS analysis_file_state (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            path TEXT NOT NULL,
+            hash TEXT,
+            mtime REAL,
+            size_bytes INTEGER,
+            last_processed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            stage_mask INTEGER DEFAULT 0,
+            UNIQUE(project_id, path)
+        );
+
+        CREATE TABLE IF NOT EXISTS analysis_file_insights (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            path TEXT NOT NULL,
+            module TEXT,
+            imports_json TEXT,
+            complexity INTEGER DEFAULT 0,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(project_id, path)
         );
         """
     )
@@ -203,6 +228,28 @@ def init_schema(conn: sqlite3.Connection) -> None:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(projects)").fetchall()}
         if "story" not in cols:
             conn.execute("ALTER TABLE projects ADD COLUMN story TEXT")
+    except Exception:
+        pass
+
+    # Backfill incremental state table columns for older installations.
+    try:
+        afs_cols = {row[1] for row in conn.execute("PRAGMA table_info(analysis_file_state)").fetchall()}
+        if afs_cols:
+            if "size_bytes" not in afs_cols:
+                conn.execute("ALTER TABLE analysis_file_state ADD COLUMN size_bytes INTEGER")
+            if "stage_mask" not in afs_cols:
+                conn.execute("ALTER TABLE analysis_file_state ADD COLUMN stage_mask INTEGER DEFAULT 0")
+    except Exception:
+        pass
+
+    # Backfill analysis_jobs checkpoint columns.
+    try:
+        job_cols = {row[1] for row in conn.execute("PRAGMA table_info(analysis_jobs)").fetchall()}
+        if job_cols:
+            if "checkpoint_cursor" not in job_cols:
+                conn.execute("ALTER TABLE analysis_jobs ADD COLUMN checkpoint_cursor INTEGER DEFAULT 0")
+            if "checkpoint_every" not in job_cols:
+                conn.execute("ALTER TABLE analysis_jobs ADD COLUMN checkpoint_every INTEGER DEFAULT 500")
     except Exception:
         pass
 

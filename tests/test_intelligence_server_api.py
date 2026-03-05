@@ -131,6 +131,14 @@ def test_ask_endpoint_returns_grounded_answer_with_citations():
             "INSERT INTO decisions(project_id,title,summary,status,source_type) VALUES(?,?,?,?,?)",
             (pid, "Adopt WebGPU pipeline", "Use GPU as default simulation backend", "accepted", "manual"),
         )
+        conn.execute(
+            "INSERT INTO files(project_id,path,language,size_bytes,mtime,hash) VALUES(?,?,?,?,?,?)",
+            (pid, "src/gpu/solver.ts", "typescript", 1000, 1.0, "h1"),
+        )
+        conn.execute(
+            "INSERT INTO risks(project_id,area,severity,kind,rationale,score) VALUES(?,?,?,?,?,?)",
+            (pid, "src/gpu/solver.ts", "high", "complexity", "hot path", 85),
+        )
         conn.commit()
 
         port = _free_port()
@@ -142,6 +150,36 @@ def test_ask_endpoint_returns_grounded_answer_with_citations():
         assert res["grounded"] is True
         assert len(res["citations"]) >= 1
         assert any(c["type"] == "decision" for c in res["citations"])
+        assert "bundle_manifest" in res
+
+
+def test_context_bundle_endpoint_returns_manifest():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        root_path = str(root.absolute())
+        conn = connect(root_path)
+        init_schema(conn)
+        conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root_path, "tmp"))
+        pid = conn.execute("SELECT id FROM projects WHERE root_path=?", (root_path,)).fetchone()[0]
+        conn.execute(
+            "INSERT INTO files(project_id,path,language,size_bytes,mtime,hash) VALUES(?,?,?,?,?,?)",
+            (pid, "src/auth/session.ts", "typescript", 1000, 1.0, "h1"),
+        )
+        conn.execute(
+            "INSERT INTO risks(project_id,area,severity,kind,rationale,score) VALUES(?,?,?,?,?,?)",
+            (pid, "src/auth/session.ts", "high", "churn", "frequent edits", 90),
+        )
+        conn.commit()
+
+        port = _free_port()
+        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
+        th.start()
+        _wait_port(port)
+
+        res = _get_json(f"http://127.0.0.1:{port}/api/context-bundle?q=auth+session")
+        assert "manifest" in res
+        assert len(res["manifest"]) >= 1
+        assert res["manifest"][0]["path"] == "src/auth/session.ts"
 
 
 def test_risk_trends_endpoint_works_with_snapshot_breakdown():
