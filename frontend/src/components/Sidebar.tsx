@@ -5,7 +5,7 @@ const GROUPS = [
     label: 'Core',
     pages: [
       { id: 'ask', label: 'consciousness', icon: '🧠' },
-      { id: 'atlas-3d', label: 'atlas 3d', icon: '🌐' },
+      { id: 'atlas-3d', label: 'atlas', icon: '🌐' },
       { id: 'timeline', label: 'event timeline', icon: '⏳' },
       { id: 'planning', label: 'planning', icon: '📋' },
     ]

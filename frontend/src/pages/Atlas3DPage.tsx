@@ -1,263 +1,206 @@
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { api } from '../api/client'
 import type { ArchNode, ArchEdge, CognitiveLoadItem } from '../types/api'
-
-type ViewMode = 'constellation' | 'tree'
-type ColorMode = 'default' | 'cognitive'
-
-interface TreeNode {
-  name: string
-  fullName: string
-  children: Record<string, TreeNode>
-  isModule: boolean
-  depth: number
-  position?: THREE.Vector3
-  debt?: number
-}
 
 export function Atlas3DPage() {
   const containerRef = useRef<HTMLDivElement>(null)
   const [loading, setLoading] = useState(true)
   const [selectedNode, setSelectedNode] = useState<any>(null)
-  const [viewMode, setViewMode] = useState<ViewMode>('tree')
-  const [colorMode, setColorMode] = useState<ColorMode>('default')
-
-  const sceneRef = useRef<THREE.Scene | null>(null)
-  const spheresRef = useRef<THREE.Mesh[]>([])
 
   useEffect(() => {
     if (!containerRef.current) return
 
-    let scene: THREE.Scene, camera: THREE.PerspectiveCamera, renderer: THREE.WebGLRenderer, controls: OrbitControls
+    let scene: THREE.Scene, camera: THREE.PerspectiveCamera, renderer: THREE.WebGLRenderer
     let raycaster: THREE.Raycaster, mouse: THREE.Vector2
+    let mouseX = 0, mouseY = 0
+    let windowHalfX = window.innerWidth / 2
+    let windowHalfY = window.innerHeight / 2
     let animationId: number
-    const graphGroup = new THREE.Group()
+    
+    const nodesGroup = new THREE.Group()
+    const starsGroup = new THREE.Group()
 
     const init = async () => {
+      // 1. Scene & Camera Setup
       scene = new THREE.Scene()
-      sceneRef.current = scene
-      scene.background = new THREE.Color(0x030305)
-      scene.fog = new THREE.FogExp2(0x030305, 0.001)
+      scene.background = new THREE.Color(0x000000)
+      scene.fog = new THREE.FogExp2(0x000000, 0.0008)
 
-      camera = new THREE.PerspectiveCamera(70, containerRef.current!.clientWidth / containerRef.current!.clientHeight, 1, 4000)
-      camera.position.set(400, 400, 800)
+      camera = new THREE.PerspectiveCamera(60, containerRef.current!.clientWidth / containerRef.current!.clientHeight, 1, 3000)
+      camera.position.z = 800
 
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
-      renderer.setSize(containerRef.current!.clientWidth, containerRef.current!.clientHeight)
       renderer.setPixelRatio(window.devicePixelRatio)
+      renderer.setSize(containerRef.current!.clientWidth, containerRef.current!.clientHeight)
       containerRef.current!.appendChild(renderer.domElement)
-
-      controls = new OrbitControls(camera, renderer.domElement)
-      controls.enableDamping = true
 
       raycaster = new THREE.Raycaster()
       mouse = new THREE.Vector2()
 
-      scene.add(new THREE.AmbientLight(0xffffff, 0.3))
-      const light = new THREE.DirectionalLight(0xffffff, 0.8)
-      light.position.set(1, 1, 1)
-      scene.add(light)
+      // 2. Stars Background (The Universe)
+      const starGeometry = new THREE.BufferGeometry()
+      const starPositions = []
+      for (let i = 0; i < 5000; i++) {
+        starPositions.push(Math.random() * 2000 - 1000)
+        starPositions.push(Math.random() * 2000 - 1000)
+        starPositions.push(Math.random() * 2000 - 1000)
+      }
+      starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starPositions, 3))
+      const starMaterial = new THREE.PointsMaterial({ color: 0x888888, size: 1, transparent: true, opacity: 0.5 })
+      const stars = new THREE.Points(starGeometry, starMaterial)
+      starsGroup.add(stars)
+      scene.add(starsGroup)
 
+      // 3. Project Nodes (The Constellation)
       try {
-        const [{ nodes, edges }, cog] = await Promise.all([
+        const [{ nodes }, cog] = await Promise.all([
           api.architecture(),
           api.cognitiveLoad()
         ])
-        
-        buildAndRender(nodes, edges, cog.items || [])
+        renderNodes(nodes, cog.items || [])
         setLoading(false)
       } catch (e) {
         console.error(e)
       }
 
-      scene.add(graphGroup)
+      scene.add(nodesGroup)
       animate()
 
-      renderer.domElement.addEventListener('click', (e) => {
-        const rect = renderer.domElement.getBoundingClientRect()
-        mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1
-        mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1
-        raycaster.setFromCamera(mouse, camera)
-        const intersects = raycaster.intersectObjects(graphGroup.children, true)
-        if (intersects.length > 0) {
-          const mesh = intersects[0].object as THREE.Mesh
-          if (mesh.userData?.name) {
-            setSelectedNode(mesh.userData)
-            spheresRef.current.forEach(s => (s.material as any).emissiveIntensity = 0.1)
-            ;(mesh.material as any).emissiveIntensity = 1.5
-          }
-        } else {
-          setSelectedNode(null)
-        }
-      })
+      // Event Listeners
+      window.addEventListener('resize', onWindowResize)
+      document.addEventListener('mousemove', onDocumentMouseMove)
+      renderer.domElement.addEventListener('click', onMouseClick)
     }
 
-    const buildAndRender = (nodes: ArchNode[], edges: ArchEdge[], cogItems: CognitiveLoadItem[]) => {
-      graphGroup.clear()
-      spheresRef.current = []
-      
-      if (viewMode === 'tree') {
-        renderSittingTree(nodes, cogItems)
-      } else {
-        renderConstellation(nodes, edges, cogItems)
-      }
-    }
-
-    const renderSittingTree = (nodes: ArchNode[], cogItems: CognitiveLoadItem[]) => {
-      const root: TreeNode = { name: 'root', fullName: 'root', children: {}, isModule: false, depth: 0 }
-      
-      // 1. Build hierarchy from paths (names usually contain folder structure)
-      nodes.forEach(n => {
-        const parts = n.name.split('/')
-        let curr = root
-        parts.forEach((part, idx) => {
-          if (!curr.children[part]) {
-            curr.children[part] = { 
-              name: part, 
-              fullName: parts.slice(0, idx + 1).join('/'),
-              children: {}, 
-              isModule: idx === parts.length - 1,
-              depth: idx + 1
-            }
-          }
-          curr = curr.children[part]
-        })
-      })
-
-      // 2. Recursive Position Assignment (Radial Tree)
-      const assignPositions = (node: TreeNode, angleStart: number, angleEnd: number, parentPos: THREE.Vector3) => {
-        const radius = node.depth * 180
-        const angle = (angleStart + angleEnd) / 2
+    const renderNodes = (nodes: ArchNode[], cogItems: CognitiveLoadItem[]) => {
+      nodes.forEach((node, i) => {
+        // Spiral / Galactic distribution
+        const t = i / nodes.length
+        const angle = 20 * t
+        const radius = 400 * Math.sqrt(t)
+        
         const x = Math.cos(angle) * radius
+        const y = (Math.random() - 0.5) * 100
         const z = Math.sin(angle) * radius
-        const y = node.depth * 100 // Height increases with depth
-        
-        node.position = new THREE.Vector3(x, y, z)
-        
-        // Render Node
-        const cog = cogItems.find(c => c.module === node.fullName)
+
+        const cog = cogItems.find(c => c.module === node.name)
         const debt = cog?.cognitive_debt_score || 0
-        const color = getDebtColor(debt)
         
-        const geo = node.isModule ? new THREE.SphereGeometry(8 + (debt/10), 20, 20) : new THREE.BoxGeometry(10, 10, 10)
-        const mat = new THREE.MeshPhongMaterial({ 
-          color: node.isModule ? 0x06b6d4 : 0x444444, 
-          emissive: node.isModule ? 0x06b6d4 : 0x000000,
-          emissiveIntensity: 0.2 
+        const size = 3 + (debt / 15)
+        const geometry = new THREE.SphereGeometry(size, 16, 16)
+        const material = new THREE.MeshBasicMaterial({ 
+          color: getDebtColor(debt),
+          transparent: true, 
+          opacity: 0.8
         })
-        const mesh = new THREE.Mesh(geo, mat)
-        mesh.position.copy(node.position)
-        mesh.userData = { ...node, debt }
-        graphGroup.add(mesh)
-        if (node.isModule) spheresRef.current.push(mesh)
-
-        // Render Branch to parent
-        if (node.depth > 0) {
-          const lineGeo = new THREE.BufferGeometry().setFromPoints([parentPos, node.position])
-          const lineMat = new THREE.LineBasicMaterial({ color: 0x222222, transparent: true, opacity: 0.4 })
-          graphGroup.add(new THREE.Line(lineGeo, lineMat))
-        }
-
-        // Children expansion
-        const childKeys = Object.keys(node.children)
-        const step = (angleEnd - angleStart) / (childKeys.length || 1)
-        childKeys.forEach((key, i) => {
-          assignPositions(node.children[key], angleStart + i * step, angleStart + (i + 1) * step, node.position!)
-        })
-      }
-
-      assignPositions(root, 0, Math.PI * 2, new THREE.Vector3(0, 0, 0))
-    }
-
-    const renderConstellation = (nodes: ArchNode[], edges: ArchEdge[], cogItems: CognitiveLoadItem[]) => {
-      // (Legacy spherical code, but optimized)
-      const nodeMap: Record<string, THREE.Vector3> = {}
-      nodes.forEach((n, i) => {
-        const phi = Math.acos(-1 + (2 * i) / nodes.length)
-        const theta = Math.sqrt(nodes.length * Math.PI) * phi
-        const pos = new THREE.Vector3(400 * Math.cos(theta) * Math.sin(phi), 400 * Math.sin(theta) * Math.sin(phi), 400 * Math.cos(phi))
-        const cog = cogItems.find(c => c.module === n.name)
-        const debt = cog?.cognitive_debt_score || 0
-        const mesh = new THREE.Mesh(new THREE.SphereGeometry(6 + (debt/15)), new THREE.MeshPhongMaterial({ color: 0x06b6d4, emissive: 0x06b6d4, emissiveIntensity: 0.2 }))
-        mesh.position.copy(pos)
-        mesh.userData = { ...n, debt }
-        graphGroup.add(mesh)
-        spheresRef.current.push(mesh)
-        nodeMap[n.name] = pos
-      })
-      edges.forEach(e => {
-        if (nodeMap[e.from] && nodeMap[e.to]) {
-          const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([nodeMap[e.from], nodeMap[e.to]]), new THREE.LineBasicMaterial({ color: 0x222222, opacity: 0.2, transparent: true }))
-          graphGroup.add(l)
-        }
+        
+        const sphere = new THREE.Mesh(geometry, material)
+        sphere.position.set(x, y, z)
+        sphere.userData = { ...node, debt }
+        nodesGroup.add(sphere)
       })
     }
 
     const getDebtColor = (debt: number) => {
-      if (debt > 70) return 0xef4444
-      if (debt > 40) return 0xf59e0b
-      return 0x10b981
+      if (debt > 70) return 0xff4444 // Red
+      if (debt > 40) return 0xffaa00 // Orange
+      return 0x00eeff // Cyan
+    }
+
+    const onDocumentMouseMove = (event: MouseEvent) => {
+      mouseX = event.clientX - windowHalfX
+      mouseY = event.clientY - windowHalfY
+
+      // Hover Detection for Cursor Change
+      const rect = renderer.domElement.getBoundingClientRect()
+      const mx = ((event.clientX - rect.left) / rect.width) * 2 - 1
+      const my = -((event.clientY - rect.top) / rect.height) * 2 + 1
+      
+      raycaster.setFromCamera({ x: mx, y: my } as any, camera)
+      const intersects = raycaster.intersectObjects(nodesGroup.children)
+      renderer.domElement.style.cursor = intersects.length > 0 ? 'pointer' : 'default'
+    }
+
+    const onMouseClick = (event: MouseEvent) => {
+      const rect = renderer.domElement.getBoundingClientRect()
+      const mx = ((event.clientX - rect.left) / rect.width) * 2 - 1
+      const my = -((event.clientY - rect.top) / rect.height) * 2 + 1
+
+      raycaster.setFromCamera({ x: mx, y: my } as any, camera)
+      const intersects = raycaster.intersectObjects(nodesGroup.children)
+
+      if (intersects.length > 0) {
+        setSelectedNode(intersects[0].object.userData)
+      } else {
+        setSelectedNode(null)
+      }
+    }
+
+    const onWindowResize = () => {
+      if (!containerRef.current) return
+      windowHalfX = window.innerWidth / 2
+      windowHalfY = window.innerHeight / 2
+      camera.aspect = containerRef.current.clientWidth / containerRef.current.clientHeight
+      camera.updateProjectionMatrix()
+      renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight)
     }
 
     const animate = () => {
       animationId = requestAnimationFrame(animate)
-      controls.update()
+      
+      // Smooth Camera Parallax (From earth perspective)
+      camera.position.x += (mouseX - camera.position.x) * 0.02
+      camera.position.y += (-mouseY - camera.position.y) * 0.02
+      camera.lookAt(scene.position)
+
+      // Gentle rotation of the universe
+      starsGroup.rotation.y += 0.0002
+      nodesGroup.rotation.y += 0.0005
+
       renderer.render(scene, camera)
     }
 
     init()
+
     return () => {
       cancelAnimationFrame(animationId)
-      renderer.dispose()
+      window.removeEventListener('resize', onWindowResize)
+      document.removeEventListener('mousemove', onDocumentMouseMove)
+      if (renderer) renderer.dispose()
       if (containerRef.current) containerRef.current.innerHTML = ''
     }
-  }, [viewMode]) // Re-render when viewMode changes
-
-  // Dynamic Coloring Effect
-  useEffect(() => {
-    spheresRef.current.forEach(s => {
-      const debt = s.userData.debt || 0
-      const mat = s.material as THREE.MeshPhongMaterial
-      if (colorMode === 'cognitive') {
-        if (debt > 70) mat.color.setHex(0xef4444)
-        else if (debt > 40) mat.color.setHex(0xf59e0b)
-        else mat.color.setHex(0x10b981)
-      } else {
-        mat.color.setHex(0x06b6d4)
-      }
-    })
-  }, [colorMode])
+  }, [])
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: 'calc(100vh - 100px)', background: '#030305', borderRadius: 12, overflow: 'hidden', border: '1px solid #111' }}>
+    <div style={{ position: 'relative', width: '100%', height: 'calc(100vh - 100px)', background: '#000', borderRadius: 12, overflow: 'hidden' }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
       
-      {/* HUD: Mode Selectors */}
-      <div style={{ position: 'absolute', top: 20, left: 20, display: 'grid', gap: 12 }}>
-        <div style={{ display: 'flex', gap: 8, background: 'rgba(0,0,0,0.5)', padding: 4, borderRadius: 8, border: '1px solid #222' }}>
-          <button className={`btn ${viewMode === 'tree' ? 'primary' : ''}`} onClick={() => setViewMode('tree')}>Sitting Tree</button>
-          <button className={`btn ${viewMode === 'constellation' ? 'primary' : ''}`} onClick={() => setViewMode('constellation')}>Constellation</button>
-        </div>
-        <div style={{ display: 'flex', gap: 8, background: 'rgba(0,0,0,0.5)', padding: 4, borderRadius: 8, border: '1px solid #222' }}>
-          <button className={`btn ${colorMode === 'default' ? 'primary' : ''}`} onClick={() => setColorMode('default')}>Standard</button>
-          <button className={`btn ${colorMode === 'cognitive' ? 'primary' : ''}`} onClick={() => setColorMode('cognitive')}>Fog Heatmap</button>
-        </div>
+      {/* Overlay UI */}
+      <div style={{ position: 'absolute', top: 30, left: 30, pointerEvents: 'none' }}>
+        <div style={{ fontSize: 10, color: '#444', letterSpacing: 3, textTransform: 'uppercase', marginBottom: 4 }}>// cosmic_intent_atlas</div>
+        <div style={{ fontSize: 24, color: '#fff', fontWeight: 300, letterSpacing: -0.5 }}>The Project Universe</div>
       </div>
 
-      {/* Selected Node Overlay */}
       {selectedNode && (
-        <div style={{ position: 'absolute', top: 20, right: 20, width: 260, background: 'rgba(5,5,10,0.9)', border: '1px solid var(--accent-cyan)', padding: 20, borderRadius: 8, backdropFilter: 'blur(10px)' }}>
-          <div className="muted" style={{ fontSize: 9 }}>// node_focused</div>
-          <div style={{ fontSize: 14, color: 'var(--accent-cyan)', margin: '8px 0' }}>{selectedNode.fullName}</div>
-          <div className="panel" style={{ padding: 8, fontSize: 12, background: '#111' }}>
-             Debt Score: {selectedNode.debt?.toFixed(1)}%
+        <div style={{ 
+          position: 'absolute', top: 30, right: 30, width: 280, 
+          background: 'rgba(0,0,0,0.8)', border: '1px solid #222', 
+          borderRadius: 8, padding: 24, backdropFilter: 'blur(10px)' 
+        }}>
+          <div style={{ fontSize: 10, color: '#666', marginBottom: 8 }}>// celestial_body_focused</div>
+          <div style={{ fontSize: 18, color: '#00eeff', marginBottom: 16 }}>{selectedNode.name}</div>
+          <div className="panel" style={{ padding: 12, background: 'rgba(255,255,255,0.02)', fontSize: 13 }}>
+            Cognitive Debt: <span style={{ color: selectedNode.debt > 50 ? '#ff4444' : '#00ffaa' }}>{selectedNode.debt?.toFixed(1)}%</span>
           </div>
         </div>
       )}
 
-      {loading && <div style={{ position: 'absolute', top: '50%', left: '50%', color: 'var(--accent-cyan)' }}>GENERATING SPATIAL HIERARCHY...</div>}
+      {loading && (
+        <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', color: '#333', letterSpacing: 2 }}>
+          CALIBRATING TELESCOPE...
+        </div>
+      )}
     </div>
   )
 }
