@@ -39,6 +39,8 @@ export function AskPage({ onNotify }: { onNotify?: (msg: string) => void }) {
     const userText = input.trim()
     setInput('')
     
+    console.group(`%c[Consciousness] User: "${userText}"`, 'color: #3b82f6; font-weight: bold;')
+    
     const userMsgId = Date.now().toString()
     setMessages(prev => [...prev, { id: userMsgId, role: 'user', text: userText }])
     
@@ -48,6 +50,7 @@ export function AskPage({ onNotify }: { onNotify?: (msg: string) => void }) {
 
     try {
       const chatRes = await api.agentChat('scout', userText)
+      console.log('%cAgent Raw Response:', 'color: #9ca3af;', chatRes.response)
       
       let answer = chatRes.response
       let toolUsed: any = undefined
@@ -60,9 +63,10 @@ export function AskPage({ onNotify }: { onNotify?: (msg: string) => void }) {
           answer = parsed.answer
           toolUsed = parsed.tool_used
           toolData = parsed.tool_data
+          console.log(`%c[GenUI] Injected Artifact: ${toolUsed}`, 'color: #f59e0b; font-weight: bold;', toolData)
         }
       } catch {
-        // Not JSON, use as plain text
+        console.log('%c[GenUI] No artifact detected, rendering plain text.', 'color: #6b7280;')
       }
 
       setMessages(prev => prev.map(m => m.id === loadingMsgId ? {
@@ -74,6 +78,7 @@ export function AskPage({ onNotify }: { onNotify?: (msg: string) => void }) {
       } : m))
 
     } catch (e) {
+      console.error('%c[Consciousness Error]', 'color: #ef4444; font-weight: bold;', e)
       setMessages(prev => prev.map(m => m.id === loadingMsgId ? {
         ...m,
         text: '',
@@ -82,6 +87,7 @@ export function AskPage({ onNotify }: { onNotify?: (msg: string) => void }) {
       } : m))
     } finally {
       setIsTyping(false)
+      console.groupEnd()
     }
   }
 

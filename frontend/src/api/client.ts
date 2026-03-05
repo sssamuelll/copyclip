@@ -1,35 +1,79 @@
 import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, AgentResponse, AskResponse, RiskTrends, AlertRule, AlertsResponse, WeeklyExport, SchedulerState, AnalyzeJob, ArchaeologyResponse, StoryTimelineResponse, AdvisorCheckResponse, IdentityDriftResponse, DecisionLinkItem, CognitiveLoadResponse } from '../types/api'
 
+// --- Debugging Suite Helpers ---
+const logAPI = (method: string, url: string, start: number, payload?: any, response?: any, error?: any) => {
+  const duration = Date.now() - start
+  const color = error ? '#ef4444' : method === 'GET' ? '#06b6d4' : '#10b981'
+  
+  console.groupCollapsed(`%c[API] ${method} ${url} %c(${duration}ms)`, `color: ${color}; font-weight: bold;`, 'color: #6b7280; font-weight: normal;')
+  if (payload) console.log('%cPayload:', 'color: #9ca3af; font-weight: bold;', payload)
+  if (response) console.log('%cResponse:', 'color: #9ca3af; font-weight: bold;', response)
+  if (error) console.error('%cError:', 'color: #ef4444; font-weight: bold;', error)
+  console.groupEnd()
+}
+
 async function getJSON<T>(url: string): Promise<T> {
-  const r = await fetch(url)
-  if (!r.ok) throw new Error(`Request failed: ${r.status}`)
-  return r.json() as Promise<T>
+  const start = Date.now()
+  try {
+    const r = await fetch(url)
+    if (!r.ok) throw new Error(`Request failed: ${r.status}`)
+    const data = await r.json()
+    logAPI('GET', url, start, undefined, data)
+    return data as T
+  } catch (e) {
+    logAPI('GET', url, start, undefined, undefined, e)
+    throw e
+  }
 }
 
 async function postJSON<T>(url: string, data: any): Promise<T> {
-  const r = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  })
-  if (!r.ok) throw new Error(`Request failed: ${r.status}`)
-  return r.json() as Promise<T>
+  const start = Date.now()
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
+    if (!r.ok) throw new Error(`Request failed: ${r.status}`)
+    const resData = await r.json()
+    logAPI('POST', url, start, data, resData)
+    return resData as T
+  } catch (e) {
+    logAPI('POST', url, start, data, undefined, e)
+    throw e
+  }
 }
 
 async function patchJSON<T>(url: string, data: any): Promise<T> {
-  const r = await fetch(url, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  })
-  if (!r.ok) throw new Error(`Request failed: ${r.status}`)
-  return r.json() as Promise<T>
+  const start = Date.now()
+  try {
+    const r = await fetch(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
+    if (!r.ok) throw new Error(`Request failed: ${r.status}`)
+    const resData = await r.json()
+    logAPI('PATCH', url, start, data, resData)
+    return resData as T
+  } catch (e) {
+    logAPI('PATCH', url, start, data, undefined, e)
+    throw e
+  }
 }
 
 async function deleteJSON<T>(url: string): Promise<T> {
-  const r = await fetch(url, { method: 'DELETE' })
-  if (!r.ok) throw new Error(`Request failed: ${r.status}`)
-  return r.json() as Promise<T>
+  const start = Date.now()
+  try {
+    const r = await fetch(url, { method: 'DELETE' })
+    if (!r.ok) throw new Error(`Request failed: ${r.status}`)
+    const resData = await r.json()
+    logAPI('DELETE', url, start, undefined, resData)
+    return resData as T
+  } catch (e) {
+    logAPI('DELETE', url, start, undefined, undefined, e)
+    throw e
+  }
 }
 
 export const api = {
