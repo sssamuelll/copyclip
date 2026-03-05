@@ -817,6 +817,68 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
         ),
     )
 
+    # Identity drift metrics snapshot (v1)
+    decision_status_rows = conn.execute(
+        "SELECT status, COUNT(*) FROM decisions WHERE project_id=? GROUP BY status",
+        (project_id,),
+    ).fetchall()
+    status_counts = {str(r[0] or ""): int(r[1] or 0) for r in decision_status_rows}
+    total_decisions = max(1, sum(status_counts.values()))
+    aligned = status_counts.get("accepted", 0) + status_counts.get("resolved", 0)
+    decision_alignment_score = round((aligned / total_decisions) * 100.0, 2)
+
+    dep_count_row = conn.execute("SELECT COUNT(*) FROM dependencies WHERE project_id=?", (project_id,)).fetchone()
+    mod_count_row = conn.execute("SELECT COUNT(*) FROM modules WHERE project_id=?", (project_id,)).fetchone()
+    dep_count = int(dep_count_row[0] or 0) if dep_count_row else 0
+    mod_count = max(1, int(mod_count_row[0] or 0) if mod_count_row else 0)
+    architecture_cohesion_delta = round((dep_count / mod_count), 3)
+
+    risk_rows = conn.execute(
+        "SELECT score FROM risks WHERE project_id=? ORDER BY score DESC LIMIT 20",
+        (project_id,),
+    ).fetchall()
+    risk_scores = [max(0, int(r[0] or 0)) for r in risk_rows]
+    risk_total = sum(risk_scores)
+    risk_top3 = sum(risk_scores[:3])
+    risk_concentration_index = round((risk_top3 / max(1, risk_total)) * 100.0, 2)
+
+    drift_causes = []
+    if decision_alignment_score < 55:
+        drift_causes.append("Low decision alignment (many proposed/unresolved decisions)")
+    if architecture_cohesion_delta > 18:
+        drift_causes.append("High dependency density per module")
+    if risk_concentration_index > 65:
+        drift_causes.append("Risk concentration clustered in top hotspots")
+
+    drift_summary = {
+        "decision_alignment_score": decision_alignment_score,
+        "architecture_cohesion_delta": architecture_cohesion_delta,
+        "risk_concentration_index": risk_concentration_index,
+        "drift_level": "high" if len(drift_causes) >= 2 else ("med" if len(drift_causes) == 1 else "low"),
+    }
+
+    conn.execute(
+        """
+        INSERT INTO identity_drift_snapshots(
+            project_id,
+            decision_alignment_score,
+            architecture_cohesion_delta,
+            risk_concentration_index,
+            causes_json,
+            summary_json
+        )
+        VALUES(?,?,?,?,?,?)
+        """,
+        (
+            project_id,
+            decision_alignment_score,
+            architecture_cohesion_delta,
+            risk_concentration_index,
+            json.dumps(drift_causes),
+            json.dumps(drift_summary),
+        ),
+    )
+
     # Project Storytelling (Async)
     story = await _generate_project_story(root, project_id, conn)
     conn.execute("UPDATE projects SET story=? WHERE id=?", (story, project_id))

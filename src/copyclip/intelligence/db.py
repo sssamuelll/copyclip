@@ -168,6 +168,17 @@ def init_schema(conn: sqlite3.Connection) -> None:
             summary_json TEXT
         );
 
+        CREATE TABLE IF NOT EXISTS identity_drift_snapshots (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            generated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            decision_alignment_score REAL,
+            architecture_cohesion_delta REAL,
+            risk_concentration_index REAL,
+            causes_json TEXT,
+            summary_json TEXT
+        );
+
         CREATE TABLE IF NOT EXISTS config (
             key TEXT PRIMARY KEY,
             value TEXT
