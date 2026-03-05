@@ -10,13 +10,12 @@ It does two things well:
 
 ## The Real Value
 
-Most tools just copy files. CopyClip helps you:
+Most tools just copy files. CopyClip helps you **stay connected to your project** as AI agents generate more of its code:
 
-- **Compress context** so LLMs get signal, not noise
-- **Control scope** (only relevant files/subpaths)
-- **Reduce tokens** before sending prompts
-- **Generate structure views** (flow/dependencies) when needed
-- **Standardize handoffs** with repeatable presets and ignore rules
+- **Prevent Intent Drift:** Ensure agent-generated code aligns with your core architectural decisions.
+- **Reduce Cognitive Load:** Turn complex Git diffs into human-readable narratives.
+- **Control "Fog of War":** Track which parts of your project are becoming "dark" (unreviewed or purely agent-built).
+- **Compress context:** Ensure LLMs get high-signal context, including your active intent and constraints.
 
 In short: it turns “here’s my repo, help” into a deterministic, high-quality prompt payload.
 
@@ -139,7 +138,10 @@ Current dashboard covers:
 - **Git Stats:** Analysis of `.git` folder size, branches, and tags.
 - **Recent Change Timeline:** Deep-dive into commit history.
 - **Explicit Decision Tracking:** Manual and automated decision log.
-- **Risk Cards:** Severity + rationale for churn, complexity, and test gaps.
+- **Decision-to-Code Links:** Anchor decisions to file globs or modules.
+- **Risk Cards:** Severity + rationale for churn, complexity, test gaps, and intent-drift signals.
+- **Narrative Timeline:** Causal story view of project evolution.
+- **Fog of War:** Cognitive load panel for module-level cognitive debt.
 
 Fast start (recommended):
 
@@ -170,6 +172,23 @@ Track explicit decisions:
 copyclip decision add --title "Adopt WebGPU first for sim" --summary "CPU fallback remains required"
 copyclip decision list
 copyclip decision resolve 1
+```
+
+Anchor decisions to code (CCIA):
+
+```bash
+# Link a decision to a file surface
+copyclip decision link 12 --type file_glob --target "frontend/src/**/*.ts"
+
+# Link a decision to a module
+copyclip decision link 12 --type module --target "frontend"
+```
+
+Run intent audit:
+
+```bash
+copyclip audit --path .
+copyclip audit --json --limit 30
 ```
 
 Generate a quick human-readable report:
@@ -224,6 +243,19 @@ Health endpoint:
 
 ```bash
 curl http://127.0.0.1:4310/api/health
+```
+
+CCIA endpoints (examples):
+
+```bash
+# Intent manifesto for handoff
+curl http://127.0.0.1:4310/api/intent/manifesto
+
+# Decision links that apply to a specific path
+curl "http://127.0.0.1:4310/api/decision-links?path=frontend/src/App.tsx"
+
+# Cognitive load (Fog of War)
+curl http://127.0.0.1:4310/api/cognitive-load
 ```
 
 See full checklist: `docs/RELEASE_PREP_CHECKLIST.md`
