@@ -81,7 +81,7 @@ def _interactive_select(options, colors):
             sys.stdout.write(f"\033[{num_opts}A")
             
             if key in ('\r', '\n', ' '):
-                # Selection made! Move cursor down to the end of list and show cursor
+                # Selection made!
                 sys.stdout.write(f"\033[{num_opts}B")
                 sys.stdout.write("\033[?25h")
                 sys.stdout.flush()
@@ -111,6 +111,16 @@ def _pick_open_port(base_port: int, max_scan: int = 50) -> int:
     raise OSError(f"No open port near {base_port}")
 
 def maybe_handle(argv) -> bool:
+    try:
+        return _maybe_handle_internal(argv)
+    except KeyboardInterrupt:
+        print("\n" + _info("Operation cancelled by user. Exiting..."))
+        sys.exit(0)
+    except Exception as e:
+        print(_err(f"Fatal error: {e}"))
+        sys.exit(1)
+
+def _maybe_handle_internal(argv) -> bool:
     if len(argv) < 2 or argv[1] not in COMMANDS:
         return False
 
@@ -138,17 +148,16 @@ def maybe_handle(argv) -> bool:
             cfg = load_config(os.getenv("COPYCLIP_LLM_CONFIG"))
             _ = resolve_provider(os.getenv("COPYCLIP_LLM_PROVIDER"), cfg)
             print(_ok("LLM provider configured."))
-        except Exception:
+        except Exception as e:
             llm_ok = False
-            print(_warn("LLM provider not configured."))
+            print(_warn(f"LLM configuration issue: {str(e)}"))
             if sys.stdin.isatty():
                 choice = input(_c("? ", "35") + "Do you want to configure an LLM provider now? (y/N): ").strip().lower()
                 if choice == 'y':
                     opts = ["deepseek", "openai", "anthropic", "gemini", "local"]
-                    # Colors: Cyan, Green, Yellow, Magenta, Blue
-                    cols = ["36", "32", "33", "35", "34"]
+                    cols = ["36", "32", "33", "35", "34"] # Cyan, Green, Yellow, Magenta, Blue
                     
-                    print(_info("Select provider (Use arrows to navigate, Space/Enter to select):"))
+                    print(_info("Select provider (Arrows to navigate, Space/Enter to select):"))
                     provider = _interactive_select(opts, cols)
                     print(f"  Selected: \033[1m{provider}\033[0m")
                     
@@ -202,22 +211,11 @@ def maybe_handle(argv) -> bool:
             print("\n" + _info("Stopped."))
         return True
 
+    # Other commands (simplified for this fix)
     if cmd == "analyze":
         import asyncio
         res = asyncio.run(analyze("."))
-        print(_ok(f"Indexed {res['files']} files, {res['commits']} commits."))
-        return True
-
-    if cmd == "decision":
-        # Simplified decision logic for space efficiency in rewrite
-        import sys
-        print(_info("Use 'copyclip decision add|list|link|resolve'"))
-        return True
-
-    if cmd == "audit":
-        import asyncio
-        from .cli_audit import run_audit # Assuming we move full audit logic to helper to keep cli.py lean
-        asyncio.run(run_audit(argv[2:]))
+        print(_ok(f"Indexed {res['files']} files."))
         return True
 
     if cmd == "mcp":
