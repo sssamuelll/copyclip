@@ -1,4 +1,4 @@
-import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, AgentResponse, AskResponse, RiskTrends, AlertRule, AlertsResponse, WeeklyExport, SchedulerState, AnalyzeJob, ArchaeologyResponse, StoryTimelineResponse, AdvisorCheckResponse, IdentityDriftResponse } from '../types/api'
+import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, AgentResponse, AskResponse, RiskTrends, AlertRule, AlertsResponse, WeeklyExport, SchedulerState, AnalyzeJob, ArchaeologyResponse, StoryTimelineResponse, AdvisorCheckResponse, IdentityDriftResponse, DecisionLinkItem } from '../types/api'
 
 async function getJSON<T>(url: string): Promise<T> {
   const r = await fetch(url)
@@ -53,6 +53,9 @@ export const api = {
     }),
   addDecisionRef: (id: number, ref_type: 'file' | 'commit' | 'doc', ref_value: string) =>
     postJSON(`/api/decisions/${id}/refs`, { ref_type, ref_value }),
+  decisionLinks: (id: number) => getJSON<{ items: DecisionLinkItem[] }>(`/api/decisions/${id}/links`),
+  addDecisionLink: (id: number, link_type: 'file_glob' | 'module', target_pattern: string) =>
+    postJSON(`/api/decisions/${id}/links`, { link_type, target_pattern }),
   risks: () => getJSON<{ items: RiskItem[]; total?: number; limit?: number; offset?: number }>('/api/risks'),
   riskTrends: () => getJSON<RiskTrends>('/api/risks/trends'),
   alerts: () => getJSON<AlertsResponse>('/api/alerts'),

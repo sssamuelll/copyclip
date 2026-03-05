@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
-import type { DecisionHistoryItem, DecisionItem } from '../types/api'
+import type { DecisionHistoryItem, DecisionItem, DecisionLinkItem } from '../types/api'
 
 export function DecisionsPage({ items, focusDecisionId }: { items: DecisionItem[]; focusDecisionId?: number | null }) {
   const [selectedId, setSelectedId] = useState<number | null>(items[0]?.id ?? null)
   const [history, setHistory] = useState<DecisionHistoryItem[]>([])
+  const [links, setLinks] = useState<DecisionLinkItem[]>([])
   const [error, setError] = useState('')
   const [note, setNote] = useState('')
   const [tab, setTab] = useState<'all' | 'proposed' | 'accepted' | 'resolved' | 'superseded'>('all')
+  const [linkType, setLinkType] = useState<'file_glob' | 'module'>('file_glob')
+  const [targetPattern, setTargetPattern] = useState('')
 
   const filtered = useMemo(() => (tab === 'all' ? items : items.filter((d) => d.status === tab)), [items, tab])
   const selected = filtered.find((d) => d.id === selectedId) || items.find((d) => d.id === selectedId) || null
@@ -21,6 +24,15 @@ export function DecisionsPage({ items, focusDecisionId }: { items: DecisionItem[
     }
   }
 
+  const loadLinks = async (id: number) => {
+    try {
+      const res = await api.decisionLinks(id)
+      setLinks(res.items || [])
+    } catch {
+      setLinks([])
+    }
+  }
+
   useEffect(() => {
     if (!filtered.length) {
       setSelectedId(items[0]?.id ?? null)
@@ -30,7 +42,10 @@ export function DecisionsPage({ items, focusDecisionId }: { items: DecisionItem[
   }, [filtered, items, selectedId])
 
   useEffect(() => {
-    if (selectedId) loadHistory(selectedId)
+    if (selectedId) {
+      loadHistory(selectedId)
+      loadLinks(selectedId)
+    }
   }, [selectedId])
 
   useEffect(() => {
@@ -45,6 +60,19 @@ export function DecisionsPage({ items, focusDecisionId }: { items: DecisionItem[
       await loadHistory(selected.id)
     } catch (e: any) {
       setError(e?.message || 'Status update failed')
+    }
+  }
+
+  const addLink = async () => {
+    if (!selected || !targetPattern.trim()) return
+    setError('')
+    try {
+      await api.addDecisionLink(selected.id, linkType, targetPattern.trim())
+      setTargetPattern('')
+      await loadLinks(selected.id)
+      await loadHistory(selected.id)
+    } catch (e: any) {
+      setError(e?.message || 'Adding decision link failed')
     }
   }
 
@@ -107,6 +135,31 @@ export function DecisionsPage({ items, focusDecisionId }: { items: DecisionItem[
                   <button className="btn primary" onClick={() => onTransition('accepted')}>accept</button>
                   <button className="btn" onClick={() => onTransition('resolved')}>resolve</button>
                   <button className="btn" onClick={() => onTransition('superseded')}>supersede</button>
+                </div>
+
+                <div className="panel" style={{ padding: 10 }}>
+                  <div className="section-title" style={{ marginBottom: 6 }}>// intent_links (decision ↔ code)</div>
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                    <select value={linkType} onChange={(e) => setLinkType(e.target.value as any)} style={{ background: 'var(--bg)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}>
+                      <option value="file_glob">file_glob</option>
+                      <option value="module">module</option>
+                    </select>
+                    <input
+                      value={targetPattern}
+                      onChange={(e) => setTargetPattern(e.target.value)}
+                      placeholder={linkType === 'file_glob' ? 'frontend/src/**/*.ts' : 'module_name'}
+                      style={{ flex: 1, background: 'var(--bg)', color: 'var(--text-primary)', border: '1px solid var(--border)', padding: 8 }}
+                    />
+                    <button className="btn" onClick={addLink}>link</button>
+                  </div>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    {links.length ? links.map((l) => (
+                      <div key={l.id} className="row-item" style={{ margin: 0, border: '1px solid var(--border)', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: 12 }}>{l.link_type}: {l.target_pattern}</span>
+                        <span className="muted" style={{ fontSize: 11 }}>{l.created_at?.slice(0, 19) || 'n/a'}</span>
+                      </div>
+                    )) : <div className="muted">No intent links yet.</div>}
+                  </div>
                 </div>
 
                 {error && <div className="error">{error}</div>}

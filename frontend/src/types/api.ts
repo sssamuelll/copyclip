@@ -242,3 +242,10 @@ export type IdentityDriftResponse = {
     generated_at?: string
   }
 }
+
+export type DecisionLinkItem = {
+  id: number
+  link_type: 'file_glob' | 'module'
+  target_pattern: string
+  created_at: string
+}
