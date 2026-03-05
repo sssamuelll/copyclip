@@ -1,4 +1,4 @@
-import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, AgentResponse, AskResponse, RiskTrends, AlertRule, AlertsResponse, WeeklyExport, SchedulerState, AnalyzeJob, ArchaeologyResponse, StoryTimelineResponse } from '../types/api'
+import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, AgentResponse, AskResponse, RiskTrends, AlertRule, AlertsResponse, WeeklyExport, SchedulerState, AnalyzeJob, ArchaeologyResponse, StoryTimelineResponse, AdvisorCheckResponse } from '../types/api'
 
 async function getJSON<T>(url: string): Promise<T> {
   const r = await fetch(url)
@@ -79,5 +79,6 @@ export const api = {
   setConfig: (data: Record<string, string>) => postJSON<{ status: string }>('/api/config', data),
   architecture: () => getJSON<{ nodes: ArchNode[]; edges: ArchEdge[] }>('/api/architecture/graph'),
   ask: (question: string) => postJSON<AskResponse>('/api/ask', { question }),
+  decisionAdvisorCheck: (intent: string, files: string[] = []) => postJSON<AdvisorCheckResponse>('/api/decision-advisor/check', { intent, files }),
   assembleContext: (p: ContextPayload) => postJSON<{ context: string; warnings: string[] }>('/api/assemble-context', p)
 }

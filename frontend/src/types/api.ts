@@ -199,3 +199,25 @@ export type StoryTimelineResponse = {
     generated_at?: string
   }
 }
+
+export type AdvisorConflict = {
+  decision_id: number
+  title: string
+  status: string
+  why_conflict: string
+  confidence: number
+  suggested_alternative: string
+  matched_refs?: Array<{ ref_type: string; ref_value: string }>
+}
+
+export type AdvisorCheckResponse = {
+  ok: boolean
+  conflicts: AdvisorConflict[]
+  has_conflicts: boolean
+  intent?: string
+  checked_files?: string[]
+  meta?: {
+    project?: string
+    generated_at?: string
+  }
+}

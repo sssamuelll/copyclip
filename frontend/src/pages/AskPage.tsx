@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react'
 import { api } from '../api/client'
-import type { AskCitation, AskResponse } from '../types/api'
+import type { AdvisorConflict, AskCitation, AskResponse } from '../types/api'
 
 export function AskPage({ onOpenCitation, onNotify }: { onOpenCitation: (c: AskCitation) => void; onNotify?: (msg: string) => void }) {
   const [q, setQ] = useState('What are the highest-risk areas right now?')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<AskResponse | null>(null)
+  const [advisorConflicts, setAdvisorConflicts] = useState<AdvisorConflict[]>([])
   const [error, setError] = useState('')
 
   const grouped = useMemo(() => {
@@ -21,10 +22,20 @@ export function AskPage({ onOpenCitation, onNotify }: { onOpenCitation: (c: AskC
     if (!q.trim()) return
     setLoading(true)
     setError('')
+    setAdvisorConflicts([])
     try {
-      const res = await api.ask(q.trim())
+      const intent = q.trim()
+      const [res, advisor] = await Promise.all([
+        api.ask(intent),
+        api.decisionAdvisorCheck(intent, []),
+      ])
       setResult(res)
-      onNotify?.(res.grounded ? 'Grounded answer ready' : 'Low-grounding answer: review citations')
+      setAdvisorConflicts(advisor?.conflicts || [])
+      if ((advisor?.conflicts || []).length > 0) {
+        onNotify?.(`Advisor detected ${(advisor?.conflicts || []).length} potential decision conflict(s)`)
+      } else {
+        onNotify?.(res.grounded ? 'Grounded answer ready' : 'Low-grounding answer: review citations')
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Ask failed')
       setResult(null)
@@ -103,6 +114,29 @@ export function AskPage({ onOpenCitation, onNotify }: { onOpenCitation: (c: AskC
           </div>
         </div>
       </div>
+
+      {advisorConflicts.length > 0 && (
+        <div className="section-panel">
+          <div className="section-header">
+            <span className="section-title">// decision_advisor_conflicts</span>
+            <span className="badge badge-high">{advisorConflicts.length} conflicts</span>
+          </div>
+          <div style={{ display: 'grid', gap: 0 }}>
+            {advisorConflicts.map((c) => (
+              <div key={`adv-${c.decision_id}`} className="row-item" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%' }}>
+                  <span className="status-badge status-proposed">#dec-{String(c.decision_id).padStart(3, '0')}</span>
+                  <span className="muted" style={{ fontSize: 12 }}>confidence {Math.round((c.confidence || 0) * 100)}%</span>
+                  <button className="btn" style={{ marginLeft: 'auto' }} onClick={() => onOpenCitation({ type: 'decision', id: c.decision_id, label: `decision #${c.decision_id}` })}>open decision</button>
+                </div>
+                <div style={{ fontSize: 12 }}>{c.title}</div>
+                <div className="muted" style={{ fontSize: 12 }}>{c.why_conflict}</div>
+                <div className="muted" style={{ fontSize: 12 }}>suggested: {c.suggested_alternative}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {result && (
         <div className="section-panel">
