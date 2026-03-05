@@ -23,6 +23,13 @@ STAGE_METADATA_HASH = 1
 STAGE_IMPORT_GRAPH = 2
 STAGE_RISK_SIGNALS = 4
 
+DRIFT_THRESHOLDS = {
+    "decision_alignment_low": 55.0,
+    "architecture_cohesion_high": 18.0,
+    "risk_concentration_high": 65.0,
+}
+DRIFT_CALIBRATION_VERSION = "v1.1"
+
 
 class AnalysisCanceled(Exception):
     pass
@@ -817,7 +824,7 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
         ),
     )
 
-    # Identity drift metrics snapshot (v1)
+    # Identity drift metrics snapshot (calibrated v1.1)
     decision_status_rows = conn.execute(
         "SELECT status, COUNT(*) FROM decisions WHERE project_id=? GROUP BY status",
         (project_id,),
@@ -843,18 +850,28 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
     risk_concentration_index = round((risk_top3 / max(1, risk_total)) * 100.0, 2)
 
     drift_causes = []
-    if decision_alignment_score < 55:
+    if decision_alignment_score < DRIFT_THRESHOLDS["decision_alignment_low"]:
         drift_causes.append("Low decision alignment (many proposed/unresolved decisions)")
-    if architecture_cohesion_delta > 18:
+    if architecture_cohesion_delta > DRIFT_THRESHOLDS["architecture_cohesion_high"]:
         drift_causes.append("High dependency density per module")
-    if risk_concentration_index > 65:
+    if risk_concentration_index > DRIFT_THRESHOLDS["risk_concentration_high"]:
         drift_causes.append("Risk concentration clustered in top hotspots")
 
+    drift_level = "high" if len(drift_causes) >= 2 else ("med" if len(drift_causes) == 1 else "low")
     drift_summary = {
         "decision_alignment_score": decision_alignment_score,
         "architecture_cohesion_delta": architecture_cohesion_delta,
         "risk_concentration_index": risk_concentration_index,
-        "drift_level": "high" if len(drift_causes) >= 2 else ("med" if len(drift_causes) == 1 else "low"),
+        "drift_level": drift_level,
+        "calibration_version": DRIFT_CALIBRATION_VERSION,
+        "thresholds": DRIFT_THRESHOLDS,
+        "qa": {
+            "decision_count": total_decisions,
+            "dependency_count": dep_count,
+            "module_count": mod_count,
+            "risk_sample_size": len(risk_scores),
+            "risk_total": risk_total,
+        },
     }
 
     conn.execute(
