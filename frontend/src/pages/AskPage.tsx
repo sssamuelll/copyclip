@@ -46,8 +46,8 @@ export function AskPage({ onNotify }: { onNotify?: (msg: string) => void }) {
     setMessages(prev => [...prev, { id: loadingMsgId, role: 'assistant', text: 'Thinking...', loading: true }])
     setIsTyping(true)
 
-    try:
-      const chatRes = await api.agentsChat({ agent: 'scout', message: userText })
+    try {
+      const chatRes = await api.agentChat('scout', userText)
       
       let answer = chatRes.response
       let toolUsed: any = undefined
