@@ -1,11 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 import type { FileItem, IssueItem } from '../types/api'
+
+type Mode = 'full' | 'signatures' | 'docstrings'
 
 export function ContextBuilderPage() {
   const [files, setFiles] = useState<FileItem[]>([])
   const [issues, setIssues] = useState<IssueItem[]>([])
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set())
+  const [fileModes, setFileModes] = useState<Record<string, Mode>>({})
   const [selectedIssues, setSelectedIssues] = useState<Set<string>>(new Set())
   const [search, setSearch] = useState('')
   const [includeDecisions, setIncludeDecisions] = useState(true)
@@ -15,18 +18,29 @@ export function ContextBuilderPage() {
   const [warnings, setWarnings] = useState<string[]>([])
 
   useEffect(() => {
-    api.files().then(res => setFiles(res.items))
-    api.issues().then(res => setIssues(res.items))
+    api.files().then((res) => setFiles(res.items))
+    api.issues().then((res) => setIssues(res.items))
   }, [])
 
-  const filteredFiles = files.filter(f => f.path.toLowerCase().includes(search.toLowerCase()))
+  const filteredFiles = useMemo(() => files.filter((f) => f.path.toLowerCase().includes(search.toLowerCase())), [files, search])
 
   const toggleFile = (path: string) => {
     const next = new Set(selectedFiles)
     if (next.has(path)) next.delete(path)
     else next.add(path)
     setSelectedFiles(next)
-    setWarnings([]) // Reset warnings on change
+    if (!fileModes[path]) setFileModes((prev) => ({ ...prev, [path]: 'full' }))
+    setWarnings([])
+  }
+
+  const setMode = (path: string, mode: Mode) => {
+    setFileModes((prev) => ({ ...prev, [path]: mode }))
+  }
+
+  const applyModeToAllSelected = (mode: Mode) => {
+    const patch: Record<string, Mode> = {}
+    Array.from(selectedFiles).forEach((f) => (patch[f] = mode))
+    setFileModes((prev) => ({ ...prev, ...patch }))
   }
 
   const toggleIssue = (id: string) => {
@@ -34,8 +48,24 @@ export function ContextBuilderPage() {
     if (next.has(id)) next.delete(id)
     else next.add(id)
     setSelectedIssues(next)
-    setWarnings([]) // Reset warnings on change
+    setWarnings([])
   }
+
+  const selectedFileObjs = useMemo(() => files.filter((f) => selectedFiles.has(f.path)), [files, selectedFiles])
+
+  const estimatedTokens = useMemo(() => {
+    // rough estimator: 1 token ~ 4 chars, mode coefficients
+    const coeff = (m: Mode) => (m === 'full' ? 1 : m === 'signatures' ? 0.3 : 0.2)
+    const fileTokens = selectedFileObjs.reduce((acc, f) => {
+      const mode = fileModes[f.path] || 'full'
+      return acc + Math.ceil((f.size * coeff(mode)) / 4)
+    }, 0)
+    const issuesTokens = selectedIssues.size * 220
+    const decisionsTokens = includeDecisions ? 300 : 0
+    return fileTokens + issuesTokens + decisionsTokens
+  }, [selectedFileObjs, fileModes, selectedIssues, includeDecisions])
+
+  const budgetState: 'ok' | 'warn' | 'risk' = estimatedTokens > 28000 ? 'risk' : estimatedTokens > 14000 ? 'warn' : 'ok'
 
   const handleCopy = async () => {
     setLoading(true)
@@ -45,7 +75,7 @@ export function ContextBuilderPage() {
         files: Array.from(selectedFiles),
         issues: Array.from(selectedIssues),
         include_decisions: includeDecisions,
-        minimize
+        minimize,
       })
       await navigator.clipboard.writeText(res.context)
       if (res.warnings && res.warnings.length > 0) {
@@ -53,7 +83,7 @@ export function ContextBuilderPage() {
       }
       setCopied(true)
       setTimeout(() => setCopied(false), 2200)
-    } catch (e) {
+    } catch {
       alert('Failed to assemble context')
     } finally {
       setLoading(false)
@@ -61,82 +91,125 @@ export function ContextBuilderPage() {
   }
 
   return (
-    <section className="page">
-      <h2>Context Builder</h2>
-      <p className="muted" style={{ marginBottom: '2rem' }}>
-        Visually assemble your AI prompt. Select files, issues, and decisions to build the perfect context payload.
-      </p>
-      
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '2rem' }}>
-        <div className="panel" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '70vh', overflow: 'hidden' }}>
-          <h3>Available Context</h3>
-          <input 
-            type="text" 
-            placeholder="Search files..." 
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            style={{ background: '#000', border: '1px solid var(--border)', color: '#fff', padding: '8px', width: '100%' }}
-          />
-          
-          <div style={{ flex: 1, overflowY: 'auto' }}>
-            <div style={{ marginBottom: '1rem' }}>
-              <div className="muted" style={{ fontSize: '0.7rem', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Files</div>
-              {filteredFiles.slice(0, 50).map(f => (
-                <div key={f.path} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 0' }}>
-                  <input type="checkbox" checked={selectedFiles.has(f.path)} onChange={() => toggleFile(f.path)} />
-                  <span style={{ fontSize: '0.9rem', opacity: selectedFiles.has(f.path) ? 1 : 0.7 }}>{f.path}</span>
-                </div>
-              ))}
-              {filteredFiles.length > 50 && <div className="muted" style={{ fontSize: '0.7rem' }}>+ {filteredFiles.length - 50} more files</div>}
-            </div>
+    <section style={{ display: 'grid', gap: 12 }}>
+      <div className="page-header">
+        <h2 className="page-title">context cart</h2>
+      </div>
 
-            <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
-              <div className="muted" style={{ fontSize: '0.7rem', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Issues</div>
-              {issues.map(i => (
-                <div key={i.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 0' }}>
-                  <input type="checkbox" checked={selectedIssues.has(i.id)} onChange={() => toggleIssue(i.id)} />
-                  <span style={{ fontSize: '0.9rem', opacity: selectedIssues.has(i.id) ? 1 : 0.7 }}>#{i.id} {i.title}</span>
+      <div className="narrative-grid">
+        <div className="insight-card">
+          <div className="insight-title">// what_changed</div>
+          <div className="insight-text">Curate files/issues and tune granularity before sending context to AI.</div>
+        </div>
+        <div className="insight-card">
+          <div className="insight-title">// why_it_matters</div>
+          <div className="insight-text">Too much raw context increases token cost and dilutes signal.</div>
+        </div>
+        <div className="insight-card">
+          <div className="insight-title">// suggested_action</div>
+          <div className="insight-text">Start with signatures/docstrings for broad scope, then upgrade key files to full.</div>
+        </div>
+      </div>
+
+      <div className="split" style={{ gridTemplateColumns: '1.2fr 1fr' }}>
+        <div className="section-panel" style={{ minHeight: '68vh' }}>
+          <div className="section-header">
+            <span className="section-title">// available_context</span>
+          </div>
+
+          <div style={{ padding: 12, display: 'grid', gap: 10 }}>
+            <input
+              type="text"
+              placeholder="search files..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: 8 }}
+            />
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="btn" onClick={() => applyModeToAllSelected('full')}>all selected → full</button>
+              <button className="btn" onClick={() => applyModeToAllSelected('signatures')}>all selected → signatures</button>
+              <button className="btn" onClick={() => applyModeToAllSelected('docstrings')}>all selected → docstrings</button>
+            </div>
+          </div>
+
+          <div style={{ maxHeight: '40vh', overflowY: 'auto', borderTop: '1px solid var(--border)' }}>
+            {filteredFiles.slice(0, 120).map((f) => {
+              const selected = selectedFiles.has(f.path)
+              const mode = fileModes[f.path] || 'full'
+              return (
+                <div key={f.path} className="row-item" style={{ alignItems: 'flex-start', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
+                    <input type="checkbox" checked={selected} onChange={() => toggleFile(f.path)} />
+                    <span style={{ fontSize: 12, opacity: selected ? 1 : 0.75 }}>{f.path}</span>
+                    <span className="muted" style={{ marginLeft: 'auto', fontSize: 11 }}>{Math.round(f.size / 1024)}KB</span>
+                  </div>
+                  {selected && (
+                    <div style={{ display: 'flex', gap: 6, marginLeft: 24 }}>
+                      {(['full', 'signatures', 'docstrings'] as Mode[]).map((m) => (
+                        <button key={m} className="btn" style={mode === m ? { background: 'var(--bg-active)' } : undefined} onClick={() => setMode(f.path, m)}>
+                          {m}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
+              )
+            })}
+            {filteredFiles.length > 120 && <div className="muted" style={{ padding: 12 }}>+ {filteredFiles.length - 120} more files</div>}
+          </div>
+
+          <div style={{ borderTop: '1px solid var(--border)', padding: 12 }}>
+            <div className="section-title" style={{ marginBottom: 6 }}>// issues</div>
+            <div style={{ maxHeight: '16vh', overflowY: 'auto', display: 'grid', gap: 6 }}>
+              {issues.map((i) => (
+                <label key={i.id} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
+                  <input type="checkbox" checked={selectedIssues.has(i.id)} onChange={() => toggleIssue(i.id)} />
+                  <span>#{i.id} {i.title}</span>
+                </label>
               ))}
             </div>
           </div>
         </div>
-        
-        <div className="panel" style={{ border: '1px solid var(--accent)', background: 'rgba(16, 185, 129, 0.02)', display: 'flex', flexDirection: 'column' }}>
-          <h3>Your Payload</h3>
-          <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
-            {selectedFiles.size === 0 && selectedIssues.size === 0 && (
-              <div className="muted" style={{ textAlign: 'center', marginTop: '2rem' }}>No items selected</div>
-            )}
-            {Array.from(selectedFiles).map(f => (
-              <div key={f} style={{ fontSize: '0.8rem', padding: '2px 0', display: 'flex', justifyContent: 'space-between' }}>
-                <span>{f}</span>
-                <button onClick={() => toggleFile(f)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer' }}>×</button>
-              </div>
-            ))}
-            {Array.from(selectedIssues).map(id => (
-              <div key={id} style={{ fontSize: '0.8rem', padding: '2px 0', color: 'var(--accent)', display: 'flex', justifyContent: 'space-between' }}>
-                <span>Issue #{id}</span>
-                <button onClick={() => toggleIssue(id)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer' }}>×</button>
-              </div>
-            ))}
+
+        <div className="section-panel" style={{ borderColor: 'var(--accent)' }}>
+          <div className="section-header">
+            <span className="section-title">// payload</span>
+            <span className={`badge ${budgetState === 'risk' ? 'badge-high' : budgetState === 'warn' ? 'badge-med' : 'badge-low'}`}>
+              {budgetState === 'risk' ? 'over budget' : budgetState === 'warn' ? 'watch budget' : 'healthy'}
+            </span>
           </div>
 
-          <div style={{ padding: '1rem', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <div style={{ display: 'flex', gap: '1rem', fontSize: '0.8rem' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <input type="checkbox" checked={includeDecisions} onChange={e => setIncludeDecisions(e.target.checked)} />
-                Include Rules
+          <div style={{ padding: 12, display: 'grid', gap: 10 }}>
+            <div className="panel" style={{ padding: 10 }}>
+              <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>estimated_tokens</div>
+              <div style={{ fontSize: 24, fontFamily: 'JetBrains Mono, monospace' }}>{estimatedTokens.toLocaleString()}</div>
+              <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+                {selectedFiles.size} files · {selectedIssues.size} issues · decisions {includeDecisions ? 'on' : 'off'}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                <input type="checkbox" checked={includeDecisions} onChange={(e) => setIncludeDecisions(e.target.checked)} /> include decisions
               </label>
-              <select 
-                value={minimize} 
-                onChange={e => setMinimize(e.target.value as any)}
-                style={{ background: '#000', color: '#fff', border: '1px solid var(--border)' }}
-              >
-                <option value="basic">Basic Minimization</option>
-                <option value="aggressive">Aggressive</option>
-                <option value="structural">Structural</option>
+              <select value={minimize} onChange={(e) => setMinimize(e.target.value as any)} style={{ background: 'var(--bg)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}>
+                <option value="basic">basic</option>
+                <option value="aggressive">aggressive</option>
+                <option value="structural">structural</option>
               </select>
+            </div>
+
+            <div className="table" style={{ maxHeight: '30vh' }}>
+              <div className="table-header" style={{ gridTemplateColumns: '1fr 100px' }}>
+                <span>selected file</span><span>mode</span>
+              </div>
+              {selectedFileObjs.length ? selectedFileObjs.map((f) => (
+                <div key={f.path} className="table-row" style={{ gridTemplateColumns: '1fr 100px' }}>
+                  <span style={{ fontSize: 12 }}>{f.path}</span>
+                  <span className="muted" style={{ fontSize: 12 }}>{fileModes[f.path] || 'full'}</span>
+                </div>
+              )) : <div className="muted" style={{ padding: 12 }}>No files selected</div>}
             </div>
 
             {warnings.length > 0 && (
@@ -148,15 +221,9 @@ export function ContextBuilderPage() {
             )}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '0.8rem', opacity: 0.7 }}>
-                {selectedFiles.size} files, {selectedIssues.size} issues
-              </span>
-              <button 
-                className="btn primary" 
-                onClick={handleCopy} 
-                disabled={loading || (selectedFiles.size === 0 && selectedIssues.size === 0)}
-              >
-                {loading ? 'Assembling...' : copied ? 'COPIED!' : 'Copy Context'}
+              <span className="muted" style={{ fontSize: 12 }}>{copied ? 'copied to clipboard' : 'ready to assemble'}</span>
+              <button className="btn primary" onClick={handleCopy} disabled={loading || (selectedFiles.size === 0 && selectedIssues.size === 0)}>
+                {loading ? 'assembling…' : copied ? 'copied!' : 'copy context'}
               </button>
             </div>
           </div>
