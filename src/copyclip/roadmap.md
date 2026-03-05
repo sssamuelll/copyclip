@@ -1,70 +1,31 @@
-# 🚀 CopyClip → 10/10 Roadmap
+# 🚀 CopyClip → Strategic Roadmap
 
-## 1. Polish & Documentation (quick wins)
-
-- [ ] README.md with:
-  - Clear 1-liner (“Intelligent project copier for AI/dev workflows”)
-  - Demo GIF (CLI + flow diagram output)
-  - Install + Quickstart in 3 commands
-  - Example with `--view both`
-- [ ] CLI `--help` → super friendly, with usage examples
-- [ ] Minimal website (docsify or mkdocs) for online docs
-- [ ] Simple logo (SVG) for branding
+## ✅ Completed (v0.3.0)
+- [x] **Project Consciousness (GenUI):** Dynamic chat-first interface with component injection.
+- [x] **Intent Oracle (MCP):** Robust server for external agent alignment and semantic auditing.
+- [x] **Cosmic Atlas:** 3D Three.js engine with Sitting Tree and Constellation algorithms.
+- [x] **Vivid UX:** Interactive parallax, planetary scaling, and high-fidelity sidebar restoration.
+- [x] **The Chronicle:** Unified event timeline (commits + decisions + narrative).
+- [x] **Interactive Setup:** In-situ LLM configuration (DeepSeek, OpenAI, etc.) with persistence.
+- [x] **Cognitive Load Tracker:** Visualizing "Fog of War" based on agentic code ratio.
 
 ---
 
-## 2. Performance & Reliability
-
-- [x] Project Intelligence Dashboard (Core)
-- [x] Isolated project data (.copyclip folder)
-- [x] GitHub Issues & Git stats integration
-- [ ] File scan cache (hash + mtime) → instant re-scans
-- [ ] Metrics: log timings (scan, read, minimize, assemble)
-- [ ] Token cost report in contextual mode (🔥 AI-workflow differentiator)
-- [ ] Windows + Wayland clipboard fully tested
-- [ ] Configurable max file size + friendly error logs
+## 🌟 Priorities (Short-Term)
+1. **Interactive Artifacts:** Allow clicking Atlas nodes to trigger chat actions (e.g., "Summarize this module").
+2. **Planning Bi-directionality:** Enable drag-and-drop between Kanban columns to update DB status.
+3. **Audit Webhooks:** Automatic auditing of incoming Git commits via background workers.
+4. **Enhanced 3D Layers:** Filter Atlas nodes by author (Human vs. Agent) or specific architectural decisions.
 
 ---
 
-## 3. Extensibility
-
-- [ ] Plugin/hook system (e.g. `copyclip --plugin custom-minimizer`)
-- [ ] Optional PlantUML/Graphviz support in addition to Mermaid
-- [ ] Export to Markdown file in addition to clipboard
-
----
-
-## 4. Developer Experience
-
-- [ ] VSCode extension (simple: run CopyClip + paste output in editor)
-- [ ] JetBrains plugin (if time allows)
-- [ ] GitHub Action (copy project, minimize, attach to PR comment)
+## 🏆 1.0 Milestones: The "Intent Engine"
+- [ ] **VSCode Extension:** Integrated intent-aware handoffs directly in the IDE.
+- [ ] **Semantic Refactor Agent:** Specialized agent that suggests architectural cleanups based on intent drift.
+- [ ] **Multi-Repo Consciousness:** Connect multiple repositories into a single "Corporate Brain" Atlas.
+- [ ] **Exportable Constraints:** Generate `.copyclip/constraints.json` for external LLM system prompts.
 
 ---
 
-## 5. Community & Adoption
-
-- [ ] Publish to PyPI (`pip install copyclip`)
-- [ ] Homebrew Tap (`brew install copyclip`)
-- [ ] Blog post/Dev.to article: _“CopyClip: Share your codebase with AI in 1 command”_
-- [ ] Twitter/X demo thread with GIFs
-- [ ] Contributor guide (`CONTRIBUTING.md`)
-
----
-
-# 🌟 Priorities to reach 9/10 quickly
-
-1. README + GIF demo
-2. PyPI release
-3. Cache + telemetry + cost report
-4. Intent Anchoring (Phase 1: Decision-to-Code linkage)
-
----
-
-# 🏆 10/10 Milestones: The "Intent Engine"
-
-- **Cognitive Load Heatmap:** Visualizing "Fog of War" (unreviewed/agentic code) in the dashboard.
-- **Narrative Evolution UI:** Timeline of "Logic Story" instead of just Git diffs.
-- **Drift Detector (Audit):** Automatic detection of code changes that violate human architectural decisions.
-- **VSCode Extension:** Integrated intent-aware handoffs.
-- **Agent Constraints Generator:** Exportable `.copyclip/constraints.json` for external agents.
+# 🎯 Vision
+Evolve CopyClip into the **Project Mind**—a sentinel that prevents developers from losing ownership of their projects as AI agents generate more code.
