@@ -24,7 +24,7 @@ body {
 }
 
 .app { display: flex; min-height: 100vh; }
-.main { flex: 1; padding: 28px; display: flex; flex-direction: column; gap: 20px; overflow-y: auto; }
+.main { flex: 1; padding: 34px; display: flex; flex-direction: column; gap: 22px; overflow-y: auto; }
 
 .sidebar {
   width: 250px;
@@ -77,7 +77,7 @@ body {
 .section-link { color: var(--accent-green); font-size: 11px; text-decoration: none; }
 
 .kpi-row { display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); gap: 12px; }
-.kpi-card { padding: 16px; border: 1px solid var(--border); background: var(--panel); }
+.kpi-card { padding: 18px; border: 1px solid var(--border); background: var(--panel); }
 .kpi-label { font-size: 11px; color: var(--text-secondary); }
 .kpi-value { font-size: 28px; font-weight: 700; margin-top: 8px; }
 .kpi-change { font-size: 11px; margin-top: 8px; color: var(--text-secondary); }
@@ -87,7 +87,7 @@ body {
 .right-column { display: flex; flex-direction: column; gap: 14px; }
 
 .row-item {
-  padding: 12px 16px;
+  padding: 14px 16px;
   border-top: 1px solid var(--border);
   display: flex;
   align-items: center;

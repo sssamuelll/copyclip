@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ArchEdge, ArchNode } from '../types/api'
 
 export function ArchitecturePage({ nodes, edges }: { nodes: ArchNode[]; edges: ArchEdge[] }) {
-  const [selected, setSelected] = useState<string | null>(nodes[0]?.name ?? null)
+  const [selected, setSelected] = useState<string | null>(null)
 
   const stats = useMemo(() => {
     const map: Record<string, { inbound: number; outbound: number; links: string[] }> = {}
@@ -17,6 +17,21 @@ export function ArchitecturePage({ nodes, edges }: { nodes: ArchNode[]; edges: A
     }
     return map
   }, [nodes, edges])
+
+  useEffect(() => {
+    if (!nodes.length) {
+      setSelected(null)
+      return
+    }
+
+    // Pick the most connected module by default (better first impression than arbitrary folders)
+    const ranked = [...nodes]
+      .map((n) => ({ name: n.name, degree: (stats[n.name]?.inbound || 0) + (stats[n.name]?.outbound || 0) }))
+      .sort((a, b) => b.degree - a.degree)
+
+    const best = ranked.find((r) => !r.name.startsWith('.') && r.name !== 'root') || ranked[0]
+    if (!selected || !stats[selected]) setSelected(best?.name || null)
+  }, [nodes, stats, selected])
 
   const current = selected ? stats[selected] : null
 
