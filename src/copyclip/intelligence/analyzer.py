@@ -753,6 +753,70 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
         (project_id, json.dumps({**summary, "risk_breakdown": risk_breakdown})),
     )
 
+    # Story snapshots (longitudinal narrative substrate)
+    focus_rows = conn.execute(
+        "SELECT area, severity, kind, score FROM risks WHERE project_id=? ORDER BY score DESC, id DESC LIMIT 5",
+        (project_id,),
+    ).fetchall()
+    focus_areas = [
+        {
+            "area": r[0],
+            "severity": r[1],
+            "kind": r[2],
+            "score": int(r[3] or 0),
+        }
+        for r in focus_rows
+    ]
+
+    change_rows = conn.execute(
+        "SELECT sha, author, date, message FROM commits WHERE project_id=? ORDER BY date DESC LIMIT 6",
+        (project_id,),
+    ).fetchall()
+    major_changes = [
+        {
+            "sha": r[0],
+            "author": r[1],
+            "date": r[2],
+            "message": r[3],
+        }
+        for r in change_rows
+    ]
+
+    question_rows = conn.execute(
+        "SELECT id, title, status FROM decisions WHERE project_id=? AND status IN ('proposed','unresolved') ORDER BY id DESC LIMIT 6",
+        (project_id,),
+    ).fetchall()
+    open_questions = [
+        {
+            "decision_id": int(r[0]),
+            "title": r[1],
+            "status": r[2],
+        }
+        for r in question_rows
+    ]
+
+    story_snapshot_summary = {
+        "files": indexed,
+        "commits": commits,
+        "risks": risk_count,
+        "focus_count": len(focus_areas),
+        "open_questions_count": len(open_questions),
+    }
+
+    conn.execute(
+        """
+        INSERT INTO story_snapshots(project_id, focus_areas_json, major_changes_json, open_questions_json, summary_json)
+        VALUES(?,?,?,?,?)
+        """,
+        (
+            project_id,
+            json.dumps(focus_areas),
+            json.dumps(major_changes),
+            json.dumps(open_questions),
+            json.dumps(story_snapshot_summary),
+        ),
+    )
+
     # Project Storytelling (Async)
     story = await _generate_project_story(root, project_id, conn)
     conn.execute("UPDATE projects SET story=? WHERE id=?", (story, project_id))

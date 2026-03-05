@@ -158,6 +158,16 @@ def init_schema(conn: sqlite3.Connection) -> None:
             summary_json TEXT
         );
 
+        CREATE TABLE IF NOT EXISTS story_snapshots (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            generated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            focus_areas_json TEXT,
+            major_changes_json TEXT,
+            open_questions_json TEXT,
+            summary_json TEXT
+        );
+
         CREATE TABLE IF NOT EXISTS config (
             key TEXT PRIMARY KEY,
             value TEXT
