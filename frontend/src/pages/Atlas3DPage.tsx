@@ -23,10 +23,8 @@ export function Atlas3DPage() {
     let hoveredObject: THREE.Mesh | null = null
 
     const init = async () => {
-      // 1. Scene & Camera Setup
       scene = new THREE.Scene()
       scene.background = new THREE.Color(0x000000)
-      // Bloom effect simulation with light and fog
       scene.fog = new THREE.FogExp2(0x000000, 0.0005)
 
       camera = new THREE.PerspectiveCamera(60, containerRef.current!.clientWidth / containerRef.current!.clientHeight, 1, 4000)
@@ -40,7 +38,7 @@ export function Atlas3DPage() {
       raycaster = new THREE.Raycaster()
       mouse = new THREE.Vector2()
 
-      // 2. Bright Stars (The Vivid Universe)
+      // Stars
       const starGeometry = new THREE.BufferGeometry()
       const starPositions = []
       const starColors = []
@@ -48,30 +46,17 @@ export function Atlas3DPage() {
         starPositions.push(Math.random() * 3000 - 1500)
         starPositions.push(Math.random() * 3000 - 1500)
         starPositions.push(Math.random() * 3000 - 1500)
-        // Variety in star brightness
         const brightness = 0.5 + Math.random() * 0.5
         starColors.push(brightness, brightness, brightness)
       }
       starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starPositions, 3))
       starGeometry.setAttribute('color', new THREE.Float32BufferAttribute(starColors, 3))
-      
-      const starMaterial = new THREE.PointsMaterial({ 
-        size: 2, 
-        vertexColors: true,
-        transparent: true, 
-        opacity: 0.9,
-        blending: THREE.AdditiveBlending 
-      })
-      const stars = new THREE.Points(starGeometry, starMaterial)
-      starsGroup.add(stars)
+      const starMaterial = new THREE.PointsMaterial({ size: 2, vertexColors: true, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending })
+      starsGroup.add(new THREE.Points(starGeometry, starMaterial))
       scene.add(starsGroup)
 
-      // 3. Project Nodes (The Luminous Constellation)
       try {
-        const [{ nodes }, cog] = await Promise.all([
-          api.architecture(),
-          api.cognitiveLoad()
-        ])
+        const [{ nodes }, cog] = await Promise.all([api.architecture(), api.cognitiveLoad()])
         renderNodes(nodes, cog.items || [])
         setLoading(false)
       } catch (e) {
@@ -79,11 +64,7 @@ export function Atlas3DPage() {
       }
 
       scene.add(nodesGroup)
-      
-      // Additional ambient glow
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.2)
-      scene.add(ambientLight)
-
+      scene.add(new THREE.AmbientLight(0xffffff, 0.2))
       animate()
 
       window.addEventListener('resize', onWindowResize)
@@ -91,56 +72,78 @@ export function Atlas3DPage() {
       renderer.domElement.addEventListener('click', onMouseClick)
     }
 
+    const createTextLabel = (text: string) => {
+      const canvas = document.createElement('canvas')
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return null
+      
+      canvas.width = 256
+      canvas.height = 64
+      ctx.font = '24px IBM Plex Mono'
+      ctx.fillStyle = '#ffffff'
+      ctx.textAlign = 'center'
+      ctx.fillText(text, 128, 32)
+      
+      const texture = new THREE.CanvasTexture(canvas)
+      const material = new THREE.SpriteMaterial({ map: texture, transparent: true, opacity: 0.6 })
+      const sprite = new THREE.Sprite(material)
+      sprite.scale.set(60, 15, 1)
+      return sprite
+    }
+
     const renderNodes = (nodes: ArchNode[], cogItems: CognitiveLoadItem[]) => {
       nodes.forEach((node, i) => {
         const t = i / nodes.length
         const angle = 25 * t
         const radius = 500 * Math.sqrt(t)
-        
         const x = Math.cos(angle) * radius
         const y = (Math.random() - 0.5) * 150
         const z = Math.sin(angle) * radius
 
         const cog = cogItems.find(c => c.module === node.name)
         const debt = cog?.cognitive_debt_score || 0
-        
         const baseSize = 4 + (debt / 12)
+        
+        const nodeContainer = new THREE.Group()
+        nodeContainer.position.set(x, y, z)
+
         const geometry = new THREE.SphereGeometry(baseSize, 32, 32)
-        
-        // High visibility material
-        const material = new THREE.MeshBasicMaterial({ 
-          color: getDebtColor(debt),
-          transparent: true, 
-          opacity: 0.9
-        })
-        
+        const material = new THREE.MeshBasicMaterial({ color: getDebtColor(debt), transparent: true, opacity: 0.9 })
         const sphere = new THREE.Mesh(geometry, material)
-        sphere.position.set(x, y, z)
-        // Store metadata and original scale for animation
-        sphere.userData = { ...node, debt, originalScale: 1, baseSize }
-        nodesGroup.add(sphere)
+        sphere.userData = { ...node, debt, baseSize }
+        nodeContainer.add(sphere)
+
+        // Add Label below node
+        const label = createTextLabel(node.name.split('/').pop() || node.name)
+        if (label) {
+          label.position.set(0, -(baseSize + 15), 0)
+          nodeContainer.add(label)
+        }
+
+        nodesGroup.add(nodeContainer)
       })
     }
 
     const getDebtColor = (debt: number) => {
-      if (debt > 70) return 0xff2222 // Vivid Red
-      if (debt > 40) return 0xffcc00 // Bright Amber
-      return 0x00ffff // Neon Cyan
+      if (debt > 70) return 0xff2222
+      if (debt > 40) return 0xffcc00
+      return 0x00ffff
     }
 
     const onDocumentMouseMove = (event: MouseEvent) => {
       const rect = renderer.domElement.getBoundingClientRect()
       mouseX = event.clientX - windowHalfX
       mouseY = event.clientY - windowHalfY
-
       const mx = ((event.clientX - rect.left) / rect.width) * 2 - 1
       const my = -((event.clientY - rect.top) / rect.height) * 2 + 1
       
       raycaster.setFromCamera({ x: mx, y: my } as any, camera)
-      const intersects = raycaster.intersectObjects(nodesGroup.children)
+      // Check spheres within containers
+      const intersects = raycaster.intersectObjects(nodesGroup.children, true)
+      const validIntersects = intersects.filter(i => i.object.type === 'Mesh')
       
-      if (intersects.length > 0) {
-        const obj = intersects[0].object as THREE.Mesh
+      if (validIntersects.length > 0) {
+        const obj = validIntersects[0].object as THREE.Mesh
         if (hoveredObject !== obj) {
           if (hoveredObject) resetNode(hoveredObject)
           hoveredObject = obj
@@ -155,18 +158,26 @@ export function Atlas3DPage() {
     }
 
     const highlightNode = (node: THREE.Mesh) => {
-      // Scale up and increase brightness
-      node.scale.set(2.5, 2.5, 2.5) // "Suddendly get closer" effect
+      node.scale.set(2.5, 2.5, 2.5)
       const mat = node.material as THREE.MeshBasicMaterial
       mat.opacity = 1.0
-      // Add a point light to selected node temporarily could be expensive, 
-      // instead we rely on color/scale for now.
+      // Highlight label
+      const label = node.parent?.children.find(c => c.type === 'Sprite') as THREE.Sprite
+      if (label) {
+        (label.material as THREE.SpriteMaterial).opacity = 1.0
+        label.scale.set(80, 20, 1)
+      }
     }
 
     const resetNode = (node: THREE.Mesh) => {
       node.scale.set(1, 1, 1)
       const mat = node.material as THREE.MeshBasicMaterial
       mat.opacity = 0.9
+      const label = node.parent?.children.find(c => c.type === 'Sprite') as THREE.Sprite
+      if (label) {
+        (label.material as THREE.SpriteMaterial).opacity = 0.6
+        label.scale.set(60, 15, 1)
+      }
     }
 
     const onMouseClick = (event: MouseEvent) => {
@@ -174,12 +185,10 @@ export function Atlas3DPage() {
       const mx = ((event.clientX - rect.left) / rect.width) * 2 - 1
       const my = -((event.clientY - rect.top) / rect.height) * 2 + 1
       raycaster.setFromCamera({ x: mx, y: my } as any, camera)
-      const intersects = raycaster.intersectObjects(nodesGroup.children)
-      if (intersects.length > 0) {
-        setSelectedNode(intersects[0].object.userData)
-      } else {
-        setSelectedNode(null)
-      }
+      const intersects = raycaster.intersectObjects(nodesGroup.children, true)
+      const sphere = intersects.find(i => i.object.type === 'Mesh')
+      if (sphere) setSelectedNode(sphere.object.userData)
+      else setSelectedNode(null)
     }
 
     const onWindowResize = () => {
@@ -193,27 +202,23 @@ export function Atlas3DPage() {
 
     const animate = () => {
       animationId = requestAnimationFrame(animate)
-      
-      // Parallax
       camera.position.x += (mouseX - camera.position.x) * 0.03
       camera.position.y += (-mouseY - camera.position.y) * 0.03
       camera.lookAt(scene.position)
-
-      // Rotations
       starsGroup.rotation.y += 0.0003
       nodesGroup.rotation.y += 0.0006
 
-      // Interpolate scale for smooth hover
-      nodesGroup.children.forEach(child => {
-        const targetScale = hoveredObject === child ? 2.2 : 1.0
-        child.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.1)
+      // Smooth hover scale
+      nodesGroup.children.forEach(container => {
+        const sphere = container.children.find(c => c.type === 'Mesh') as THREE.Mesh
+        const targetScale = hoveredObject === sphere ? 2.2 : 1.0
+        sphere.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.1)
       })
 
       renderer.render(scene, camera)
     }
 
     init()
-
     return () => {
       cancelAnimationFrame(animationId)
       window.removeEventListener('resize', onWindowResize)
@@ -226,19 +231,12 @@ export function Atlas3DPage() {
   return (
     <div style={{ position: 'relative', width: '100%', height: 'calc(100vh - 100px)', background: '#000', borderRadius: 12, overflow: 'hidden' }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
-      
       <div style={{ position: 'absolute', top: 30, left: 30, pointerEvents: 'none' }}>
-        <div style={{ fontSize: 10, color: '#555', letterSpacing: 3, textTransform: 'uppercase', marginBottom: 4 }}>// vivid_cosmic_atlas_v3</div>
+        <div style={{ fontSize: 10, color: '#555', letterSpacing: 3, textTransform: 'uppercase', marginBottom: 4 }}>// cosmic_intent_atlas_v3</div>
         <div style={{ fontSize: 24, color: '#fff', fontWeight: 300, letterSpacing: -0.5 }}>The Project Universe</div>
       </div>
-
       {selectedNode && (
-        <div style={{ 
-          position: 'absolute', top: 30, right: 30, width: 280, 
-          background: 'rgba(0,0,0,0.85)', border: '1px solid #333', 
-          borderRadius: 8, padding: 24, backdropFilter: 'blur(12px)',
-          boxShadow: '0 0 20px rgba(0,238,255,0.1)'
-        }}>
+        <div style={{ position: 'absolute', top: 30, right: 30, width: 280, background: 'rgba(0,0,0,0.85)', border: '1px solid #333', borderRadius: 8, padding: 24, backdropFilter: 'blur(12px)', boxShadow: '0 0 20px rgba(0,238,255,0.1)' }}>
           <div style={{ fontSize: 10, color: '#888', marginBottom: 8 }}>// celestial_body_focused</div>
           <div style={{ fontSize: 18, color: '#00ffff', marginBottom: 16, fontWeight: 500 }}>{selectedNode.name}</div>
           <div className="panel" style={{ padding: 12, background: 'rgba(255,255,255,0.03)', fontSize: 13, border: '1px solid #222' }}>
@@ -246,12 +244,7 @@ export function Atlas3DPage() {
           </div>
         </div>
       )}
-
-      {loading && (
-        <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', color: '#00ffff', letterSpacing: 2, fontWeight: 'bold' }}>
-          IGNITING THE UNIVERSE...
-        </div>
-      )}
+      {loading && <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', color: '#00ffff', letterSpacing: 2, fontWeight: 'bold' }}>IGNITING THE UNIVERSE...</div>}
     </div>
   )
 }
