@@ -26,6 +26,7 @@ export function RisksPage({ items, focusRiskArea }: { items: RiskItem[]; focusRi
   const sortedByScore = [...items].sort((a, b) => b.score - a.score)
   const escalated = sortedByScore.slice(0, 2)
   const top = sortedByScore[0]
+  const intentDriftCount = items.filter((i) => i.kind === 'intent_drift').length
 
   return (
     <section style={{ display: 'grid', gap: 12 }}>
@@ -44,7 +45,10 @@ export function RisksPage({ items, focusRiskArea }: { items: RiskItem[]; focusRi
         </div>
         <div className="insight-card">
           <div className="insight-title">// suggested_action</div>
-          <div className="insight-text">Prioritize top 3 risks, then link each to a decision or mitigation owner.</div>
+          <div className="insight-text">
+            Prioritize top 3 risks, then link each to a decision or mitigation owner.
+            {intentDriftCount > 0 ? ` ${intentDriftCount} intent-drift signal(s) need immediate decision review.` : ''}
+          </div>
         </div>
       </div>
 
@@ -62,9 +66,12 @@ export function RisksPage({ items, focusRiskArea }: { items: RiskItem[]; focusRi
           <div style={{ display: 'grid', gap: 8 }}>
             {escalated.map((r, i) => (
               <div key={`${r.area}-${i}`} className="panel" style={{ padding: 10, borderColor: i === 0 ? 'var(--accent-red)' : 'var(--accent-amber)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
                   <span>{r.area}</span>
-                  <strong style={{ color: r.score > 70 ? 'var(--accent-red)' : 'var(--accent-amber)' }}>{r.score}</strong>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    {r.kind === 'intent_drift' && <span className="badge badge-intent">intent</span>}
+                    <strong style={{ color: r.score > 70 ? 'var(--accent-red)' : 'var(--accent-amber)' }}>{r.score}</strong>
+                  </div>
                 </div>
                 <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>{r.rationale}</div>
               </div>
@@ -87,7 +94,7 @@ export function RisksPage({ items, focusRiskArea }: { items: RiskItem[]; focusRi
             >
               <span><span className={`badge badge-${r.severity}`}>{r.severity}</span></span>
               <span>{r.area}</span>
-              <span className="muted">{r.kind}</span>
+              <span>{r.kind === 'intent_drift' ? <span className="badge badge-intent">intent_drift</span> : <span className="muted">{r.kind}</span>}</span>
               <span style={{ color: r.score > 70 ? 'var(--accent-red)' : r.score > 40 ? 'var(--accent-amber)' : 'var(--accent-green)' }}>{r.score}</span>
               <span className="muted" style={{ fontSize: 12 }}>{r.rationale}</span>
             </div>

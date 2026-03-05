@@ -163,6 +163,7 @@ export function AtlasPage({ overview, changes, risks, decisions }: Props) {
             {risks.slice(0, 6).map((r, i) => (
               <div className="row-item" key={`${r.area}-${i}`}>
                 <span className={`badge badge-${r.severity}`}>{r.severity}</span>
+                {r.kind === 'intent_drift' && <span className="badge badge-intent">intent</span>}
                 <span className="commit-msg">{r.area}</span>
                 <span className="commit-meta">{r.score}</span>
               </div>

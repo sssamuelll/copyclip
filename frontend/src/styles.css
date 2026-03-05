@@ -140,6 +140,7 @@ body {
 .badge-high { color: var(--accent-red); border-color: var(--accent-red); background: rgba(239,68,68,.12); }
 .badge-med { color: var(--accent-amber); border-color: var(--accent-amber); background: rgba(245,158,11,.12); }
 .badge-low { color: var(--accent-green); border-color: var(--accent-green); background: rgba(16,185,129,.12); }
+.badge-intent { color: #a78bfa; border-color: #a78bfa; background: rgba(167,139,250,.14); }
 
 .status-badge { font-size: 10px; border: 1px solid; padding: 3px 8px; }
 .status-proposed { color: var(--accent-amber); border-color: var(--accent-amber); background: rgba(245,158,11,.12); }
