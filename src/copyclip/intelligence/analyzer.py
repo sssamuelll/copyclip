@@ -24,6 +24,10 @@ STAGE_IMPORT_GRAPH = 2
 STAGE_RISK_SIGNALS = 4
 
 
+class AnalysisCanceled(Exception):
+    pass
+
+
 # Brief: _generate_project_story
 
 async def _generate_project_story(root: str, project_id: int, conn) -> str:
@@ -327,10 +331,21 @@ def _analyze_git_folder(project_root: str, project_id: int, conn) -> Dict:
 
 # Brief: analyze
 
-async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, checkpoint_every: int = 500, checkpoint_cb=None) -> Dict[str, int]:
+async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, checkpoint_every: int = 500, checkpoint_cb=None, should_cancel=None) -> Dict[str, int]:
     root = os.path.abspath(project_root)
     conn = connect(root)
     init_schema(conn)
+
+    def _check_canceled():
+        try:
+            if callable(should_cancel) and should_cancel():
+                raise AnalysisCanceled("analysis canceled")
+        except AnalysisCanceled:
+            raise
+        except Exception:
+            pass
+
+    _check_canceled()
 
     name = os.path.basename(root)
     conn.execute(
@@ -430,6 +445,7 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
 
     changed_modules: Set[str] = set()
     for p, rel in discovered:
+        _check_canceled()
         try:
             st = p.stat()
             if st.st_size > 2_000_000:
@@ -492,6 +508,7 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
         scanned_items = list(pool.map(_scan_item, queued))
 
     for scanned in scanned_items:
+        _check_canceled()
         if scanned.get("skip"):
             continue
         try:
@@ -598,6 +615,7 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
     commits = 0
     if log:
         for line in log.splitlines():
+            _check_canceled()
             try:
                 sha, author, date, msg = line.split("|", 3)
                 conn.execute(
@@ -613,6 +631,7 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
     current_sha = None
     if raw_changes:
         for line in raw_changes.splitlines():
+            _check_canceled()
             line = line.strip()
             if not line:
                 continue
@@ -632,6 +651,7 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
 
     # churn risks
     for file_path, score in churn.most_common(10):
+        _check_canceled()
         sev = "high" if score >= 8 else ("med" if score >= 4 else "low")
         conn.execute(
             "INSERT INTO risks(project_id,area,severity,kind,rationale,score) VALUES(?,?,?,?,?,?)",
@@ -649,6 +669,7 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
     # test gap risks: changed non-test files without nearby tests
     test_bases = {_base_for_test_match(p) for p in repo_files if _is_test_path(p)}
     for file_path, score in churn.most_common(25):
+        _check_canceled()
         if _is_test_path(file_path):
             continue
         base = _base_for_test_match(file_path)
@@ -669,6 +690,7 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
 
     # complexity risks
     for file_path, cscore in sorted(complexity_by_file.items(), key=lambda x: x[1], reverse=True)[:10]:
+        _check_canceled()
         if cscore < 18:
             continue
         sev = "high" if cscore >= 35 else ("med" if cscore >= 24 else "low")
@@ -684,6 +706,8 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
             ),
         )
         risk_count += 1
+
+    _check_canceled()
 
     # Persist incremental file-state snapshot for next run.
     conn.execute("DELETE FROM analysis_file_state WHERE project_id=?", (project_id,))

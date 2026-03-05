@@ -55,6 +55,16 @@ export function OpsPage({ onNotify }: { onNotify?: (msg: string) => void }) {
     }
   }
 
+  const onCancelAnalyze = async () => {
+    try {
+      const res = await api.cancelAnalyzeJob()
+      await refresh()
+      onNotify?.(res.cancel_requested ? `Cancel requested for ${res.job_id.slice(0, 8)}` : 'Cancel request sent')
+    } catch (e: any) {
+      onNotify?.(`Cancel failed: ${e?.message || 'unknown error'}`)
+    }
+  }
+
   const onCreateRule = async () => {
     await api.upsertAlertRule({
       ...newRule,
@@ -128,6 +138,7 @@ export function OpsPage({ onNotify }: { onNotify?: (msg: string) => void }) {
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <button onClick={onStartAnalyze}>Start incremental analyze</button>
           <button onClick={onResumeAnalyze}>Resume last failed job</button>
+          <button onClick={onCancelAnalyze} disabled={!activeJob}>Cancel active job</button>
           {activeJob ? (
             <span>
               {activeJob.status} / {activeJob.phase || 'analyzing'} — {activeJob.processed}/{activeJob.total}

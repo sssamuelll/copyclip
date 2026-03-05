@@ -55,6 +55,8 @@ def run_server(project_root: str, port: int = 4310) -> None:
     }
 
     analysis_lock = threading.Lock()
+    cancel_lock = threading.Lock()
+    cancel_events = {}
 
     def _count_project_files(base_root: str) -> int:
         ignored_dirs = {".git", ".venv", "node_modules", ".copyclip", "dist", "build", "__pycache__"}
@@ -251,6 +253,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
     def _start_analysis_job(pid: int, resume_from: int = 0, checkpoint_every: int = 500):
         job_id = str(uuid.uuid4())
         total = _count_project_files(root)
+        cancel_event = threading.Event()
         conn_j = connect(root)
         init_schema(conn_j)
         conn_j.execute(
@@ -259,6 +262,8 @@ def run_server(project_root: str, port: int = 4310) -> None:
         )
         conn_j.commit()
         conn_j.close()
+        with cancel_lock:
+            cancel_events[job_id] = cancel_event
 
         def _runner():
             with analysis_lock:
@@ -273,7 +278,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 publish_event("analyze.progress", {"job_id": job_id, "status": "running", "phase": "analyzing", "processed": int(resume_from or 0), "total": total})
 
                 try:
-                    from .analyzer import analyze
+                    from .analyzer import AnalysisCanceled, analyze
 
                     def _on_progress(phase, processed, total_local, message):
                         _set_job_phase(job_id, phase, int(processed or 0), int(total_local or 0), str(message or ""))
@@ -306,6 +311,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                             start_cursor=int(resume_from or 0),
                             checkpoint_every=int(checkpoint_every or 500),
                             checkpoint_cb=_on_checkpoint,
+                            should_cancel=cancel_event.is_set,
                         )
                     )
                     conn_d = connect(root)
@@ -317,6 +323,16 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     conn_d.commit()
                     conn_d.close()
                     publish_event("analyze.completed", {"job_id": job_id, "summary": summary})
+                except AnalysisCanceled:
+                    conn_c = connect(root)
+                    init_schema(conn_c)
+                    conn_c.execute(
+                        "UPDATE analysis_jobs SET status='canceled', phase=?, message=?, finished_at=CURRENT_TIMESTAMP WHERE id=?",
+                        (PHASE_ERROR, "analysis canceled by user", job_id),
+                    )
+                    conn_c.commit()
+                    conn_c.close()
+                    publish_event("analyze.canceled", {"job_id": job_id})
                 except Exception as e:
                     conn_e = connect(root)
                     init_schema(conn_e)
@@ -327,6 +343,9 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     conn_e.commit()
                     conn_e.close()
                     publish_event("analyze.failed", {"job_id": job_id, "error": str(e)})
+                finally:
+                    with cancel_lock:
+                        cancel_events.pop(job_id, None)
 
         threading.Thread(target=_runner, daemon=True).start()
         return job_id
@@ -1125,7 +1144,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     return
 
                 last = conn.execute(
-                    "SELECT checkpoint_cursor,total FROM analysis_jobs WHERE project_id=? AND status IN ('failed','queued','running') ORDER BY started_at DESC LIMIT 1",
+                    "SELECT checkpoint_cursor,total FROM analysis_jobs WHERE project_id=? AND status IN ('failed','queued','running','canceled') ORDER BY started_at DESC LIMIT 1",
                     (pid,),
                 ).fetchone()
                 if not last:
@@ -1140,6 +1159,30 @@ def run_server(project_root: str, port: int = 4310) -> None:
 
                 job_id = _start_analysis_job(pid, resume_from=resume_from)
                 self._json(with_meta({"ok": True, "job_id": job_id, "already_running": False, "resume_from": resume_from}))
+                return
+
+            if parsed.path == "/api/analyze/cancel":
+                running = conn.execute(
+                    "SELECT id,status FROM analysis_jobs WHERE project_id=? AND status IN ('queued','running') ORDER BY started_at DESC LIMIT 1",
+                    (pid,),
+                ).fetchone()
+                if not running:
+                    self._json({"error": "no_running_job"}, 404)
+                    return
+
+                job_id = str(running[0])
+                with cancel_lock:
+                    ev = cancel_events.get(job_id)
+                    if ev:
+                        ev.set()
+
+                conn.execute(
+                    "UPDATE analysis_jobs SET message=? WHERE id=?",
+                    ("cancel requested", job_id),
+                )
+                conn.commit()
+                publish_event("analyze.cancel_requested", {"job_id": job_id})
+                self._json(with_meta({"ok": True, "job_id": job_id, "cancel_requested": True}))
                 return
 
             if parsed.path == "/api/alerts/scheduler":

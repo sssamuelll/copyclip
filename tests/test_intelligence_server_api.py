@@ -182,6 +182,29 @@ def test_context_bundle_endpoint_returns_manifest():
         assert res["manifest"][0]["path"] == "src/auth/session.ts"
 
 
+def test_analyze_cancel_without_running_job_returns_404():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        root_path = str(root.absolute())
+        conn = connect(root_path)
+        init_schema(conn)
+        conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root_path, "tmp"))
+        conn.commit()
+
+        port = _free_port()
+        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
+        th.start()
+        _wait_port(port)
+
+        try:
+            _post_json(f"http://127.0.0.1:{port}/api/analyze/cancel", {})
+            assert False, "Expected HTTPError"
+        except HTTPError as e:
+            assert e.code == 404
+            payload = json.loads(e.read().decode("utf-8"))
+            assert payload.get("error") == "no_running_job"
+
+
 def test_risk_trends_endpoint_works_with_snapshot_breakdown():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
