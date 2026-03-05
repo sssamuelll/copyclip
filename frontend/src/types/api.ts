@@ -180,3 +180,22 @@ export type ArchaeologyResponse = {
     generated_at?: string
   }
 }
+
+export type StoryTimelineItem = {
+  id: number
+  generated_at: string
+  focus_areas: Array<{ area: string; severity: string; kind: string; score: number }>
+  major_changes: Array<{ sha: string; author: string; date: string; message: string }>
+  open_questions: Array<{ decision_id: number; title: string; status: string }>
+  summary: Record<string, number>
+}
+
+export type StoryTimelineResponse = {
+  items: StoryTimelineItem[]
+  total: number
+  range_days: number
+  meta?: {
+    project?: string
+    generated_at?: string
+  }
+}

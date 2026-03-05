@@ -1,4 +1,6 @@
-import type { ChangeItem, DecisionItem, Overview, RiskItem } from '../types/api'
+import { useEffect, useState } from 'react'
+import { api } from '../api/client'
+import type { ChangeItem, DecisionItem, Overview, RiskItem, StoryTimelineItem } from '../types/api'
 
 type Props = {
   overview?: Overview
@@ -8,6 +10,12 @@ type Props = {
 }
 
 export function AtlasPage({ overview, changes, risks, decisions }: Props) {
+  const [storyItems, setStoryItems] = useState<StoryTimelineItem[]>([])
+
+  useEffect(() => {
+    api.storyTimeline('30d').then((res) => setStoryItems(res.items || [])).catch(() => setStoryItems([]))
+  }, [])
+
   const proposed = decisions.filter((d) => d.status === 'proposed').length
   const unresolved = decisions.filter((d) => d.status === 'unresolved').length
   const topRisk = [...risks].sort((a, b) => b.score - a.score)[0]
@@ -50,6 +58,29 @@ export function AtlasPage({ overview, changes, risks, decisions }: Props) {
           <div className="insight-text">
             {proposed > 0 ? `Review ${proposed} proposed decision(s) before next major refactor.` : 'No pending proposals. Validate risk hotspots and schedule refactor windows.'}
           </div>
+        </div>
+      </div>
+
+      <div className="section-panel">
+        <div className="section-header">
+          <span className="section-title">// story_timeline_30d</span>
+          <span className="muted" style={{ fontSize: 11 }}>{storyItems.length} snapshots</span>
+        </div>
+        <div style={{ maxHeight: '34vh', overflowY: 'auto' }}>
+          {storyItems.length ? storyItems.slice(0, 12).map((s) => (
+            <div key={s.id} className="row-item" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span className="muted" style={{ fontSize: 11 }}>{(s.generated_at || '').replace('T', ' ').slice(0, 19)}</span>
+                <span className="badge badge-low">focus {s.focus_areas?.length || 0}</span>
+                <span className="badge badge-med">changes {s.major_changes?.length || 0}</span>
+                <span className="badge badge-high">questions {s.open_questions?.length || 0}</span>
+              </div>
+              <div style={{ fontSize: 12, marginTop: 6 }}>
+                Top focus: {s.focus_areas?.[0]?.area || 'n/a'}
+                {s.major_changes?.[0]?.message ? ` · latest change: ${s.major_changes[0].message}` : ''}
+              </div>
+            </div>
+          )) : <div className="muted" style={{ padding: 12 }}>No story snapshots yet. Run analyze to build timeline memory.</div>}
         </div>
       </div>
 
