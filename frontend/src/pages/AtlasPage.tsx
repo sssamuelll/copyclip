@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
-import type { ChangeItem, DecisionItem, Overview, RiskItem, StoryTimelineItem } from '../types/api'
+import type { ChangeItem, DecisionItem, IdentityDriftItem, Overview, RiskItem, StoryTimelineItem } from '../types/api'
 
 type Props = {
   overview?: Overview
@@ -11,9 +11,11 @@ type Props = {
 
 export function AtlasPage({ overview, changes, risks, decisions }: Props) {
   const [storyItems, setStoryItems] = useState<StoryTimelineItem[]>([])
+  const [driftCurrent, setDriftCurrent] = useState<IdentityDriftItem | null>(null)
 
   useEffect(() => {
     api.storyTimeline('30d').then((res) => setStoryItems(res.items || [])).catch(() => setStoryItems([]))
+    api.identityDrift('30d').then((res) => setDriftCurrent(res.current || null)).catch(() => setDriftCurrent(null))
   }, [])
 
   const proposed = decisions.filter((d) => d.status === 'proposed').length
@@ -81,6 +83,61 @@ export function AtlasPage({ overview, changes, risks, decisions }: Props) {
               </div>
             </div>
           )) : <div className="muted" style={{ padding: 12 }}>No story snapshots yet. Run analyze to build timeline memory.</div>}
+        </div>
+      </div>
+
+      <div className="section-panel">
+        <div className="section-header">
+          <span className="section-title">// identity_drift_30d</span>
+          {driftCurrent && (
+            <span className={`badge ${driftLevel(driftCurrent) === 'high' ? 'badge-high' : driftLevel(driftCurrent) === 'med' ? 'badge-med' : 'badge-low'}`}>
+              {driftLevel(driftCurrent)}
+            </span>
+          )}
+        </div>
+        <div style={{ padding: 12, display: 'grid', gap: 10 }}>
+          {driftCurrent ? (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(120px, 1fr))', gap: 10 }}>
+                <div className="panel" style={{ padding: 10 }}>
+                  <div className="muted" style={{ fontSize: 11 }}>decision_alignment</div>
+                  <div style={{ fontSize: 18 }}>{driftCurrent.decision_alignment_score.toFixed(1)}%</div>
+                </div>
+                <div className="panel" style={{ padding: 10 }}>
+                  <div className="muted" style={{ fontSize: 11 }}>architecture_cohesion_delta</div>
+                  <div style={{ fontSize: 18 }}>{driftCurrent.architecture_cohesion_delta.toFixed(2)}</div>
+                </div>
+                <div className="panel" style={{ padding: 10 }}>
+                  <div className="muted" style={{ fontSize: 11 }}>risk_concentration</div>
+                  <div style={{ fontSize: 18 }}>{driftCurrent.risk_concentration_index.toFixed(1)}%</div>
+                </div>
+              </div>
+              <div>
+                <div className="section-title" style={{ marginBottom: 6 }}>// top_causes</div>
+                {driftCurrent.causes?.length ? (
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    {driftCurrent.causes.slice(0, 4).map((c, i) => (
+                      <div key={`cause-${i}`} className="muted">• {c}</div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="muted">No major drift causes detected. Current state appears stable.</div>
+                )}
+              </div>
+              <div>
+                <div className="section-title" style={{ marginBottom: 6 }}>// stabilization_actions</div>
+                <div className="muted">
+                  {driftLevel(driftCurrent) === 'high'
+                    ? 'Freeze non-critical refactors, resolve proposed decisions, and rebalance top risk hotspots.'
+                    : driftLevel(driftCurrent) === 'med'
+                      ? 'Prioritize decision closure and reduce dependency hotspots in highest-risk modules.'
+                      : 'Keep current direction; validate new AI-generated changes against accepted decisions.'}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="muted">No drift snapshot yet. Run analyze to compute identity drift signals.</div>
+          )}
         </div>
       </div>
 
@@ -152,4 +209,15 @@ function normalizeStatus(status: string) {
   if (status === 'superseded') return 'superseded'
   if (status === 'unresolved') return 'unresolved'
   return 'proposed'
+}
+
+function driftLevel(d: IdentityDriftItem): 'low' | 'med' | 'high' {
+  const causes = d.causes?.length || 0
+  if (causes >= 2) return 'high'
+  if (causes === 1) return 'med'
+
+  // Fallback from score thresholds if causes are missing.
+  if (d.decision_alignment_score < 55 || d.risk_concentration_index > 70 || d.architecture_cohesion_delta > 20) return 'high'
+  if (d.decision_alignment_score < 70 || d.risk_concentration_index > 55 || d.architecture_cohesion_delta > 14) return 'med'
+  return 'low'
 }

@@ -221,3 +221,24 @@ export type AdvisorCheckResponse = {
     generated_at?: string
   }
 }
+
+export type IdentityDriftItem = {
+  id: number
+  generated_at: string
+  decision_alignment_score: number
+  architecture_cohesion_delta: number
+  risk_concentration_index: number
+  causes: string[]
+  summary: Record<string, any>
+}
+
+export type IdentityDriftResponse = {
+  items: IdentityDriftItem[]
+  total: number
+  range_days: number
+  current: IdentityDriftItem | null
+  meta?: {
+    project?: string
+    generated_at?: string
+  }
+}
