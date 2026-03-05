@@ -427,6 +427,59 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 }))
                 return
 
+            if parsed.path == "/api/identity/drift":
+                if not pid:
+                    self._json(with_meta({"items": [], "total": 0, "range_days": 30, "current": None}))
+                    return
+
+                q = parse_qs(parsed.query or "")
+                raw_range = (q.get("range", ["30d"])[0] or "30d").strip().lower()
+                m = re.match(r"^(\d+)(d)?$", raw_range)
+                range_days = int(m.group(1)) if m else 30
+                range_days = max(1, min(range_days, 365))
+
+                rows = conn.execute(
+                    """
+                    SELECT id, generated_at, decision_alignment_score, architecture_cohesion_delta, risk_concentration_index, causes_json, summary_json
+                    FROM identity_drift_snapshots
+                    WHERE project_id=? AND datetime(generated_at) >= datetime('now', ?)
+                    ORDER BY datetime(generated_at) DESC
+                    LIMIT 400
+                    """,
+                    (pid, f"-{range_days} days"),
+                ).fetchall()
+
+                items = []
+                for r in rows:
+                    try:
+                        causes = json.loads(r[5] or "[]")
+                    except Exception:
+                        causes = []
+                    try:
+                        summary = json.loads(r[6] or "{}")
+                    except Exception:
+                        summary = {}
+                    items.append(
+                        {
+                            "id": int(r[0]),
+                            "generated_at": r[1],
+                            "decision_alignment_score": float(r[2] or 0),
+                            "architecture_cohesion_delta": float(r[3] or 0),
+                            "risk_concentration_index": float(r[4] or 0),
+                            "causes": causes,
+                            "summary": summary,
+                        }
+                    )
+
+                current = items[0] if items else None
+                self._json(with_meta({
+                    "items": items,
+                    "total": len(items),
+                    "range_days": range_days,
+                    "current": current,
+                }))
+                return
+
             if parsed.path == "/api/story/timeline":
                 if not pid:
                     self._json(with_meta({"items": [], "total": 0, "range_days": 30}))
