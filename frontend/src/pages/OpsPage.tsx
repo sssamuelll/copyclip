@@ -126,6 +126,7 @@ export function OpsPage({ onNotify }: { onNotify?: (msg: string) => void }) {
 
   const activeJob = analysisJobs.find((j) => j.status === 'running' || j.status === 'queued') || null
   const latestJob = analysisJobs[0] || null
+  const cancelRequested = Boolean(activeJob && (activeJob.message || '').toLowerCase().includes('cancel requested'))
   const progressRatio = activeJob && activeJob.total > 0 ? Math.min(1, Math.max(0, activeJob.processed / activeJob.total)) : 0
   const progressPct = Math.round(progressRatio * 100)
 
@@ -144,6 +145,7 @@ export function OpsPage({ onNotify }: { onNotify?: (msg: string) => void }) {
               {activeJob.status} / {activeJob.phase || 'analyzing'} — {activeJob.processed}/{activeJob.total}
               {activeJob.throughput_fps != null ? ` • ${activeJob.throughput_fps} files/s` : ''}
               {activeJob.eta_sec != null ? ` • ETA ${activeJob.eta_sec}s` : ''}
+              {cancelRequested ? ' • ⚠ cancel requested' : ''}
             </span>
           ) : (
             <span className="muted">No active analyze job.</span>
@@ -170,13 +172,17 @@ export function OpsPage({ onNotify }: { onNotify?: (msg: string) => void }) {
           <div className="muted">No jobs yet.</div>
         ) : (
           <ul>
-            {analysisJobs.slice(0, 8).map((j) => (
-              <li key={j.id}>
-                {j.id.slice(0, 8)} — {j.status} / {j.phase || 'n/a'} — {j.processed}/{j.total}
-                {j.checkpoint_cursor != null ? ` • cp:${j.checkpoint_cursor}` : ''}
-                {j.eta_sec != null ? ` • ETA ${j.eta_sec}s` : ''}
-              </li>
-            ))}
+            {analysisJobs.slice(0, 8).map((j) => {
+              const jobCancelRequested = ((j.message || '').toLowerCase().includes('cancel requested'))
+              return (
+                <li key={j.id}>
+                  {j.id.slice(0, 8)} — {j.status} / {j.phase || 'n/a'} — {j.processed}/{j.total}
+                  {j.checkpoint_cursor != null ? ` • cp:${j.checkpoint_cursor}` : ''}
+                  {j.eta_sec != null ? ` • ETA ${j.eta_sec}s` : ''}
+                  {jobCancelRequested ? ' • ⚠ cancel requested' : ''}
+                </li>
+              )
+            })}
           </ul>
         )}
       </div>
