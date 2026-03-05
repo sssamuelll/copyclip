@@ -239,10 +239,17 @@ def maybe_handle(argv) -> bool:
         return True
 
     if cmd == "audit":
+        import asyncio
+        import re
+        from copyclip.llm_client import LLMClientFactory
+        from copyclip.llm.config import load_config
+        from copyclip.llm.provider_config import resolve_provider
+
         p = argparse.ArgumentParser("copyclip audit")
         p.add_argument("--path", default=".")
         p.add_argument("--json", action="store_true", dest="as_json")
         p.add_argument("--limit", type=int, default=20)
+        p.add_argument("--semantic", action=argparse.BooleanOptionalAction, default=True, help="Run semantic drift checks with LLM (default: on)")
         args = p.parse_args(argv[2:])
 
         root = os.path.abspath(args.path)
@@ -272,6 +279,117 @@ def maybe_handle(argv) -> bool:
             (pid,),
         ).fetchone()[0]
 
+        semantic_violations = []
+
+        if args.semantic and intent_risks:
+            try:
+                cfg = load_config(os.getenv("COPYCLIP_LLM_CONFIG"))
+                prov = resolve_provider(os.getenv("COPYCLIP_LLM_PROVIDER"), cfg)
+                client = LLMClientFactory.create(
+                    prov["name"],
+                    api_key=prov.get("api_key"),
+                    model=prov.get("model"),
+                    endpoint=prov.get("base_url"),
+                    timeout=30,
+                )
+
+                async def _semantic_check(decision_text: str, code_diff: str) -> tuple[int, str]:
+                    prompt = f"""
+You are an intent drift auditor.
+
+Decision intent:
+{decision_text}
+
+Code diff:
+{code_diff[:8000]}
+
+Question: Does this change contradict the decision intent?
+Return exactly:
+Score: <0-100>
+Reason: <one concise paragraph>
+""".strip()
+                    out = await client.minimize_code_contextually(prompt, "text", "en")
+                    m = re.search(r"Score\s*:\s*(\d{1,3})", out or "", flags=re.IGNORECASE)
+                    score = int(m.group(1)) if m else 0
+                    score = max(0, min(100, score))
+                    reason = out or "No explanation returned"
+                    return score, reason
+
+                for r in intent_risks:
+                    area = r[0]
+
+                    # Find linked decisions applicable to this file path.
+                    drows = conn.execute(
+                        """
+                        SELECT d.id, d.title, d.summary, dl.link_type, dl.target_pattern
+                        FROM decision_links dl
+                        JOIN decisions d ON d.id = dl.decision_id
+                        WHERE dl.project_id=? AND d.project_id=? AND d.status IN ('accepted','resolved')
+                        ORDER BY d.id DESC
+                        """,
+                        (pid, pid),
+                    ).fetchall()
+
+                    applicable = []
+                    for dr in drows:
+                        ltype = dr[3]
+                        target = dr[4] or ""
+                        matched = False
+                        if ltype == "file_glob":
+                            from fnmatch import fnmatch
+                            matched = fnmatch(area, target)
+                        elif ltype == "module":
+                            matched = area.startswith(f"{target}/") or area == target
+                        if matched:
+                            applicable.append(dr)
+
+                    if not applicable:
+                        continue
+
+                    # Get latest diff for file
+                    code_diff = ""
+                    try:
+                        code_diff = subprocess.check_output(
+                            ["git", "log", "-n", "1", "-p", "--", area],
+                            cwd=root,
+                            text=True,
+                            stderr=subprocess.DEVNULL,
+                            timeout=10,
+                        )
+                    except Exception:
+                        code_diff = f"(diff unavailable for {area})"
+
+                    for dr in applicable[:2]:
+                        did, title, summary = int(dr[0]), dr[1] or "", dr[2] or ""
+                        decision_text = f"Decision #{did}: {title}\n{summary}"
+                        score, reason = asyncio.run(_semantic_check(decision_text, code_diff))
+                        if score >= 55:
+                            conn.execute(
+                                "INSERT INTO risks(project_id,area,severity,kind,rationale,score) VALUES(?,?,?,?,?,?)",
+                                (
+                                    pid,
+                                    area,
+                                    "high" if score >= 80 else "med",
+                                    "semantic_drift",
+                                    f"Decision #{did} semantic audit: {reason[:700]}",
+                                    score,
+                                ),
+                            )
+                            semantic_violations.append(
+                                {
+                                    "decision_id": did,
+                                    "decision_title": title,
+                                    "area": area,
+                                    "score": score,
+                                    "reason": reason[:800],
+                                }
+                            )
+                conn.commit()
+            except Exception as e:
+                semantic_violations.append({
+                    "error": f"semantic_audit_failed: {e}",
+                })
+
         payload = {
             "decision_links": int(link_count),
             "decisions_total": int(decision_count),
@@ -286,6 +404,7 @@ def maybe_handle(argv) -> bool:
                 }
                 for r in intent_risks
             ],
+            "semantic_violations": semantic_violations,
         }
 
         if args.as_json:
@@ -296,13 +415,21 @@ def maybe_handle(argv) -> bool:
         print(_info(f"Decision links: {payload['decision_links']} | Decisions: {payload['decisions_total']} | Unresolved: {payload['decisions_unresolved']}"))
         if not payload["intent_drift_risks"]:
             print(_ok("No intent-drift risks detected."))
-            return True
+        else:
+            print(_warn(f"Detected {len(payload['intent_drift_risks'])} intent-drift risk signals:"))
+            for i, r in enumerate(payload["intent_drift_risks"], start=1):
+                print(f"{i:02d}. [{r['severity']}] score={r['score']} area={r['area']}")
+                if r.get("rationale"):
+                    print(f"    ↳ {r['rationale'][:180]}")
 
-        print(_warn(f"Detected {len(payload['intent_drift_risks'])} intent-drift risk signals:"))
-        for i, r in enumerate(payload["intent_drift_risks"], start=1):
-            print(f"{i:02d}. [{r['severity']}] score={r['score']} area={r['area']}")
-            if r.get("rationale"):
-                print(f"    ↳ {r['rationale'][:180]}")
+        if semantic_violations:
+            print(_warn(f"Semantic drift violations: {len([v for v in semantic_violations if 'score' in v])}"))
+            for v in semantic_violations[:10]:
+                if 'error' in v:
+                    print(_warn(v['error']))
+                    continue
+                print(f"- [score={v['score']}] area={v['area']} vs #dec-{v['decision_id']}: {v['decision_title']}")
+                print(f"  ↳ {v['reason'][:200]}")
         return True
 
     if cmd == "issue":
