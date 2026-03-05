@@ -7,6 +7,7 @@ import sys
 import threading
 import time
 import uuid
+import subprocess
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -588,6 +589,93 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     "total": total,
                     "limit": limit,
                     "offset": offset,
+                }))
+                return
+
+            if parsed.path == "/api/archaeology":
+                if not pid:
+                    self._json(with_meta({"file": None, "commits": [], "related_decisions": []}))
+                    return
+                params = parse_qs(parsed.query or "")
+                target_file = (params.get("file", [""])[0] or "").strip()
+                if not target_file:
+                    self._json({"error": "file_required", "message": "Query param 'file' is required"}, 400)
+                    return
+
+                commits = []
+                try:
+                    proc = subprocess.run(
+                        [
+                            "git",
+                            "log",
+                            "--pretty=format:%H\t%an\t%ad\t%s",
+                            "--date=iso",
+                            "-n",
+                            "12",
+                            "--",
+                            target_file,
+                        ],
+                        cwd=root,
+                        capture_output=True,
+                        text=True,
+                        timeout=8,
+                        check=False,
+                    )
+                    for line in (proc.stdout or "").splitlines():
+                        parts = line.split("\t", 3)
+                        if len(parts) != 4:
+                            continue
+                        sha, author, date, message = parts
+                        commits.append({
+                            "sha": sha,
+                            "author": author,
+                            "date": date,
+                            "message": message,
+                        })
+                except Exception:
+                    commits = []
+
+                rows = conn.execute(
+                    """
+                    SELECT d.id, d.title, d.status, d.source_type, dr.ref_type, dr.ref_value
+                    FROM decisions d
+                    LEFT JOIN decision_refs dr ON dr.decision_id = d.id
+                    WHERE d.project_id=?
+                    ORDER BY d.id DESC
+                    """,
+                    (pid,),
+                ).fetchall()
+
+                related = {}
+                for r in rows:
+                    did, title, status, source_type, ref_type, ref_value = r
+                    match = False
+                    ref_value = ref_value or ""
+                    if ref_type == "file" and ref_value == target_file:
+                        match = True
+                    elif ref_type == "commit" and any(c["sha"].startswith(ref_value) for c in commits):
+                        match = True
+                    elif ref_type == "doc" and target_file.lower() in ref_value.lower():
+                        match = True
+
+                    if match:
+                        if did not in related:
+                            related[did] = {
+                                "id": did,
+                                "title": title,
+                                "status": status,
+                                "source_type": source_type,
+                                "matched_refs": [],
+                            }
+                        related[did]["matched_refs"].append({
+                            "ref_type": ref_type,
+                            "ref_value": ref_value,
+                        })
+
+                self._json(with_meta({
+                    "file": target_file,
+                    "commits": commits,
+                    "related_decisions": list(related.values()),
                 }))
                 return
 

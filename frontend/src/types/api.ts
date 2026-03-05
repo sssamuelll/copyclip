@@ -155,3 +155,28 @@ export type AnalyzeJob = {
 
 export type ArchNode = { name: string }
 export type ArchEdge = { from: string; to: string; type: string }
+
+export type ArchaeologyCommit = {
+  sha: string
+  author: string
+  date: string
+  message: string
+}
+
+export type ArchaeologyDecision = {
+  id: number
+  title: string
+  status: string
+  source_type?: string
+  matched_refs: Array<{ ref_type: string; ref_value: string }>
+}
+
+export type ArchaeologyResponse = {
+  file: string
+  commits: ArchaeologyCommit[]
+  related_decisions: ArchaeologyDecision[]
+  meta?: {
+    project?: string
+    generated_at?: string
+  }
+}

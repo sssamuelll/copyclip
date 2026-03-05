@@ -1,9 +1,38 @@
-import type { ChangeItem } from '../types/api'
+import { useEffect, useMemo, useState } from 'react'
+import { api } from '../api/client'
+import type { ArchaeologyResponse, ChangeItem, FileItem } from '../types/api'
 
 export function ChangesPage({ items, focusCommitId }: { items: ChangeItem[]; focusCommitId?: string | null }) {
   const sorted = [...items]
   const highImpact = sorted.slice(0, 3)
   const latest = sorted[0]
+
+  const [files, setFiles] = useState<FileItem[]>([])
+  const [fileQuery, setFileQuery] = useState('')
+  const [arch, setArch] = useState<ArchaeologyResponse | null>(null)
+  const [archLoading, setArchLoading] = useState(false)
+  const [archError, setArchError] = useState('')
+
+  useEffect(() => {
+    api.files().then((res) => setFiles(res.items)).catch(() => {})
+  }, [])
+
+  const suggestions = useMemo(() => files.filter((f) => f.path.toLowerCase().includes(fileQuery.toLowerCase())).slice(0, 20), [files, fileQuery])
+
+  const runArchaeology = async () => {
+    if (!fileQuery.trim()) return
+    setArchError('')
+    setArchLoading(true)
+    try {
+      const res = await api.archaeology(fileQuery.trim())
+      setArch(res)
+    } catch (e) {
+      setArch(null)
+      setArchError(e instanceof Error ? e.message : 'Archaeology request failed')
+    } finally {
+      setArchLoading(false)
+    }
+  }
 
   return (
     <section style={{ display: 'grid', gap: 12 }}>
@@ -41,6 +70,65 @@ export function ChangesPage({ items, focusCommitId }: { items: ChangeItem[]; foc
 
       <div className="section-panel">
         <div className="section-header">
+          <span className="section-title">// git_archaeology</span>
+        </div>
+        <div style={{ padding: 12, display: 'grid', gap: 10 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              list="arch-file-list"
+              value={fileQuery}
+              onChange={(e) => setFileQuery(e.target.value)}
+              placeholder="enter file path (e.g. frontend/src/App.tsx)"
+              style={{ flex: 1, background: 'var(--bg)', color: 'var(--text-primary)', border: '1px solid var(--border)', padding: 8 }}
+            />
+            <button className="btn" onClick={runArchaeology} disabled={archLoading || !fileQuery.trim()}>
+              {archLoading ? 'loading…' : 'inspect'}
+            </button>
+            <datalist id="arch-file-list">
+              {suggestions.map((s) => (
+                <option key={s.path} value={s.path} />
+              ))}
+            </datalist>
+          </div>
+
+          {archError && <div className="error">{archError}</div>}
+
+          {arch && (
+            <div className="split" style={{ gridTemplateColumns: '1fr 1fr' }}>
+              <div className="panel" style={{ padding: 10 }}>
+                <div className="section-title" style={{ marginBottom: 8 }}>// commits_for_file</div>
+                <div style={{ display: 'grid', gap: 8 }}>
+                  {arch.commits.length ? arch.commits.slice(0, 8).map((c) => (
+                    <div key={c.sha} className="row-item" style={{ margin: 0, border: '1px solid var(--border)' }}>
+                      <span className="commit-sha">{c.sha.slice(0, 7)}</span>
+                      <span className="commit-msg">{c.message}</span>
+                    </div>
+                  )) : <div className="muted">No git history found for this file.</div>}
+                </div>
+              </div>
+
+              <div className="panel" style={{ padding: 10 }}>
+                <div className="section-title" style={{ marginBottom: 8 }}>// related_decisions</div>
+                <div style={{ display: 'grid', gap: 8 }}>
+                  {arch.related_decisions.length ? arch.related_decisions.map((d) => (
+                    <div key={d.id} className="row-item" style={{ margin: 0, border: '1px solid var(--border)', flexDirection: 'column', alignItems: 'flex-start' }}>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <span className={`status-badge status-${normalizeStatus(d.status)}`}>{d.status}</span>
+                        <span className="muted" style={{ fontSize: 11 }}>#dec-{String(d.id).padStart(3, '0')}</span>
+                      </div>
+                      <div style={{ fontSize: 12 }}>{d.title}</div>
+                      <div className="muted" style={{ fontSize: 11 }}>refs: {d.matched_refs.map((r) => `${r.ref_type}:${r.ref_value}`).join(', ')}</div>
+                    </div>
+                  )) : <div className="muted">No linked decisions found for this file/commit history.</div>}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="section-panel">
+        <div className="section-header">
           <span className="section-title">// commit_timeline</span>
           <span className="muted" style={{ fontSize: 11 }}>{items.length} commits indexed</span>
         </div>
@@ -57,4 +145,12 @@ export function ChangesPage({ items, focusCommitId }: { items: ChangeItem[]; foc
       </div>
     </section>
   )
+}
+
+function normalizeStatus(status: string) {
+  if (status === 'accepted') return 'accepted'
+  if (status === 'resolved') return 'resolved'
+  if (status === 'superseded') return 'superseded'
+  if (status === 'unresolved') return 'unresolved'
+  return 'proposed'
 }
