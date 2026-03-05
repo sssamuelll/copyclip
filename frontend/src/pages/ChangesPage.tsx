@@ -107,9 +107,25 @@ export function ChangesPage({
                 <div className="section-title" style={{ marginBottom: 8 }}>// commits_for_file</div>
                 <div style={{ display: 'grid', gap: 8 }}>
                   {arch.commits.length ? arch.commits.slice(0, 8).map((c) => (
-                    <div key={c.sha} className="row-item" style={{ margin: 0, border: '1px solid var(--border)' }}>
-                      <span className="commit-sha">{c.sha.slice(0, 7)}</span>
-                      <span className="commit-msg">{c.message}</span>
+                    <div key={c.sha} className="row-item" style={{ margin: 0, border: '1px solid var(--border)', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', minWidth: 0 }}>
+                        <span className="commit-sha">{c.sha.slice(0, 7)}</span>
+                        <span className="commit-msg" style={{ minWidth: 0 }}>{c.message}</span>
+                      </div>
+                      <button
+                        className="btn"
+                        onClick={() => {
+                          const short = c.sha.slice(0, 7)
+                          const el = document.querySelector(`[data-commit-sha=\"${short}\"]`) as HTMLElement | null
+                          if (el) {
+                            el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                            el.style.background = 'rgba(16,185,129,.22)'
+                            window.setTimeout(() => { el.style.background = '' }, 1200)
+                          }
+                        }}
+                      >
+                        jump
+                      </button>
                     </div>
                   )) : <div className="muted">No git history found for this file.</div>}
                 </div>
@@ -144,7 +160,7 @@ export function ChangesPage({
         {sorted.map((c) => {
           const focused = !!focusCommitId && c.sha.startsWith(focusCommitId)
           return (
-            <div key={c.sha} className="row-item" style={focused ? { background: 'rgba(16,185,129,.15)' } : undefined}>
+            <div data-commit-sha={c.sha.slice(0, 7)} key={c.sha} className="row-item" style={focused ? { background: 'rgba(16,185,129,.15)' } : undefined}>
               <span className="commit-sha">{c.sha.slice(0, 7)}</span>
               <span className="commit-msg">{c.message}</span>
               <span className="commit-meta">{c.date?.slice(0, 19) || 'n/a'}</span>
