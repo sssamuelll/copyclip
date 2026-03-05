@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
 :root {
   color-scheme: dark;
   --bg: #0a0a0a;
@@ -20,7 +22,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text-primary);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Courier New', monospace;
 }
 
 * :focus-visible {
@@ -41,7 +43,13 @@ body {
   justify-content: space-between;
 }
 
-.sidebar h1 { margin: 0 0 12px 0; color: var(--text-primary); font-size: 18px; }
+.sidebar h1 {
+  margin: 0 0 12px 0;
+  color: var(--text-primary);
+  font-size: 18px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: .2px;
+}
 .sidebar nav { display: flex; flex-direction: column; gap: 8px; }
 .nav-group { margin-bottom: 12px; }
 
@@ -65,7 +73,12 @@ body {
   align-items: center;
   gap: 12px;
 }
-.page-title { font-size: 28px; margin: 0; }
+.page-title {
+  font-size: 28px;
+  margin: 0;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: .2px;
+}
 
 .panel, .card, .section-panel {
   border: 1px solid var(--border);
@@ -77,13 +90,18 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 14px 16px;
+  padding: 16px 18px;
   border-bottom: 1px solid var(--border);
 }
-.section-title { font-size: 12px; color: var(--text-secondary); }
+.section-title {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: .3px;
+}
 .section-link { color: var(--accent-green); font-size: 11px; text-decoration: none; }
 
-.kpi-row { display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); gap: 12px; }
+.kpi-row { display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); gap: 16px; }
 .kpi-card {
   padding: 18px;
   border: 1px solid var(--border);
@@ -95,9 +113,9 @@ body {
 .kpi-value { font-size: 28px; font-weight: 700; margin-top: 8px; }
 .kpi-change { font-size: 11px; margin-top: 8px; color: var(--text-secondary); }
 
-.content-columns { display: grid; grid-template-columns: 1.6fr 1fr; gap: 14px; }
-.left-column { display: flex; flex-direction: column; gap: 14px; }
-.right-column { display: flex; flex-direction: column; gap: 14px; }
+.content-columns { display: grid; grid-template-columns: 1.6fr 1fr; gap: 18px; }
+.left-column { display: flex; flex-direction: column; gap: 18px; }
+.right-column { display: flex; flex-direction: column; gap: 18px; }
 
 .row-item {
   padding: 14px 16px;
