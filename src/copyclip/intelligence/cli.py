@@ -163,6 +163,7 @@ def _maybe_handle_internal(argv) -> bool:
                     
                     api_key = input(_c("  Enter API Key: ", "37")).strip()
                     if provider and api_key:
+                        from dotenv import load_dotenv
                         env_path = os.path.join(root, ".env")
                         meta = PROVIDERS.get(provider, PROVIDERS["deepseek"])
                         key_var = meta.api_key_env
@@ -172,9 +173,9 @@ def _maybe_handle_internal(argv) -> bool:
                             f.write(f"COPYCLIP_LLM_PROVIDER={provider}\n")
                             f.write(f"{key_var}={api_key}\n")
                         
-                        os.environ["COPYCLIP_LLM_PROVIDER"] = provider
-                        os.environ[key_var] = api_key
-                        print(_ok("Settings saved to .env. Semantic intelligence enabled."))
+                        # Load immediately into current process
+                        load_dotenv(env_path, override=True)
+                        print(_ok(f"Settings saved to {env_path}. Semantic intelligence enabled."))
                         llm_ok = True
                     else:
                         print(_warn("Incomplete info. Using basic mode."))

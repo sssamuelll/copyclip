@@ -58,11 +58,10 @@ def _get_copyclip_ignore_file() -> Optional[str]:
 
 # Brief: main
 def main():
+    load_dotenv(override=True)
     # Intelligence commands are handled first and remain additive.
     if maybe_handle_intelligence(sys.argv):
         return
-
-    load_dotenv(override=True)
     parser = argparse.ArgumentParser(
         description=(
             "Copies the content of all files in a folder to the clipboard, "
