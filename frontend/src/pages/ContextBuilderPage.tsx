@@ -19,11 +19,19 @@ export function ContextBuilderPage() {
   const [advisorIntent, setAdvisorIntent] = useState('')
   const [advisorConflicts, setAdvisorConflicts] = useState<AdvisorConflict[]>([])
   const [advisorOverride, setAdvisorOverride] = useState(false)
+  const [governanceMode, setGovernanceMode] = useState<boolean>(() => {
+    try { return localStorage.getItem('copyclip.governanceMode') === '1' } catch { return false }
+  })
+  const [overrideReason, setOverrideReason] = useState('')
 
   useEffect(() => {
     api.files().then((res) => setFiles(res.items))
     api.issues().then((res) => setIssues(res.items))
   }, [])
+
+  useEffect(() => {
+    try { localStorage.setItem('copyclip.governanceMode', governanceMode ? '1' : '0') } catch {}
+  }, [governanceMode])
 
   const filteredFiles = useMemo(() => files.filter((f) => f.path.toLowerCase().includes(search.toLowerCase())), [files, search])
 
@@ -36,6 +44,7 @@ export function ContextBuilderPage() {
     setWarnings([])
     setAdvisorConflicts([])
     setAdvisorOverride(false)
+    setOverrideReason('')
   }
 
   const setMode = (path: string, mode: Mode) => {
@@ -60,6 +69,7 @@ export function ContextBuilderPage() {
     setWarnings([])
     setAdvisorConflicts([])
     setAdvisorOverride(false)
+    setOverrideReason('')
   }
 
   const selectedFileObjs = useMemo(() => files.filter((f) => selectedFiles.has(f.path)), [files, selectedFiles])
@@ -94,6 +104,13 @@ export function ContextBuilderPage() {
         return
       }
 
+      // Governance mode: explicit reason required to override conflicts.
+      if (conflicts.length > 0 && governanceMode && !overrideReason.trim()) {
+        setWarnings(['Governance mode requires an override reason before copying context.'])
+        setLoading(false)
+        return
+      }
+
       const res = await api.assembleContext({
         files: Array.from(selectedFiles),
         issues: Array.from(selectedIssues),
@@ -106,6 +123,8 @@ export function ContextBuilderPage() {
       }
       setCopied(true)
       setTimeout(() => setCopied(false), 2200)
+      setAdvisorOverride(false)
+      setOverrideReason('')
     } catch {
       alert('Failed to assemble context')
     } finally {
@@ -228,11 +247,16 @@ export function ContextBuilderPage() {
               <textarea
                 rows={2}
                 value={advisorIntent}
-                onChange={(e) => { setAdvisorIntent(e.target.value); setAdvisorConflicts([]); setAdvisorOverride(false) }}
+                onChange={(e) => { setAdvisorIntent(e.target.value); setAdvisorConflicts([]); setAdvisorOverride(false); setOverrideReason('') }}
                 placeholder="e.g. Refactor dependency graph around analyzer + server API"
                 style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: 8 }}
               />
             </div>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+              <input type="checkbox" checked={governanceMode} onChange={(e) => { setGovernanceMode(e.target.checked); setWarnings([]) }} />
+              governance mode (override requires reason)
+            </label>
 
             <div className="table" style={{ maxHeight: '30vh' }}>
               <div className="table-header" style={{ gridTemplateColumns: '1fr 100px' }}>
@@ -258,6 +282,19 @@ export function ContextBuilderPage() {
                     <div className="muted">{c.why_conflict}</div>
                   </div>
                 ))}
+
+                {governanceMode && advisorOverride && (
+                  <div style={{ marginTop: 8 }}>
+                    <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>override_reason (required)</div>
+                    <textarea
+                      rows={2}
+                      value={overrideReason}
+                      onChange={(e) => { setOverrideReason(e.target.value); setWarnings([]) }}
+                      placeholder="Explain why proceeding is still safe in this context..."
+                      style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: 8 }}
+                    />
+                  </div>
+                )}
               </div>
             )}
 
