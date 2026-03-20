@@ -79,13 +79,17 @@ export function DecisionsPage({ items, focusDecisionId }: { items: DecisionItem[
   return (
     <section style={{ display: 'grid', gap: 12 }}>
       <div className="page-header">
-        <h2 className="page-title">decisions</h2>
+        <h2 className="page-title">Oracle of Intent</h2>
+      </div>
+
+      <div className="muted" style={{ fontSize: 13, maxWidth: 860 }}>
+        Inspect the project’s governing memory. The Oracle holds decisions, constraints, unresolved tensions, and the normative shape of the system.
       </div>
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {(['all', 'proposed', 'accepted', 'resolved', 'superseded'] as const).map((s) => (
           <button key={s} className="btn" style={tab === s ? { background: 'var(--bg-active)' } : undefined} onClick={() => setTab(s)}>
-            {s} {s !== 'all' ? `(${items.filter((d) => d.status === s).length})` : `(${items.length})`}
+            {labelForStatus(s)} {s !== 'all' ? `(${items.filter((d) => d.status === s).length})` : `(${items.length})`}
           </button>
         ))}
       </div>
@@ -99,7 +103,7 @@ export function DecisionsPage({ items, focusDecisionId }: { items: DecisionItem[
             <div key={d.id} className={`table-row ${d.id === selectedId ? 'selected' : ''}`} onClick={() => setSelectedId(d.id)}>
               <span>#dec-{String(d.id).padStart(3, '0')}</span>
               <span>{d.title}</span>
-              <span><span className={`status-badge status-${normalizeStatus(d.status)}`}>{d.status}</span></span>
+              <span><span className={`status-badge status-${normalizeStatus(d.status)}`}>{labelForStatus(d.status)}</span></span>
               <span className="muted">{d.source_type || 'manual'}</span>
             </div>
           ))}
@@ -111,7 +115,7 @@ export function DecisionsPage({ items, focusDecisionId }: { items: DecisionItem[
               <div className="detail-header">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <strong>#dec-{String(selected.id).padStart(3, '0')}</strong>
-                  <span className={`status-badge status-${normalizeStatus(selected.status)}`}>{selected.status}</span>
+                  <span className={`status-badge status-${normalizeStatus(selected.status)}`}>{labelForStatus(selected.status)}</span>
                 </div>
                 <div style={{ marginTop: 8 }}>{selected.title}</div>
                 <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>created: {selected.created_at?.slice(0, 19) || 'n/a'} | source: {selected.source_type || 'manual'}</div>
@@ -120,25 +124,25 @@ export function DecisionsPage({ items, focusDecisionId }: { items: DecisionItem[
               <div className="detail-body">
                 <div>
                   <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>summary</div>
-                  <div style={{ fontSize: 13 }}>{selected.summary || 'No summary.'}</div>
+                  <div style={{ fontSize: 13 }}>{selected.summary || 'No summary yet. The Oracle has no explicit note for this decision.'}</div>
                 </div>
 
                 <textarea
                   rows={2}
-                  placeholder="Optional evidence note (required if resolving without refs)"
+                  placeholder="Add an evidence note or interpretive trace…"
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
                   style={{ background: 'var(--bg)', color: 'var(--text-primary)', border: '1px solid var(--border)', padding: 8 }}
                 />
 
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button className="btn primary" onClick={() => onTransition('accepted')}>accept</button>
-                  <button className="btn" onClick={() => onTransition('resolved')}>resolve</button>
-                  <button className="btn" onClick={() => onTransition('superseded')}>supersede</button>
+                  <button className="btn primary" onClick={() => onTransition('accepted')}>anchor</button>
+                  <button className="btn" onClick={() => onTransition('resolved')}>integrate</button>
+                  <button className="btn" onClick={() => onTransition('superseded')}>transcend</button>
                 </div>
 
                 <div className="panel" style={{ padding: 10 }}>
-                  <div className="section-title" style={{ marginBottom: 6 }}>// intent_links (decision ↔ code)</div>
+                  <div className="section-title" style={{ marginBottom: 6 }}>// intent_links (oracle ↔ system)</div>
                   <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                     <select value={linkType} onChange={(e) => setLinkType(e.target.value as any)} style={{ background: 'var(--bg)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}>
                       <option value="file_glob">file_glob</option>
@@ -150,7 +154,7 @@ export function DecisionsPage({ items, focusDecisionId }: { items: DecisionItem[
                       placeholder={linkType === 'file_glob' ? 'frontend/src/**/*.ts' : 'module_name'}
                       style={{ flex: 1, background: 'var(--bg)', color: 'var(--text-primary)', border: '1px solid var(--border)', padding: 8 }}
                     />
-                    <button className="btn" onClick={addLink}>link</button>
+                    <button className="btn" onClick={addLink}>seal link</button>
                   </div>
                   <div style={{ display: 'grid', gap: 6 }}>
                     {links.length ? links.map((l) => (
@@ -158,28 +162,28 @@ export function DecisionsPage({ items, focusDecisionId }: { items: DecisionItem[
                         <span style={{ fontSize: 12 }}>{l.link_type}: {l.target_pattern}</span>
                         <span className="muted" style={{ fontSize: 11 }}>{l.created_at?.slice(0, 19) || 'n/a'}</span>
                       </div>
-                    )) : <div className="muted">No intent links yet.</div>}
+                    )) : <div className="muted">The Oracle has no explicit links to code yet.</div>}
                   </div>
                 </div>
 
                 {error && <div className="error">{error}</div>}
 
                 <div>
-                  <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>timeline</div>
+                  <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>chronicle</div>
                   <div style={{ display: 'grid', gap: 8 }}>
                     {history.length ? history.map((h) => (
                       <div key={h.id} className="panel" style={{ padding: 8, fontSize: 12 }}>
                         [{h.created_at?.slice(0, 19)}] {h.action}
-                        {h.from_status || h.to_status ? ` (${h.from_status || '-'} → ${h.to_status || '-'})` : ''}
+                        {h.from_status || h.to_status ? ` (${labelForStatus(h.from_status || '-')} → ${labelForStatus(h.to_status || '-')})` : ''}
                         {h.note ? ` — ${h.note}` : ''}
                       </div>
-                    )) : <div className="muted">No timeline events yet.</div>}
+                    )) : <div className="muted">No oracle events recorded yet.</div>}
                   </div>
                 </div>
               </div>
             </>
           ) : (
-            <div className="detail-body muted">No decisions yet.</div>
+            <div className="detail-body muted">The Oracle is silent. No decisions have been anchored yet.</div>
           )}
         </div>
       </div>
@@ -193,4 +197,15 @@ function normalizeStatus(status: string) {
   if (status === 'superseded') return 'superseded'
   if (status === 'unresolved') return 'unresolved'
   return 'proposed'
+}
+
+function labelForStatus(status: string) {
+  if (status === 'all') return 'all'
+  if (status === 'proposed') return 'emerging'
+  if (status === 'accepted') return 'anchored'
+  if (status === 'resolved') return 'integrated'
+  if (status === 'superseded') return 'transcended'
+  if (status === 'unresolved') return 'in tension'
+  if (status === '-') return '-'
+  return status
 }

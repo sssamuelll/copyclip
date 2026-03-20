@@ -20,7 +20,7 @@ export function SettingsPage({ onNotify }: { onNotify?: (msg: string) => void })
     try {
       await api.setConfig(config)
       setSaved(true)
-      onNotify?.('Settings saved')
+      onNotify?.('Nexus updated')
       setTimeout(() => setSaved(false), 3000)
     } finally {
       setLoading(false)
@@ -29,11 +29,11 @@ export function SettingsPage({ onNotify }: { onNotify?: (msg: string) => void })
 
   return (
     <section className="page">
-      <h2>Project Settings</h2>
-      <p className="muted">Configure AI providers and project preferences. Settings are stored locally in .copyclip/</p>
+      <h2>Configuration Nexus</h2>
+      <p className="muted">Configure how the consciousness sees, interprets, and speaks. Settings are stored locally inside .copyclip/.</p>
 
       <div className="panel" style={{ marginTop: '2rem', maxWidth: '600px' }}>
-        <h3>LLM Configuration</h3>
+        <h3>Interpretive Providers</h3>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginTop: '1rem' }}>
           
           <div>
@@ -90,7 +90,7 @@ export function SettingsPage({ onNotify }: { onNotify?: (msg: string) => void })
               onClick={handleSave} 
               disabled={loading}
             >
-              {loading ? 'Saving...' : saved ? 'SETTINGS SAVED!' : 'Save Configuration'}
+              {loading ? 'Anchoring…' : saved ? 'NEXUS UPDATED' : 'Anchor Configuration'}
             </button>
           </div>
 

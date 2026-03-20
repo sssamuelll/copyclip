@@ -75,7 +75,6 @@ export function ContextBuilderPage() {
   const selectedFileObjs = useMemo(() => files.filter((f) => selectedFiles.has(f.path)), [files, selectedFiles])
 
   const estimatedTokens = useMemo(() => {
-    // rough estimator: 1 token ~ 4 chars, mode coefficients
     const coeff = (m: Mode) => (m === 'full' ? 1 : m === 'signatures' ? 0.3 : 0.2)
     const fileTokens = selectedFileObjs.reduce((acc, f) => {
       const mode = fileModes[f.path] || 'full'
@@ -97,16 +96,14 @@ export function ContextBuilderPage() {
       const conflicts = advisor?.conflicts || []
       setAdvisorConflicts(conflicts)
 
-      // First click with conflicts = review step (no copy yet)
       if (conflicts.length > 0 && !advisorOverride) {
         setAdvisorOverride(true)
         setLoading(false)
         return
       }
 
-      // Governance mode: explicit reason required to override conflicts.
       if (conflicts.length > 0 && governanceMode && !overrideReason.trim()) {
-        setWarnings(['Governance mode requires an override reason before copying context.'])
+        setWarnings(['Governance mode requires an override reason before forging context.'])
         setLoading(false)
         return
       }
@@ -126,7 +123,7 @@ export function ContextBuilderPage() {
       setAdvisorOverride(false)
       setOverrideReason('')
     } catch {
-      alert('Failed to assemble context')
+      alert('Failed to forge context')
     } finally {
       setLoading(false)
     }
@@ -135,34 +132,34 @@ export function ContextBuilderPage() {
   return (
     <section style={{ display: 'grid', gap: 12 }}>
       <div className="page-header">
-        <h2 className="page-title">context cart</h2>
+        <h2 className="page-title">Context Forge</h2>
       </div>
 
       <div className="narrative-grid">
         <div className="insight-card">
-          <div className="insight-title">// what_changed</div>
-          <div className="insight-text">Curate files/issues and tune granularity before sending context to AI.</div>
+          <div className="insight-title">// what_it_does</div>
+          <div className="insight-text">Assemble high-signal context bundles for humans and agents without severing them from intent, decisions, or meaning.</div>
         </div>
         <div className="insight-card">
           <div className="insight-title">// why_it_matters</div>
-          <div className="insight-text">Too much raw context increases token cost and dilutes signal.</div>
+          <div className="insight-text">Too much raw context dilutes signal. Too little context breaks orientation. The Forge compresses without flattening the field.</div>
         </div>
         <div className="insight-card">
           <div className="insight-title">// suggested_action</div>
-          <div className="insight-text">Start with signatures/docstrings for broad scope, then upgrade key files to full.</div>
+          <div className="insight-text">Start with signatures or docstrings for breadth, then upgrade only the surfaces that truly need full code.</div>
         </div>
       </div>
 
       <div className="split" style={{ gridTemplateColumns: '1.2fr 1fr' }}>
         <div className="section-panel" style={{ minHeight: '68vh' }}>
           <div className="section-header">
-            <span className="section-title">// available_context</span>
+            <span className="section-title">// available_surfaces</span>
           </div>
 
           <div style={{ padding: 12, display: 'grid', gap: 10 }}>
             <input
               type="text"
-              placeholder="search files..."
+              placeholder="name the surface you want to enter…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: 8 }}
@@ -202,7 +199,7 @@ export function ContextBuilderPage() {
           </div>
 
           <div style={{ borderTop: '1px solid var(--border)', padding: 12 }}>
-            <div className="section-title" style={{ marginBottom: 6 }}>// issues</div>
+            <div className="section-title" style={{ marginBottom: 6 }}>// linked_issues</div>
             <div style={{ maxHeight: '16vh', overflowY: 'auto', display: 'grid', gap: 6 }}>
               {issues.map((i) => (
                 <label key={i.id} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
@@ -216,9 +213,9 @@ export function ContextBuilderPage() {
 
         <div className="section-panel" style={{ borderColor: 'var(--accent)' }}>
           <div className="section-header">
-            <span className="section-title">// payload</span>
+            <span className="section-title">// forged_payload</span>
             <span className={`badge ${budgetState === 'risk' ? 'badge-high' : budgetState === 'warn' ? 'badge-med' : 'badge-low'}`}>
-              {budgetState === 'risk' ? 'over budget' : budgetState === 'warn' ? 'watch budget' : 'healthy'}
+              {budgetState === 'risk' ? 'over budget' : budgetState === 'warn' ? 'watch budget' : 'stable'}
             </span>
           </div>
 
@@ -243,12 +240,12 @@ export function ContextBuilderPage() {
             </div>
 
             <div>
-              <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>advisor_intent (used for conflict checks)</div>
+              <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>forge_intent (used for oracle conflict checks)</div>
               <textarea
                 rows={2}
                 value={advisorIntent}
                 onChange={(e) => { setAdvisorIntent(e.target.value); setAdvisorConflicts([]); setAdvisorOverride(false); setOverrideReason('') }}
-                placeholder="e.g. Refactor dependency graph around analyzer + server API"
+                placeholder="Describe the intervention you are preparing…"
                 style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: 8 }}
               />
             </div>
@@ -260,21 +257,21 @@ export function ContextBuilderPage() {
 
             <div className="table" style={{ maxHeight: '30vh' }}>
               <div className="table-header" style={{ gridTemplateColumns: '1fr 100px' }}>
-                <span>selected file</span><span>mode</span>
+                <span>selected surface</span><span>mode</span>
               </div>
               {selectedFileObjs.length ? selectedFileObjs.map((f) => (
                 <div key={f.path} className="table-row" style={{ gridTemplateColumns: '1fr 100px' }}>
                   <span style={{ fontSize: 12 }}>{f.path}</span>
                   <span className="muted" style={{ fontSize: 12 }}>{fileModes[f.path] || 'full'}</span>
                 </div>
-              )) : <div className="muted" style={{ padding: 12 }}>No files selected</div>}
+              )) : <div className="muted" style={{ padding: 12 }}>No surfaces selected yet.</div>}
             </div>
 
             {advisorConflicts.length > 0 && (
               <div className="panel" style={{ border: '1px solid #7f1d1d', background: 'rgba(127, 29, 29, 0.18)', padding: '10px', fontSize: '0.8rem' }}>
-                <div style={{ color: '#fca5a5', fontWeight: 'bold', marginBottom: '6px' }}>Advisor conflicts detected ({advisorConflicts.length})</div>
+                <div style={{ color: '#fca5a5', fontWeight: 'bold', marginBottom: '6px' }}>Oracle conflicts detected ({advisorConflicts.length})</div>
                 <div className="muted" style={{ marginBottom: 6 }}>
-                  {advisorOverride ? 'Proceed is unlocked. Review conflicts and click again to copy context.' : 'Review before copy. Copy is paused until you confirm.'}
+                  {advisorOverride ? 'Proceed is unlocked. Review the tension and forge again to copy context.' : 'The Oracle has paused the Forge. Review the tension before proceeding.'}
                 </div>
                 {advisorConflicts.map((c) => (
                   <div key={`ctx-adv-${c.decision_id}`} style={{ marginBottom: 6, borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 6 }}>
@@ -290,7 +287,7 @@ export function ContextBuilderPage() {
                       rows={2}
                       value={overrideReason}
                       onChange={(e) => { setOverrideReason(e.target.value); setWarnings([]) }}
-                      placeholder="Explain why proceeding is still safe in this context..."
+                      placeholder="Explain why forging this context is still aligned with the project…"
                       style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: 8 }}
                     />
                   </div>
@@ -300,16 +297,16 @@ export function ContextBuilderPage() {
 
             {warnings.length > 0 && (
               <div className="panel" style={{ border: '1px solid #92400e', background: 'rgba(146, 64, 14, 0.2)', padding: '10px', fontSize: '0.8rem' }}>
-                <div style={{ color: '#fbbf24', fontWeight: 'bold', marginBottom: '6px' }}>Decision Advisor Warning</div>
-                <div className="muted" style={{ marginBottom: 6 }}>Context copied, but this payload may conflict with prior architecture decisions.</div>
+                <div style={{ color: '#fbbf24', fontWeight: 'bold', marginBottom: '6px' }}>Oracle warning</div>
+                <div className="muted" style={{ marginBottom: 6 }}>The payload was forged, but the Oracle detected possible tension with prior architectural decisions.</div>
                 {warnings.map((w, idx) => <div key={idx} style={{ marginBottom: 4 }}>• {w}</div>)}
               </div>
             )}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span className="muted" style={{ fontSize: 12 }}>{copied ? 'copied to clipboard' : 'ready to assemble'}</span>
+              <span className="muted" style={{ fontSize: 12 }}>{copied ? 'copied to clipboard' : 'ready to forge'}</span>
               <button className="btn primary" onClick={handleCopy} disabled={loading || (selectedFiles.size === 0 && selectedIssues.size === 0)}>
-                {loading ? 'assembling…' : copied ? 'copied!' : advisorConflicts.length > 0 && advisorOverride ? 'proceed & copy' : 'copy context'}
+                {loading ? 'forging…' : copied ? 'copied!' : advisorConflicts.length > 0 && advisorOverride ? 'proceed & copy' : 'forge context'}
               </button>
             </div>
           </div>

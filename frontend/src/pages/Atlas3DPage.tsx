@@ -260,8 +260,8 @@ export function Atlas3DPage() {
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
       
       <div style={{ position: 'absolute', top: 30, left: 30, pointerEvents: 'none' }}>
-        <div style={{ fontSize: 10, color: '#666', letterSpacing: 3, textTransform: 'uppercase', marginBottom: 4 }}>// autonomous_project_universe</div>
-        <div style={{ fontSize: 24, color: '#fff', fontWeight: 300 }}>Deep Space Atlas</div>
+        <div style={{ fontSize: 10, color: '#666', letterSpacing: 3, textTransform: 'uppercase', marginBottom: 4 }}>// cosmic_project_atlas</div>
+        <div style={{ fontSize: 24, color: '#fff', fontWeight: 300 }}>The Atlas</div>
       </div>
       
       {activeNode && (
@@ -273,7 +273,7 @@ export function Atlas3DPage() {
           transition: 'all 0.2s ease'
         }}>
           <div style={{ fontSize: 9, color: selectedNode ? '#00eeff' : '#666', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
-            {selectedNode ? 'Persistent Link Established' : 'Scanning Celestial Body...'}
+            {selectedNode ? 'Persistent link established' : 'Reading project body…'}
           </div>
           <div style={{ fontSize: 18, color: '#fff', marginBottom: 16, fontWeight: 500 }}>{activeNode.name}</div>
           <div style={{ display: 'grid', gap: 12 }}>
@@ -290,7 +290,7 @@ export function Atlas3DPage() {
         </div>
       )}
 
-      {loading && <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', color: '#fff', letterSpacing: 4, fontWeight: 200 }}>IGNITING STARCORES...</div>}
+      {loading && <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', color: '#fff', letterSpacing: 4, fontWeight: 200 }}>MATERIALIZING THE ATLAS…</div>}
     </div>
   )
 }

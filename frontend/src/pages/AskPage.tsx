@@ -1,8 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { api } from '../api/client'
-import type { AskResponse, AdvisorConflict } from '../types/api'
+import type { AdvisorConflict } from '../types/api'
 
-// Import existing visual components to use them as "Artifacts" in the chat
 import { ArchitecturePage } from './ArchitecturePage'
 import { RisksPage } from './RisksPage'
 import { AtlasPage } from './AtlasPage'
@@ -13,7 +12,6 @@ type ChatMessage = {
   text: string
   loading?: boolean
   error?: string
-  // Artifacts returned by the API
   toolUsed?: 'architecture' | 'risks' | 'atlas' | 'decisions'
   toolData?: any
   citations?: any[]
@@ -24,7 +22,7 @@ export function AskPage({ onNotify }: { onNotify?: (msg: string) => void }) {
   const [messages, setMessages] = useState<ChatMessage[]>([{
     id: 'welcome',
     role: 'assistant',
-    text: "I am the project's consciousness. Ask me anything about the architecture, risks, or intent.",
+    text: "I am the project's consciousness. Ask about architecture, intent, drift, risks, or the hidden shape of the system.",
   }])
   const [input, setInput] = useState('')
   const [isTyping, setIsTyping] = useState(false)
@@ -45,7 +43,7 @@ export function AskPage({ onNotify }: { onNotify?: (msg: string) => void }) {
     setMessages(prev => [...prev, { id: userMsgId, role: 'user', text: userText }])
     
     const loadingMsgId = (Date.now() + 1).toString()
-    setMessages(prev => [...prev, { id: loadingMsgId, role: 'assistant', text: 'Thinking...', loading: true }])
+    setMessages(prev => [...prev, { id: loadingMsgId, role: 'assistant', text: 'Consulting the consciousness…', loading: true }])
     setIsTyping(true)
 
     try {
@@ -56,7 +54,6 @@ export function AskPage({ onNotify }: { onNotify?: (msg: string) => void }) {
       let toolUsed: any = undefined
       let toolData: any = undefined
 
-      // Check if response is JSON-encoded (it will be for artifacts)
       try {
         const parsed = JSON.parse(chatRes.response)
         if (parsed.tool_used) {
@@ -100,21 +97,23 @@ export function AskPage({ onNotify }: { onNotify?: (msg: string) => void }) {
 
   return (
     <div className="chat-container" style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 120px)', background: 'var(--bg)', borderRadius: 8, overflow: 'hidden' }}>
+      <div style={{ padding: '0 24px 12px 24px' }}>
+        <div className="muted" style={{ fontSize: 10, letterSpacing: 2 }}>// consciousness_interface</div>
+        <h1 style={{ margin: '8px 0 6px 0' }}>Ask the Consciousness</h1>
+        <div className="muted" style={{ fontSize: 13, maxWidth: 720 }}>
+          Interrogate the living state of the project. Ask about architecture, intent, drift, risk, and the hidden relationships shaping the system.
+        </div>
+      </div>
       
-      {/* Chat History */}
       <div className="chat-history" style={{ flex: 1, overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', gap: '32px' }}>
         {messages.map(msg => (
           <div key={msg.id} className={`chat-message role-${msg.role}`} style={{ display: 'flex', gap: '16px', maxWidth: '100%', alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
             
-            {/* Avatar */}
             {msg.role === 'assistant' && (
               <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--accent-cyan)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#000', fontWeight: 'bold', flexShrink: 0 }}>C</div>
             )}
             
-            {/* Content Area */}
             <div style={{ display: 'grid', gap: '16px', width: msg.role === 'user' ? 'auto' : '100%' }}>
-              
-              {/* Text Bubble */}
               {msg.text && (
                 <div style={{ 
                   background: msg.role === 'user' ? 'var(--accent-cyan)' : 'transparent', 
@@ -129,35 +128,32 @@ export function AskPage({ onNotify }: { onNotify?: (msg: string) => void }) {
                 </div>
               )}
 
-              {/* Error State */}
               {msg.error && <div className="error" style={{ fontSize: 13, padding: 8 }}>{msg.error}</div>}
 
-              {/* Dynamic Artifacts (GenUI Component Injection) */}
               {msg.toolUsed === 'architecture' && msg.toolData && (
                 <div className="artifact-container" style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 16, background: '#111115' }}>
-                  <div className="muted" style={{ marginBottom: 12, fontSize: 11 }}>// artifact: architecture_graph</div>
+                  <div className="muted" style={{ marginBottom: 12, fontSize: 11 }}>// artifact: architecture_constellation</div>
                   <ArchitecturePage nodes={msg.toolData.nodes} edges={msg.toolData.edges} />
                 </div>
               )}
 
               {msg.toolUsed === 'risks' && msg.toolData && (
                 <div className="artifact-container" style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 16, background: '#111115' }}>
-                   <div className="muted" style={{ marginBottom: 12, fontSize: 11 }}>// artifact: risk_map</div>
+                   <div className="muted" style={{ marginBottom: 12, fontSize: 11 }}>// artifact: distortion_field</div>
                    <RisksPage items={msg.toolData} focusRiskArea={null} />
                 </div>
               )}
 
               {msg.toolUsed === 'atlas' && msg.toolData && (
                 <div className="artifact-container" style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 16, background: '#111115' }}>
-                   <div className="muted" style={{ marginBottom: 12, fontSize: 11 }}>// artifact: project_overview</div>
+                   <div className="muted" style={{ marginBottom: 12, fontSize: 11 }}>// artifact: atlas_projection</div>
                    <AtlasPage overview={msg.toolData.overview} changes={msg.toolData.changes} risks={msg.toolData.risks} decisions={msg.toolData.decisions} />
                 </div>
               )}
 
-              {/* Citations & Conflicts (Inline) */}
               {msg.conflicts && msg.conflicts.length > 0 && (
                 <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid var(--accent-red)', borderRadius: 6, padding: 12, fontSize: 13 }}>
-                  <strong style={{ color: 'var(--accent-red)' }}>Warning: Potential Intent Conflict</strong>
+                  <strong style={{ color: 'var(--accent-red)' }}>Oracle warning: anchored intent may be under tension</strong>
                   <ul style={{ margin: '8px 0 0 0', paddingLeft: 20 }}>
                     {msg.conflicts.map(c => <li key={c.decision_id} className="muted">{c.why_conflict}</li>)}
                   </ul>
@@ -169,14 +165,13 @@ export function AskPage({ onNotify }: { onNotify?: (msg: string) => void }) {
         <div ref={bottomRef} />
       </div>
 
-      {/* Input Area */}
       <div className="chat-input-area" style={{ padding: '24px', borderTop: '1px solid var(--border)', background: 'var(--bg-dark)' }}>
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask project consciousness or request specific maps (e.g., 'show architecture')..."
+            placeholder="Ask about architecture, drift, intent, or the hidden shape of the system…"
             rows={1}
             disabled={isTyping}
             style={{ 
