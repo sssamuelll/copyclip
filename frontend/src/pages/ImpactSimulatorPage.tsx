@@ -35,33 +35,33 @@ export function ImpactSimulatorPage() {
   return (
     <section style={{ display: 'grid', gap: 12 }}>
       <div className="page-header">
-        <h2 className="page-title">impact simulator</h2>
+        <h2 className="page-title">Propagation Oracle</h2>
       </div>
 
       <div className="narrative-grid">
         <div className="insight-card">
-          <div className="insight-title">// what_changed</div>
-          <div className="insight-text">Pick any file and CopyClip estimates how far the dependency impact propagates.</div>
+          <div className="insight-title">// what_it_does</div>
+          <div className="insight-text">Trace how a local intervention may propagate through modules, relationships, and dependency pathways.</div>
         </div>
         <div className="insight-card">
           <div className="insight-title">// why_it_matters</div>
-          <div className="insight-text">In AI-heavy codebases, local edits can silently break distant modules.</div>
+          <div className="insight-text">No file moves alone. In agentic codebases, small edits can silently disturb distant surfaces.</div>
         </div>
         <div className="insight-card">
           <div className="insight-title">// suggested_action</div>
-          <div className="insight-text">Run impact before large edits and prioritize tests for affected modules first.</div>
+          <div className="insight-text">Run propagation before major edits and gate high-blast changes with tests and decision review.</div>
         </div>
       </div>
 
       <div className="split" style={{ gridTemplateColumns: '1fr 1.2fr' }}>
         <div className="section-panel">
           <div className="section-header">
-            <span className="section-title">// target_file</span>
+            <span className="section-title">// target_surface</span>
           </div>
           <div style={{ padding: 12 }}>
             <input
               type="text"
-              placeholder="search files..."
+              placeholder="select a file or module to trace…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               style={{ width: '100%', background: 'var(--bg)', color: 'var(--text-primary)', border: '1px solid var(--border)', padding: 8 }}
@@ -83,13 +83,13 @@ export function ImpactSimulatorPage() {
 
         <div className="section-panel">
           <div className="section-header">
-            <span className="section-title">// blast_radius</span>
+            <span className="section-title">// propagation_field</span>
             {impact && <span className={`badge badge-${severity}`}>{severity}</span>}
           </div>
 
           <div style={{ padding: 14, display: 'grid', gap: 12 }}>
-            {!impact && !loading && <div className="muted">Select a file to start simulation.</div>}
-            {loading && <div className="muted">Calculating blast radius...</div>}
+            {!impact && !loading && <div className="muted">Select a system surface to reveal its propagation field.</div>}
+            {loading && <div className="muted">Tracing disturbance through the graph…</div>}
 
             {impact && (
               <>
@@ -100,9 +100,9 @@ export function ImpactSimulatorPage() {
                 </div>
 
                 <div className="panel" style={{ padding: 12 }}>
-                  <div className="muted" style={{ fontSize: 11, marginBottom: 8 }}>impact_path</div>
+                  <div className="muted" style={{ fontSize: 11, marginBottom: 8 }}>disturbance_path</div>
                   {blastCount === 0 ? (
-                    <div className="muted">No dependents detected. Low systemic break risk.</div>
+                    <div className="muted">No downstream dependents detected. Low systemic turbulence.</div>
                   ) : (
                     <div style={{ display: 'grid', gap: 8 }}>
                       {impact.impacted_modules.map((m) => (
@@ -116,13 +116,13 @@ export function ImpactSimulatorPage() {
                 </div>
 
                 <div className="panel" style={{ padding: 12, borderColor: 'var(--accent-amber)', background: 'rgba(245,158,11,.06)' }}>
-                  <div style={{ color: 'var(--accent-amber)', fontSize: 12, marginBottom: 6 }}>advisor_note</div>
+                  <div style={{ color: 'var(--accent-amber)', fontSize: 12, marginBottom: 6 }}>oracle_note</div>
                   <div style={{ fontSize: 13 }}>
                     {blastCount >= 6
-                      ? 'High blast radius. Gate merge with targeted regression tests and decision review.'
+                      ? 'High propagation. Gate merge with targeted regression tests and an oracle review of intent alignment.'
                       : blastCount >= 3
-                        ? 'Moderate blast radius. Validate interfaces for impacted modules before merge.'
-                        : 'Low blast radius. Validate local behavior and proceed with standard checks.'}
+                        ? 'Moderate propagation. Validate connected interfaces before the change lands.'
+                        : 'Low propagation. Validate local behavior and proceed with normal checks.'}
                   </div>
                 </div>
               </>

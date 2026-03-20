@@ -51,16 +51,20 @@ export function ArchitecturePage({ nodes, edges }: { nodes: ArchNode[]; edges: A
   return (
     <section style={{ display: 'grid', gap: 12 }}>
       <div className="page-header">
-        <h2 className="page-title">architecture</h2>
+        <h2 className="page-title">Structure Graph</h2>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
           <input type="checkbox" checked={showFog} onChange={(e) => setShowFog(e.target.checked)} />
-          fog of war (color by cognitive debt)
+          reveal fog of war
         </label>
+      </div>
+
+      <div className="muted" style={{ fontSize: 13, maxWidth: 860 }}>
+        Inspect the connective skeleton beneath the Atlas. The Structure Graph reveals module relationships, edge density, and the places where cognitive fog is thickening.
       </div>
 
       <div className="arch-body">
         <div className="graph-area">
-          <div className="section-title" style={{ marginBottom: 10 }}>// module_map</div>
+          <div className="section-title" style={{ marginBottom: 10 }}>// structural_constellation</div>
           <div className="graph-grid">
             {nodes.map((n) => {
               const s = stats[n.name] || { inbound: 0, outbound: 0 }
@@ -99,7 +103,7 @@ export function ArchitecturePage({ nodes, edges }: { nodes: ArchNode[]; edges: A
           </div>
 
           <div className="panel-block">
-            <div className="section-title">// stats</div>
+            <div className="section-title">// field_metrics</div>
             <div style={{ marginTop: 8, display: 'grid', gap: 6, fontSize: 13 }}>
               <div>inbound deps: <strong>{current?.inbound ?? 0}</strong></div>
               <div>outbound deps: <strong>{current?.outbound ?? 0}</strong></div>
@@ -110,11 +114,11 @@ export function ArchitecturePage({ nodes, edges }: { nodes: ArchNode[]; edges: A
           </div>
 
           <div className="panel-block" style={{ borderBottom: 'none' }}>
-            <div className="section-title">// dependencies</div>
+            <div className="section-title">// dependency_paths</div>
             <div style={{ marginTop: 8, display: 'grid', gap: 6 }}>
               {current?.links?.length ? current.links.slice(0, 20).map((l, i) => (
                 <div key={`${l}-${i}`} className="muted" style={{ fontSize: 12 }}>{l}</div>
-              )) : <div className="muted">No dependency links for selected module.</div>}
+              )) : <div className="muted">No dependency links for the selected module.</div>}
             </div>
           </div>
         </div>
