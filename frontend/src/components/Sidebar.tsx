@@ -2,28 +2,28 @@ type Props = { page: string; setPage: (v: string) => void; lastIndexedText?: str
 
 const GROUPS = [
   {
-    label: 'Core',
+    label: 'Consciousness',
     pages: [
-      { id: 'ask', label: 'consciousness' },
+      { id: 'ask', label: 'ask the consciousness' },
       { id: 'atlas-3d', label: 'atlas' },
-      { id: 'timeline', label: 'event timeline' },
-      { id: 'planning', label: 'planning' },
+      { id: 'timeline', label: 'chronicle' },
+      { id: 'planning', label: 'intent field' },
     ]
   },
   {
-    label: 'Analyze',
+    label: 'Structures',
     pages: [
-      { id: 'architecture', label: 'architecture' },
-      { id: 'impact', label: 'impact simulator' },
-      { id: 'risks', label: 'risk heatmap' },
+      { id: 'architecture', label: 'structure graph' },
+      { id: 'impact', label: 'propagation oracle' },
+      { id: 'risks', label: 'distortion field' },
     ]
   },
   {
-    label: 'System',
+    label: 'Bridges',
     pages: [
-      { id: 'context-builder', label: 'context builder' },
-      { id: 'decisions', label: 'intent log' },
-      { id: 'settings', label: 'settings' },
+      { id: 'context-builder', label: 'context forge' },
+      { id: 'decisions', label: 'oracle of intent' },
+      { id: 'settings', label: 'nexus' },
     ]
   }
 ]
@@ -63,7 +63,7 @@ export function Sidebar({ page, setPage, lastIndexedText }: Props) {
           / v0.3.0_stable
         </div>
         <div style={{ fontSize: 10, color: 'var(--text-tertiary)', paddingLeft: '10px' }}>
-          {lastIndexedText || 'system ready'}
+          {lastIndexedText || 'consciousness active'}
         </div>
       </div>
     </aside>
