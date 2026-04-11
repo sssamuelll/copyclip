@@ -151,7 +151,7 @@ export function Atlas3DPage() {
         .force('charge', forceManyBody().strength(-200))
         .force('link', forceLink(links).distance(120))
         .force('center', forceCenter(0, 0, 0))
-        .force('collide', forceCollide().radius((d: GraphNode) => getNodeRadius(d.connectionCount) + 5))
+        .force('collide', forceCollide().radius((d: GraphNode) => getNodeRadius(d.connectionCount, graphNodes.length) + 5))
         .stop()
 
       // Run simulation to settle
@@ -172,8 +172,14 @@ export function Atlas3DPage() {
       renderEdges(graphNodes, edges)
     }
 
-    const getNodeRadius = (connectionCount: number) => {
-      return Math.max(6, Math.min(30, 6 + Math.sqrt(connectionCount) * 3))
+    const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
+
+    const getNodeRadius = (connectionCount: number, totalNodes: number) => {
+      // Graph-aware scale: adapts node sizes to total graph density
+      // Ported from CodeGraphContext's getGraphAwareNodeScale()
+      const graphScale = clamp(1 + Math.log10(Math.max(totalNodes, 1)) * 0.22, 1, 2)
+      const degreeSize = Math.log2(connectionCount + 1) * 4
+      return clamp((4 + degreeSize) * graphScale, 5, 35)
     }
 
     const createLabel = (text: string) => {
@@ -196,7 +202,7 @@ export function Atlas3DPage() {
 
     const renderNodes = (nodes: GraphNode[]) => {
       nodes.forEach((node) => {
-        const radius = getNodeRadius(node.connectionCount)
+        const radius = getNodeRadius(node.connectionCount, nodes.length)
         const nodeContainer = new THREE.Group()
         nodeContainer.position.set(node.x || 0, node.y || 0, node.z || 0)
 
