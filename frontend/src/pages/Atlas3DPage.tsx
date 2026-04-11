@@ -324,7 +324,13 @@ export function Atlas3DPage() {
     const resetEdges = () => {
       // Remove split edge meshes
       const toRemove = scene.children.filter(c => c.userData._edgeType === 'dim' || c.userData._edgeType === 'bright')
-      toRemove.forEach(c => scene.remove(c))
+      toRemove.forEach(c => {
+        scene.remove(c)
+        if (c instanceof THREE.LineSegments) {
+          c.geometry.dispose()
+          ;(c.material as THREE.Material).dispose()
+        }
+      })
 
       // Recreate single edges mesh
       if (graphNodes.length > 0) {
@@ -357,6 +363,7 @@ export function Atlas3DPage() {
     const resetNodeVisual = (node: THREE.Mesh) => {
       const mat = node.material as THREE.MeshStandardMaterial
       mat.emissiveIntensity = 0.3
+      mat.opacity = 1.0
       const label = node.parent?.children.find(c => c.type === 'Sprite') as THREE.Sprite
       if (label) {
         ;(label.material as THREE.SpriteMaterial).opacity = 0.7
@@ -444,15 +451,17 @@ export function Atlas3DPage() {
         mesh.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.1)
       })
 
-      // Distance-based label opacity fade
-      nodesGroup.children.forEach(container => {
-        const label = container.children.find(c => c.type === 'Sprite') as THREE.Sprite
-        if (!label) return
-        const dist = camera.position.distanceTo(container.position)
-        const maxFade = 2500
-        const opacity = Math.max(0.1, Math.min(0.9, 1.0 - dist / maxFade))
-        ;(label.material as THREE.SpriteMaterial).opacity = opacity
-      })
+      // Distance-based label opacity fade (skip when focus/dim is active)
+      if (!currentHoveredMesh && !currentSelectedMesh) {
+        nodesGroup.children.forEach(container => {
+          const label = container.children.find(c => c.type === 'Sprite') as THREE.Sprite
+          if (!label) return
+          const dist = camera.position.distanceTo(container.position)
+          const maxFade = 2500
+          const opacity = Math.max(0.1, Math.min(0.9, 1.0 - dist / maxFade))
+          ;(label.material as THREE.SpriteMaterial).opacity = opacity
+        })
+      }
 
       renderer.render(scene, camera)
     }
