@@ -58,6 +58,16 @@ def _get_copyclip_ignore_file() -> Optional[str]:
 
 # Brief: main
 def main():
+    try:
+        _main_inner()
+    except KeyboardInterrupt:
+        print("\n\n  Exiting copyclip. (Ctrl+C)", file=sys.stderr)
+        print("  Run 'copyclip start' to launch the dashboard.", file=sys.stderr)
+        print("  Run 'copyclip --help' for all commands.\n", file=sys.stderr)
+        sys.exit(0)
+
+
+def _main_inner():
     load_dotenv(override=True)
     # Intelligence commands are handled first and remain additive.
     if maybe_handle_intelligence(sys.argv):
