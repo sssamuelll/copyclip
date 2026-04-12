@@ -336,17 +336,26 @@ def _maybe_handle_internal(argv) -> bool:
                 print(_ok("copyclip updated successfully."))
                 return True
 
-        # Fall back to pip (--force-reinstall ensures code updates even with same version)
-        pip_cmd = [sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", f"copyclip @ {REPO_URL}"]
-        # Then install deps separately without force
-        deps_cmd = [sys.executable, "-m", "pip", "install", f"copyclip @ {REPO_URL}"]
+        # Fall back to pip
+        # On Windows, the running copyclip.exe locks itself — use a subprocess
+        # that downloads, builds, and replaces after this process exits.
         print(_info("Upgrading via pip..."))
-        result = subprocess.run(pip_cmd)
-        subprocess.run(deps_cmd, capture_output=True)
-        if result.returncode == 0:
-            print(_ok("copyclip updated successfully."))
+        if sys.platform == "win32":
+            # Windows: can't overwrite running .exe. Use a delayed install via cmd /c.
+            pip_path = shutil.which("pip") or shutil.which("pip3") or f"{sys.executable} -m pip"
+            install_cmd = f'"{sys.executable}" -m pip install --force-reinstall --no-deps "copyclip @ {REPO_URL}" && "{sys.executable}" -m pip install "copyclip @ {REPO_URL}" >nul 2>&1'
+            print(_info("Scheduling update (Windows requires restart)..."))
+            subprocess.Popen(f'cmd /c "timeout /t 2 /nobreak >nul && {install_cmd}"', shell=True)
+            print(_ok("Update scheduled. Restart your terminal in a few seconds."))
         else:
-            print(_err("Update failed. Try manually: pip install --upgrade copyclip"))
+            pip_cmd = [sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", f"copyclip @ {REPO_URL}"]
+            deps_cmd = [sys.executable, "-m", "pip", "install", f"copyclip @ {REPO_URL}"]
+            result = subprocess.run(pip_cmd)
+            subprocess.run(deps_cmd, capture_output=True)
+            if result.returncode == 0:
+                print(_ok("copyclip updated successfully."))
+            else:
+                print(_err("Update failed. Try manually: pip install --upgrade copyclip"))
         return True
 
     return False
