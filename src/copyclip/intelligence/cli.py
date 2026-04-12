@@ -40,18 +40,30 @@ def _err(msg: str) -> str:
 
 
 def _get_key():
-    """Read a single key press from stdin."""
-    import tty, termios
-    fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
-    try:
-        tty.setraw(sys.stdin.fileno())
-        ch = sys.stdin.read(1)
-        if ch == '\x1b':
-            ch += sys.stdin.read(2)
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-    return ch
+    """Read a single key press from stdin (cross-platform)."""
+    if sys.platform == "win32":
+        import msvcrt
+        ch = msvcrt.getwch()
+        if ch in ('\x00', '\xe0'):  # special key prefix on Windows
+            code = msvcrt.getwch()
+            if code == 'H':
+                return '\x1b[A'  # Up arrow
+            elif code == 'P':
+                return '\x1b[B'  # Down arrow
+            return ch + code
+        return ch
+    else:
+        import tty, termios
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(sys.stdin.fileno())
+            ch = sys.stdin.read(1)
+            if ch == '\x1b':
+                ch += sys.stdin.read(2)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        return ch
 
 def _interactive_select(options, colors):
     """Render a vertical list with arrow navigation and colored items."""
