@@ -64,6 +64,15 @@ cd copyclip
 pip install -e .
 ```
 
+### Updating
+
+From the CLI:
+```bash
+copyclip update
+```
+
+Or re-run the install script — it detects the existing installation and upgrades automatically.
+
 ### 2. Start the Consciousness
 ```bash
 copyclip start

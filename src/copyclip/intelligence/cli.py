@@ -10,7 +10,7 @@ from .db import connect, init_schema
 from .server import run_server
 
 
-COMMANDS = {"analyze", "serve", "start", "decision", "report", "issue", "audit", "mcp"}
+COMMANDS = {"analyze", "serve", "start", "decision", "report", "issue", "audit", "mcp", "update"}
 
 
 def _use_color() -> bool:
@@ -224,6 +224,33 @@ def _maybe_handle_internal(argv) -> bool:
         from ..mcp_server import main as run_mcp_server
         print(_info("Starting MCP Oracle..."))
         asyncio.run(run_mcp_server())
+        return True
+
+    if cmd == "update":
+        import shutil
+        REPO_URL = "git+https://github.com/sssamuelll/copyclip.git"
+        print(_info("Updating copyclip..."))
+
+        # Try pipx first
+        if shutil.which("pipx"):
+            pipx_list = subprocess.run(["pipx", "list"], capture_output=True, text=True)
+            if "copyclip" in (pipx_list.stdout or ""):
+                print(_info("Upgrading via pipx..."))
+                result = subprocess.run(["pipx", "upgrade", "copyclip"])
+                if result.returncode != 0:
+                    print(_warn("pipx upgrade failed, reinstalling..."))
+                    subprocess.run(["pipx", "install", f"copyclip @ {REPO_URL}", "--force"])
+                print(_ok("copyclip updated successfully."))
+                return True
+
+        # Fall back to pip
+        pip_cmd = [sys.executable, "-m", "pip", "install", "--upgrade", f"copyclip @ {REPO_URL}"]
+        print(_info("Upgrading via pip..."))
+        result = subprocess.run(pip_cmd)
+        if result.returncode == 0:
+            print(_ok("copyclip updated successfully."))
+        else:
+            print(_err("Update failed. Try manually: pip install --upgrade copyclip"))
         return True
 
     return False

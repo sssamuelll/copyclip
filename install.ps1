@@ -1,5 +1,6 @@
-# CopyClip installer for Windows
-# Usage: irm https://raw.githubusercontent.com/sssamuelll/copyclip/main/install.ps1 | iex
+# CopyClip installer/updater for Windows
+# Install: irm https://raw.githubusercontent.com/sssamuelll/copyclip/main/install.ps1 | iex
+# Update:  irm https://raw.githubusercontent.com/sssamuelll/copyclip/main/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 $REPO = "https://github.com/sssamuelll/copyclip.git"
@@ -33,7 +34,15 @@ if (-not $python) {
 $pyver = & $python --version 2>&1
 Write-Info "Found $python ($pyver)"
 
-# --- Install via pipx (preferred) or pip ---
+# --- Detect existing installation ---
+$upgrading = $false
+try {
+    $null = Get-Command copyclip -ErrorAction Stop
+    $upgrading = $true
+    Write-Info "Existing copyclip found - upgrading..."
+} catch { }
+
+# --- Install/upgrade via pipx (preferred) or pip ---
 $usePipx = $false
 try {
     $null = Get-Command pipx -ErrorAction Stop
@@ -41,17 +50,23 @@ try {
 } catch { }
 
 if ($usePipx) {
-    Write-Info "Installing with pipx (isolated environment)..."
-    pipx install "copyclip @ git+${REPO}" --force
+    if ($upgrading) {
+        Write-Info "Upgrading with pipx..."
+        try { pipx upgrade copyclip } catch { pipx install "copyclip @ git+${REPO}" --force }
+    } else {
+        Write-Info "Installing with pipx (isolated environment)..."
+        pipx install "copyclip @ git+${REPO}" --force
+    }
 } else {
-    Write-Info "pipx not found, installing with pip --user..."
-    & $python -m pip install --user "copyclip @ git+${REPO}"
+    $action = if ($upgrading) { "Upgrading" } else { "Installing" }
+    Write-Info "$action with pip --user..."
+    & $python -m pip install --user --upgrade "copyclip @ git+${REPO}"
 }
 
 # --- Verify installation ---
 try {
     $null = Get-Command copyclip -ErrorAction Stop
-    Write-Ok "copyclip installed successfully!"
+    if ($upgrading) { Write-Ok "copyclip upgraded successfully!" } else { Write-Ok "copyclip installed successfully!" }
     Write-Host ""
     Write-Ok "Get started:"
     Write-Host "  cd your-project"

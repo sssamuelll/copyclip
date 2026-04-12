@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# CopyClip installer for macOS and Linux
-# Usage: curl -fsSL https://raw.githubusercontent.com/sssamuelll/copyclip/main/install.sh | bash
+# CopyClip installer/updater for macOS and Linux
+# Install: curl -fsSL https://raw.githubusercontent.com/sssamuelll/copyclip/main/install.sh | bash
+# Update:  curl -fsSL https://raw.githubusercontent.com/sssamuelll/copyclip/main/install.sh | bash
 
 REPO="https://github.com/sssamuelll/copyclip.git"
 MIN_PYTHON="3.10"
@@ -38,16 +39,28 @@ fi
 
 info "Found $PYTHON ($($PYTHON --version 2>&1))"
 
-# --- Install via pipx (preferred) or pip ---
+# --- Detect existing installation ---
+UPGRADING=false
+if command -v copyclip &>/dev/null; then
+    UPGRADING=true
+    info "Existing copyclip found — upgrading..."
+fi
+
+# --- Install/upgrade via pipx (preferred) or pip ---
 if command -v pipx &>/dev/null; then
-    info "Installing with pipx (isolated environment)..."
-    pipx install "copyclip @ git+${REPO}" --force
+    if $UPGRADING && pipx list 2>/dev/null | grep -q copyclip; then
+        info "Upgrading with pipx..."
+        pipx upgrade copyclip || pipx install "copyclip @ git+${REPO}" --force
+    else
+        info "Installing with pipx (isolated environment)..."
+        pipx install "copyclip @ git+${REPO}" --force
+    fi
 elif command -v pip3 &>/dev/null; then
-    info "pipx not found, installing with pip3 --user..."
-    pip3 install --user "copyclip @ git+${REPO}"
+    info "${UPGRADING:+Upgrading}${UPGRADING:=Installing} with pip3 --user..."
+    pip3 install --user --upgrade "copyclip @ git+${REPO}"
 elif "$PYTHON" -m pip --version &>/dev/null; then
-    info "pipx not found, installing with $PYTHON -m pip --user..."
-    "$PYTHON" -m pip install --user "copyclip @ git+${REPO}"
+    info "${UPGRADING:+Upgrading}${UPGRADING:=Installing} with $PYTHON -m pip --user..."
+    "$PYTHON" -m pip install --user --upgrade "copyclip @ git+${REPO}"
 else
     err "Neither pipx nor pip found. Install pip first:"
     err "  $PYTHON -m ensurepip --upgrade"
@@ -56,7 +69,11 @@ fi
 
 # --- Verify installation ---
 if command -v copyclip &>/dev/null; then
-    ok "copyclip installed successfully!"
+    if $UPGRADING; then
+        ok "copyclip upgraded successfully!"
+    else
+        ok "copyclip installed successfully!"
+    fi
     echo -e "${DIM}  $(copyclip --version 2>/dev/null || echo 'copyclip ready')${NC}"
     echo ""
     ok "Get started:"
