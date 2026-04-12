@@ -36,9 +36,42 @@ Manage the future of your architecture. Move AI proposals from "Intentions" to "
 ## 🛠 Quick Start
 
 ### 1. Installation
+
+**macOS / Linux** (one-liner):
 ```bash
+curl -fsSL https://raw.githubusercontent.com/sssamuelll/copyclip/main/install.sh | bash
+```
+
+**Windows** (PowerShell):
+```powershell
+irm https://raw.githubusercontent.com/sssamuelll/copyclip/main/install.ps1 | iex
+```
+
+**With pipx** (recommended for Python developers):
+```bash
+pipx install "copyclip @ git+https://github.com/sssamuelll/copyclip.git"
+```
+
+**With pip** (manual):
+```bash
+pip install "copyclip @ git+https://github.com/sssamuelll/copyclip.git"
+```
+
+**From source** (development):
+```bash
+git clone https://github.com/sssamuelll/copyclip.git
+cd copyclip
 pip install -e .
 ```
+
+### Updating
+
+From the CLI:
+```bash
+copyclip update
+```
+
+Or re-run the install script — it detects the existing installation and upgrades automatically.
 
 ### 2. Start the Consciousness
 ```bash

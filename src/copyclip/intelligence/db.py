@@ -78,6 +78,30 @@ def init_schema(conn: sqlite3.Connection) -> None:
             UNIQUE(project_id, from_module, to_module, edge_type)
         );
 
+        CREATE TABLE IF NOT EXISTS symbols (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            line_start INTEGER,
+            line_end INTEGER,
+            parent_symbol_id INTEGER,
+            module TEXT,
+            UNIQUE(project_id, file_path, name, kind, line_start)
+        );
+
+        CREATE TABLE IF NOT EXISTS symbol_edges (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            from_symbol_id INTEGER NOT NULL,
+            to_symbol_id INTEGER NOT NULL,
+            edge_type TEXT NOT NULL,
+            UNIQUE(project_id, from_symbol_id, to_symbol_id, edge_type),
+            FOREIGN KEY (from_symbol_id) REFERENCES symbols(id),
+            FOREIGN KEY (to_symbol_id) REFERENCES symbols(id)
+        );
+
         CREATE TABLE IF NOT EXISTS decisions (
             id INTEGER PRIMARY KEY,
             project_id INTEGER NOT NULL,

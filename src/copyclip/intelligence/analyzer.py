@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Set, Tuple
 
 from .db import connect, init_schema
+from .tree_sitter_parser import extract_symbols, SUPPORTED_LANGUAGES, ExtractionResult
 from .phases import (
     PHASE_COMPLETED,
     PHASE_DISCOVERY,
@@ -110,6 +111,12 @@ def _lang_from_ext(path: str) -> str:
         ".json": "json",
         ".css": "css",
         ".html": "html",
+        ".cpp": "cpp",
+        ".cc": "cpp",
+        ".cxx": "cpp",
+        ".h": "cpp",
+        ".hpp": "cpp",
+        ".rs": "rust",
     }.get(ext, "other")
 
 
@@ -578,7 +585,29 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
                         reused_insight = True
                         skipped_parse_files += 1
 
-            if (not reused_insight) and language in {"python", "javascript", "typescript"} and st_size < 300_000:
+            if (not reused_insight) and language in SUPPORTED_LANGUAGES and st_size < 300_000:
+                try:
+                    content = p.read_text(encoding="utf-8", errors="ignore")
+                    extraction = extract_symbols(content, language)
+                    cscore = extraction.complexity
+                    imports = sorted(set(imp.target for imp in extraction.imports))
+                    complexity_by_file[rel] = cscore
+                    for t in imports:
+                        dep_edges.add((mod, t))
+                    stage_mask |= STAGE_IMPORT_GRAPH | STAGE_RISK_SIGNALS
+                    next_insights[rel] = {
+                        "module": mod,
+                        "imports": imports,
+                        "complexity": cscore,
+                        "cognitive_debt": 0.0,
+                    }
+                    # Store extraction for symbol resolution pass
+                    if not hasattr(analyze, '_file_extractions'):
+                        analyze._file_extractions = {}
+                    analyze._file_extractions[rel] = (mod, extraction)
+                except Exception:
+                    pass
+            elif (not reused_insight) and language in {"python", "javascript", "typescript"} and st_size < 300_000:
                 try:
                     content = p.read_text(encoding="utf-8", errors="ignore")
                     cscore = _complexity_score(content, language)
@@ -607,6 +636,107 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
 
     if progress_cb:
         progress_cb(PHASE_IMPORT_GRAPH, indexed, total_files, "building module and dependency graph")
+
+    # --- Symbol resolution pass ---
+    file_extractions = getattr(analyze, '_file_extractions', {})
+    if file_extractions:
+        # Clear previous symbols for this project
+        conn.execute("DELETE FROM symbol_edges WHERE project_id=?", (project_id,))
+        conn.execute("DELETE FROM symbols WHERE project_id=?", (project_id,))
+
+        # Insert all symbol definitions
+        symbol_id_map = {}  # (file_path, name, kind) -> symbol_id
+        global_symbols = {}  # (module, name) -> symbol_id (for cross-file resolution)
+
+        for rel, (mod, extraction) in file_extractions.items():
+            for sym in extraction.definitions:
+                cursor = conn.execute(
+                    "INSERT OR REPLACE INTO symbols(project_id,name,kind,file_path,line_start,line_end,parent_symbol_id,module) VALUES(?,?,?,?,?,?,?,?)",
+                    (project_id, sym.name, sym.kind, rel, sym.line_start, sym.line_end, None, mod),
+                )
+                sid = cursor.lastrowid
+                symbol_id_map[(rel, sym.name, sym.kind)] = sid
+                global_symbols[(mod, sym.name)] = sid
+
+        # Resolve parent_symbol_id for methods
+        for rel, (mod, extraction) in file_extractions.items():
+            for sym in extraction.definitions:
+                if sym.parent:
+                    parent_id = symbol_id_map.get((rel, sym.parent, "class"))
+                    child_id = symbol_id_map.get((rel, sym.name, sym.kind))
+                    if parent_id and child_id:
+                        conn.execute("UPDATE symbols SET parent_symbol_id=? WHERE id=?", (parent_id, child_id))
+                        conn.execute(
+                            "INSERT OR IGNORE INTO symbol_edges(project_id,from_symbol_id,to_symbol_id,edge_type) VALUES(?,?,?,?)",
+                            (project_id, parent_id, child_id, "contains"),
+                        )
+
+        # Build import map for cross-file call resolution
+        # Maps (file_path, imported_name) -> source_module
+        import_map = {}
+        for rel, (mod, extraction) in file_extractions.items():
+            for imp in extraction.imports:
+                import_map[(rel, imp.target)] = imp.target
+
+        # Resolve calls
+        for rel, (mod, extraction) in file_extractions.items():
+            for call in extraction.calls:
+                # Try to find the callee symbol
+                callee_base = call.callee.split(".")[0]  # handle obj.method -> obj
+                callee_name = call.callee.split(".")[-1] if "." in call.callee else call.callee
+
+                # Look in same file first
+                callee_id = symbol_id_map.get((rel, callee_name, "function")) or \
+                            symbol_id_map.get((rel, callee_name, "method"))
+
+                # Look in imported modules
+                if not callee_id:
+                    for (r, imp_name), src_mod in import_map.items():
+                        if r == rel and imp_name == callee_base:
+                            callee_id = global_symbols.get((src_mod, callee_name))
+                            if callee_id:
+                                break
+
+                # Look globally as fallback
+                if not callee_id:
+                    for (m, n), sid in global_symbols.items():
+                        if n == callee_name:
+                            callee_id = sid
+                            break
+
+                if callee_id:
+                    caller_id = symbol_id_map.get((rel, call.caller, "function")) or \
+                                symbol_id_map.get((rel, call.caller, "method"))
+                    if caller_id:
+                        conn.execute(
+                            "INSERT OR IGNORE INTO symbol_edges(project_id,from_symbol_id,to_symbol_id,edge_type) VALUES(?,?,?,?)",
+                            (project_id, caller_id, callee_id, "calls"),
+                        )
+
+        # Resolve inheritance
+        for rel, (mod, extraction) in file_extractions.items():
+            for inh in extraction.inheritance:
+                child_id = symbol_id_map.get((rel, inh.child, "class")) or \
+                           symbol_id_map.get((rel, inh.child, "struct"))
+                parent_id = None
+                # Look in same file
+                parent_id = symbol_id_map.get((rel, inh.parent, "class")) or \
+                            symbol_id_map.get((rel, inh.parent, "trait")) or \
+                            symbol_id_map.get((rel, inh.parent, "interface"))
+                # Look globally
+                if not parent_id:
+                    for (m, n), sid in global_symbols.items():
+                        if n == inh.parent:
+                            parent_id = sid
+                            break
+                if child_id and parent_id:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO symbol_edges(project_id,from_symbol_id,to_symbol_id,edge_type) VALUES(?,?,?,?)",
+                        (project_id, child_id, parent_id, "inherits"),
+                    )
+
+        # Clean up
+        analyze._file_extractions = {}
 
     for module in modules_seen:
         conn.execute(

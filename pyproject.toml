@@ -17,6 +17,13 @@ dependencies = [
   "aiohttp",
   "tiktoken",
   "pyyaml",
+  "tree-sitter>=0.21.0",
+  "tree-sitter-python",
+  "tree-sitter-javascript",
+  "tree-sitter-typescript",
+  "tree-sitter-css",
+  "tree-sitter-cpp",
+  "tree-sitter-rust",
 ]
 
 [project.scripts]

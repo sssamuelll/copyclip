@@ -156,6 +156,42 @@ export type AnalyzeJob = {
 export type ArchNode = { name: string }
 export type ArchEdge = { from: string; to: string; type: string }
 
+export type ModuleSourceFile = {
+  path: string
+  content: string
+  language: string
+}
+
+export type ModuleSourceResponse = {
+  module: string
+  files: ModuleSourceFile[]
+  meta?: {
+    project?: string
+    generated_at?: string
+  }
+}
+
+export type SymbolItem = {
+  name: string
+  kind: 'function' | 'class' | 'method' | 'interface' | 'trait' | 'enum' | 'struct'
+  file_path: string
+  line_start: number
+  line_end: number
+  methods?: string[]
+  calls?: string[]
+  called_by?: string[]
+  inherits?: string[]
+}
+
+export type ModuleSymbolsResponse = {
+  module: string
+  symbols: SymbolItem[]
+  meta?: {
+    project?: string
+    generated_at?: string
+  }
+}
+
 export type ArchaeologyCommit = {
   sha: string
   author: string

@@ -689,6 +689,82 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 }))
                 return
 
+            if parsed.path == "/api/module/source":
+                if not pid:
+                    self._json(with_meta({"module": "", "files": []}))
+                    return
+                q = parse_qs(parsed.query or "")
+                module_name = (q.get("module", [""])[0] or "").strip()
+                if not module_name:
+                    self._json(with_meta({"module": "", "files": []}))
+                    return
+                rows = conn.execute(
+                    "SELECT DISTINCT path FROM analysis_file_insights WHERE project_id=? AND module=? LIMIT 10",
+                    (pid, module_name),
+                ).fetchall()
+                result_files = []
+                root_path = Path(root).resolve()
+                for (rel_path,) in rows:
+                    fp = (root_path / rel_path).resolve()
+                    if not fp.is_relative_to(root_path) or not fp.exists() or not fp.is_file():
+                        continue
+                    try:
+                        raw = fp.read_bytes()
+                        if b"\x00" in raw[:1024]:
+                            continue  # skip binary
+                        content = raw.decode("utf-8", errors="replace")
+                        if len(content) > 102400:
+                            content = content[:102400] + "\n// ... truncated (100KB limit)"
+                        ext = fp.suffix.lstrip(".")
+                        lang_map = {"py": "python", "js": "javascript", "ts": "javascript", "tsx": "javascript", "css": "css", "json": "javascript"}
+                        result_files.append({"path": rel_path, "content": content, "language": lang_map.get(ext, "")})
+                    except Exception:
+                        continue
+                self._json(with_meta({"module": module_name, "files": result_files}))
+                return
+
+            if parsed.path == "/api/module/symbols":
+                if not pid:
+                    self._json(with_meta({"module": "", "symbols": []}))
+                    return
+                q = parse_qs(parsed.query or "")
+                module_name = (q.get("module", [""])[0] or "").strip()
+                if not module_name:
+                    self._json(with_meta({"module": "", "symbols": []}))
+                    return
+                rows = conn.execute(
+                    "SELECT id, name, kind, file_path, line_start, line_end, parent_symbol_id FROM symbols WHERE project_id=? AND module=? ORDER BY file_path, line_start",
+                    (pid, module_name),
+                ).fetchall()
+                symbols = []
+                symbol_ids = {r[0] for r in rows}
+                for r in rows:
+                    sid, name, kind, fpath, lstart, lend, parent_id = r
+                    # Get methods (children)
+                    methods = [row[0] for row in conn.execute(
+                        "SELECT name FROM symbols WHERE parent_symbol_id=? AND project_id=?", (sid, pid)
+                    ).fetchall()] if kind == "class" else []
+                    # Get calls (outgoing)
+                    calls = [row[0] for row in conn.execute(
+                        "SELECT s.name FROM symbol_edges e JOIN symbols s ON e.to_symbol_id=s.id WHERE e.from_symbol_id=? AND e.edge_type='calls'", (sid,)
+                    ).fetchall()]
+                    # Get called_by (incoming)
+                    called_by = [row[0] for row in conn.execute(
+                        "SELECT s.name FROM symbol_edges e JOIN symbols s ON e.from_symbol_id=s.id WHERE e.to_symbol_id=? AND e.edge_type='calls'", (sid,)
+                    ).fetchall()]
+                    # Get inherits
+                    inherits = [row[0] for row in conn.execute(
+                        "SELECT s.name FROM symbol_edges e JOIN symbols s ON e.to_symbol_id=s.id WHERE e.from_symbol_id=? AND e.edge_type='inherits'", (sid,)
+                    ).fetchall()]
+                    symbols.append({
+                        "name": name, "kind": kind, "file_path": fpath,
+                        "line_start": lstart, "line_end": lend,
+                        "methods": methods, "calls": calls,
+                        "called_by": called_by, "inherits": inherits,
+                    })
+                self._json(with_meta({"module": module_name, "symbols": symbols}))
+                return
+
             if parsed.path == "/api/context-bundle":
                 if not pid:
                     self._json(with_meta({"selected_files": [], "manifest": [], "total_candidates": 0}))
