@@ -156,6 +156,21 @@ export type AnalyzeJob = {
 export type ArchNode = { name: string }
 export type ArchEdge = { from: string; to: string; type: string }
 
+export type ModuleSourceFile = {
+  path: string
+  content: string
+  language: string
+}
+
+export type ModuleSourceResponse = {
+  module: string
+  files: ModuleSourceFile[]
+  meta?: {
+    project?: string
+    generated_at?: string
+  }
+}
+
 export type ArchaeologyCommit = {
   sha: string
   author: string
