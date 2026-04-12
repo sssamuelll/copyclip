@@ -79,10 +79,10 @@ def _interactive_select(options, colors):
             # Print options
             for i, (opt, col) in enumerate(zip(options, colors)):
                 if i == idx:
-                    prefix = _c("  → [x] ", "37;1")
+                    prefix = _c("  > [x] ", "37;1")
                     label = f"\033[1;{col}m{opt}\033[0m"
                 else:
-                    prefix = "      [ ] "
+                    prefix = "    [ ] "
                     label = f"\033[{col}m{opt}\033[0m"
                 sys.stdout.write(f"{prefix}{label}\n")
             
