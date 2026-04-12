@@ -224,6 +224,114 @@ body {
 .side-panel { border: 1px solid var(--border); background: var(--panel); }
 .panel-block { padding: 12px; border-bottom: 1px solid var(--border); }
 
+/* --- Atlas Augmented Info Panel --- */
+.atlas-info-panel {
+  position: absolute;
+  top: 30px;
+  right: 30px;
+  width: 320px;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(16px);
+  transition: box-shadow 0.3s ease;
+
+  /* Augmented-ui geometry (adapted from samueldar.io for 320px panel) */
+  --aug-clip-tr1: initial;
+  --aug-tr1-alt-join-out: initial;
+  --aug-tr1: 12px;
+  --aug-clip-tr2: initial;
+  --aug-tr2: 12px;
+  --aug-tr-extend1: 40px;
+
+  --aug-round-tl1: initial;
+  --aug-tl1: 6px;
+  --aug-round-br1: initial;
+  --aug-br1: 6px;
+
+  --aug-border: initial;
+  --aug-border-all: 2px;
+  --aug-border-bg: #00eeff;
+  --aug-inlay: initial;
+  --aug-inlay-all: 2px;
+  --aug-inlay-bg: rgba(0, 238, 255, 0.08);
+  --aug-inlay-opacity: 0.15;
+  box-shadow: 0 0 20px rgba(0, 238, 255, 0.1);
+}
+
+.atlas-info-panel--locked {
+  width: 380px;
+  max-height: 60vh;
+  overflow-y: auto;
+  box-shadow: 0 0 40px rgba(0, 238, 255, 0.15);
+  transition: width 0.2s ease, max-height 0.2s ease;
+}
+
+/* --- Atlas Code Viewer --- */
+.atlas-file-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid #222;
+  margin-bottom: 0;
+  overflow-x: auto;
+}
+
+.atlas-file-tab {
+  padding: 6px 12px;
+  font-size: 10px;
+  color: #666;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  transition: color 0.15s ease, border-color 0.15s ease;
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+.atlas-file-tab:hover {
+  color: #aaa;
+}
+
+.atlas-file-tab--active {
+  color: #fff;
+  border-bottom-color: #00eeff;
+}
+
+.atlas-code-container {
+  height: 300px;
+  overflow: hidden;
+  border: 1px solid #222;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.atlas-code-container .CodeMirror {
+  height: 100%;
+  background: transparent;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+}
+
+/* CodeMirror Atlas Cosmic Theme */
+.cm-s-atlas-cosmic { background: transparent; color: #b5b4b6; }
+.cm-s-atlas-cosmic .CodeMirror-gutters { background: transparent; border: none; margin-right: 8px; }
+.cm-s-atlas-cosmic .CodeMirror-linenumber { color: rgba(0, 238, 255, 0.2); padding-right: 8px; }
+.cm-s-atlas-cosmic .CodeMirror-cursor { border-left-color: #00eeff !important; }
+.cm-s-atlas-cosmic .CodeMirror-selected { background: rgba(0, 238, 255, 0.1); }
+.cm-s-atlas-cosmic .cm-keyword { color: #00eeff; }
+.cm-s-atlas-cosmic .cm-def { color: #fff; }
+.cm-s-atlas-cosmic .cm-variable { color: #c7c9d3; }
+.cm-s-atlas-cosmic .cm-variable-2 { color: #47cf73; }
+.cm-s-atlas-cosmic .cm-string { color: #ffaa00; }
+.cm-s-atlas-cosmic .cm-string-2 { color: #d75093; }
+.cm-s-atlas-cosmic .cm-number { color: #2bc7b9; }
+.cm-s-atlas-cosmic .cm-comment { color: #4a5568; }
+.cm-s-atlas-cosmic .cm-property { color: #5e91f2; }
+.cm-s-atlas-cosmic .cm-operator { color: #47cf73; }
+.cm-s-atlas-cosmic .cm-meta { color: #00eeff; }
+.cm-s-atlas-cosmic .cm-tag { color: #00eeff; }
+.cm-s-atlas-cosmic .cm-atom { color: #a3d65a; }
+.cm-s-atlas-cosmic .cm-builtin { color: #ae63e4; }
+.cm-s-atlas-cosmic .cm-qualifier { color: #00eeff; }
+.cm-s-atlas-cosmic .cm-header { color: #ff3c41; font-weight: bold; }
+
 @media (max-width: 1200px) {
   .kpi-row { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
   .content-columns, .split, .risk-top-row, .arch-body, .narrative-grid { grid-template-columns: 1fr; }
