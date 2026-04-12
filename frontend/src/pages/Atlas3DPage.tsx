@@ -4,7 +4,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 // @ts-ignore — d3-force-3d has no type declarations
 import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide } from 'd3-force-3d'
 import { api } from '../api/client'
-import type { ArchNode, ArchEdge, CognitiveLoadItem, ModuleSourceFile } from '../types/api'
+import type { ArchNode, ArchEdge, CognitiveLoadItem, ModuleSourceFile, SymbolItem } from '../types/api'
 
 type GraphNode = ArchNode & {
   debt: number
@@ -36,6 +36,7 @@ export function Atlas3DPage() {
   const [sourceFiles, setSourceFiles] = useState<ModuleSourceFile[]>([])
   const [activeFileIdx, setActiveFileIdx] = useState(0)
   const [loadingSource, setLoadingSource] = useState(false)
+  const [symbols, setSymbols] = useState<SymbolItem[]>([])
   const codeMirrorRef = useRef<HTMLDivElement>(null)
   const cmInstanceRef = useRef<any>(null)
 
@@ -495,6 +496,7 @@ export function Atlas3DPage() {
   useEffect(() => {
     if (!selectedNode) {
       setSourceFiles([])
+      setSymbols([])
       setActiveFileIdx(0)
       if (cmInstanceRef.current) {
         cmInstanceRef.current.toTextArea()
@@ -503,14 +505,19 @@ export function Atlas3DPage() {
       return
     }
     setLoadingSource(true)
-    api.moduleSource(selectedNode.name)
-      .then(res => {
-        setSourceFiles(res.files || [])
+    Promise.all([
+      api.moduleSource(selectedNode.name),
+      api.moduleSymbols(selectedNode.name),
+    ])
+      .then(([sourceRes, symbolsRes]) => {
+        setSourceFiles(sourceRes.files || [])
         setActiveFileIdx(0)
+        setSymbols(symbolsRes.symbols || [])
         setLoadingSource(false)
       })
       .catch(() => {
         setSourceFiles([])
+        setSymbols([])
         setLoadingSource(false)
       })
   }, [selectedNode])
@@ -605,6 +612,54 @@ export function Atlas3DPage() {
                     </span>
                   ))}
                 </div>
+              </div>
+            )}
+            {selectedNode && symbols.length > 0 && (
+              <div className="atlas-symbols-section">
+                <div className="atlas-symbols-header">SYMBOLS ({symbols.length} definitions)</div>
+                {symbols.filter(s => s.kind === 'class' || s.kind === 'struct').map(cls => (
+                  <div key={`${cls.file_path}:${cls.name}:${cls.line_start}`}>
+                    <div
+                      className="atlas-symbol-item"
+                      onClick={() => {
+                        if (cmInstanceRef.current && cls.line_start) {
+                          const fileIdx = sourceFiles.findIndex(f => f.path === cls.file_path)
+                          if (fileIdx >= 0) setActiveFileIdx(fileIdx)
+                          setTimeout(() => cmInstanceRef.current?.scrollIntoView({ line: cls.line_start - 1, ch: 0 }), 100)
+                        }
+                      }}
+                    >
+                      <span className="atlas-symbol-name" style={{ color: '#00eeff' }}>{cls.name}</span>
+                      <span className="atlas-symbol-kind">{cls.kind}{cls.inherits && cls.inherits.length > 0 ? ` : ${cls.inherits.join(', ')}` : ''}</span>
+                    </div>
+                    {cls.methods && cls.methods.length > 0 && (
+                      <div className="atlas-symbol-nested">
+                        {cls.methods.map(m => (
+                          <div key={m} className="atlas-symbol-item" style={{ fontSize: 10 }}>
+                            <span className="atlas-symbol-name">{m}</span>
+                            <span className="atlas-symbol-kind">method</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {symbols.filter(s => s.kind === 'function').map(fn => (
+                  <div
+                    key={`${fn.file_path}:${fn.name}:${fn.line_start}`}
+                    className="atlas-symbol-item"
+                    onClick={() => {
+                      if (cmInstanceRef.current && fn.line_start) {
+                        const fileIdx = sourceFiles.findIndex(f => f.path === fn.file_path)
+                        if (fileIdx >= 0) setActiveFileIdx(fileIdx)
+                        setTimeout(() => cmInstanceRef.current?.scrollIntoView({ line: fn.line_start - 1, ch: 0 }), 100)
+                      }
+                    }}
+                  >
+                    <span className="atlas-symbol-name">{fn.name}</span>
+                    <span className="atlas-symbol-kind">function</span>
+                  </div>
+                ))}
               </div>
             )}
             {selectedNode && sourceFiles.length > 0 && (

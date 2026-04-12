@@ -309,6 +309,46 @@ body {
   font-size: 12px;
 }
 
+.atlas-symbols-section {
+  margin-top: 8px;
+}
+
+.atlas-symbols-header {
+  font-size: 10px;
+  color: #666;
+  margin-bottom: 6px;
+}
+
+.atlas-symbol-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 0;
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.atlas-symbol-item:hover {
+  color: #00eeff;
+}
+
+.atlas-symbol-name {
+  color: #ccc;
+}
+
+.atlas-symbol-kind {
+  font-size: 9px;
+  color: #555;
+  text-transform: lowercase;
+}
+
+.atlas-symbol-nested {
+  padding-left: 16px;
+  border-left: 1px solid #222;
+  margin-left: 4px;
+}
+
 /* CodeMirror Atlas Cosmic Theme */
 .cm-s-atlas-cosmic { background: transparent; color: #b5b4b6; }
 .cm-s-atlas-cosmic .CodeMirror-gutters { background: transparent; border: none; margin-right: 8px; }
