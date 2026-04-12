@@ -291,7 +291,8 @@ def _maybe_handle_internal(argv) -> bool:
         print(_info("Updating copyclip..."))
 
         # Detect if running from a local git repo (editable install)
-        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        # __file__ = src/copyclip/intelligence/cli.py → need 4 levels up to reach repo root
+        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
         is_editable = os.path.exists(os.path.join(repo_root, ".git")) and os.path.exists(os.path.join(repo_root, "pyproject.toml"))
 
         if is_editable:
