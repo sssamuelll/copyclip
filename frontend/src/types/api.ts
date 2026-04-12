@@ -171,6 +171,27 @@ export type ModuleSourceResponse = {
   }
 }
 
+export type SymbolItem = {
+  name: string
+  kind: 'function' | 'class' | 'method' | 'interface' | 'trait' | 'enum' | 'struct'
+  file_path: string
+  line_start: number
+  line_end: number
+  methods?: string[]
+  calls?: string[]
+  called_by?: string[]
+  inherits?: string[]
+}
+
+export type ModuleSymbolsResponse = {
+  module: string
+  symbols: SymbolItem[]
+  meta?: {
+    project?: string
+    generated_at?: string
+  }
+}
+
 export type ArchaeologyCommit = {
   sha: string
   author: string
