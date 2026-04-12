@@ -4,7 +4,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 // @ts-ignore — d3-force-3d has no type declarations
 import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide } from 'd3-force-3d'
 import { api } from '../api/client'
-import type { ArchNode, ArchEdge, CognitiveLoadItem } from '../types/api'
+import type { ArchNode, ArchEdge, CognitiveLoadItem, ModuleSourceFile } from '../types/api'
 
 type GraphNode = ArchNode & {
   debt: number
@@ -33,6 +33,11 @@ export function Atlas3DPage() {
   const [loading, setLoading] = useState(true)
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null)
   const [hoveredNodeData, setHoveredNodeData] = useState<GraphNode | null>(null)
+  const [sourceFiles, setSourceFiles] = useState<ModuleSourceFile[]>([])
+  const [activeFileIdx, setActiveFileIdx] = useState(0)
+  const [loadingSource, setLoadingSource] = useState(false)
+  const codeMirrorRef = useRef<HTMLDivElement>(null)
+  const cmInstanceRef = useRef<any>(null)
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -486,6 +491,64 @@ export function Atlas3DPage() {
     }
   }, [])
 
+  // Fetch source code when a node is selected
+  useEffect(() => {
+    if (!selectedNode) {
+      setSourceFiles([])
+      setActiveFileIdx(0)
+      if (cmInstanceRef.current) {
+        cmInstanceRef.current.toTextArea()
+        cmInstanceRef.current = null
+      }
+      return
+    }
+    setLoadingSource(true)
+    api.moduleSource(selectedNode.name)
+      .then(res => {
+        setSourceFiles(res.files || [])
+        setActiveFileIdx(0)
+        setLoadingSource(false)
+      })
+      .catch(() => {
+        setSourceFiles([])
+        setLoadingSource(false)
+      })
+  }, [selectedNode])
+
+  // Initialize/update CodeMirror when active file changes
+  useEffect(() => {
+    if (!selectedNode || sourceFiles.length === 0) return
+    const file = sourceFiles[activeFileIdx]
+    if (!file) return
+
+    const timer = setTimeout(() => {
+      const container = codeMirrorRef.current
+      if (!container) return
+
+      if (cmInstanceRef.current) {
+        cmInstanceRef.current.toTextArea()
+        cmInstanceRef.current = null
+      }
+
+      while (container.firstChild) container.removeChild(container.firstChild)
+      const textarea = document.createElement('textarea')
+      container.appendChild(textarea)
+
+      const CM = (window as any).CodeMirror
+      if (!CM) return
+      cmInstanceRef.current = CM.fromTextArea(textarea, {
+        value: file.content,
+        mode: file.language || null,
+        readOnly: true,
+        lineNumbers: true,
+        theme: 'atlas-cosmic',
+      })
+      cmInstanceRef.current.setValue(file.content)
+    }, 50)
+
+    return () => clearTimeout(timer)
+  }, [selectedNode, sourceFiles, activeFileIdx])
+
   const activeNode = selectedNode || hoveredNodeData
 
   return (
@@ -544,8 +607,27 @@ export function Atlas3DPage() {
                 </div>
               </div>
             )}
+            {selectedNode && sourceFiles.length > 0 && (
+              <>
+                <div className="atlas-file-tabs">
+                  {sourceFiles.map((f, i) => (
+                    <div
+                      key={f.path}
+                      className={`atlas-file-tab${i === activeFileIdx ? ' atlas-file-tab--active' : ''}`}
+                      onClick={() => setActiveFileIdx(i)}
+                    >
+                      {f.path.split('/').pop()}
+                    </div>
+                  ))}
+                </div>
+                <div className="atlas-code-container" ref={codeMirrorRef} />
+              </>
+            )}
+            {selectedNode && loadingSource && sourceFiles.length === 0 && (
+              <div style={{ fontSize: 10, color: '#666', padding: 12 }}>Loading source...</div>
+            )}
             {selectedNode && (
-              <div style={{ fontSize: 11, color: '#00eeff', opacity: 0.6 }}>
+              <div style={{ fontSize: 11, color: '#00eeff', opacity: 0.6, marginTop: 4 }}>
                 Click in deep space to release focus.
               </div>
             )}
