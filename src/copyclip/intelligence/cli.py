@@ -290,7 +290,28 @@ def _maybe_handle_internal(argv) -> bool:
         REPO_URL = "git+https://github.com/sssamuelll/copyclip.git"
         print(_info("Updating copyclip..."))
 
-        # Try pipx first
+        # Detect if running from a local git repo (editable install)
+        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        is_editable = os.path.exists(os.path.join(repo_root, ".git")) and os.path.exists(os.path.join(repo_root, "pyproject.toml"))
+
+        if is_editable:
+            print(_info("Detected editable install — pulling latest from git..."))
+            result = subprocess.run(["git", "-C", repo_root, "pull", "origin", "main"], capture_output=True, text=True)
+            if result.returncode == 0:
+                print(_ok(f"Git pull: {result.stdout.strip()}"))
+            else:
+                print(_warn(f"Git pull issue: {result.stderr.strip()}"))
+
+            # Reinstall in the current Python environment to pick up new deps
+            print(_info("Installing updated dependencies..."))
+            pip_result = subprocess.run([sys.executable, "-m", "pip", "install", "-e", repo_root, "--quiet"])
+            if pip_result.returncode == 0:
+                print(_ok("copyclip updated successfully."))
+            else:
+                print(_err("Dependency install failed. Try: pip install -e ."))
+            return True
+
+        # Non-editable: try pipx first
         if shutil.which("pipx"):
             pipx_list = subprocess.run(["pipx", "list"], capture_output=True, text=True)
             if "copyclip" in (pipx_list.stdout or ""):
