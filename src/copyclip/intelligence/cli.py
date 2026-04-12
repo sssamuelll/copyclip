@@ -324,10 +324,13 @@ def _maybe_handle_internal(argv) -> bool:
                 print(_ok("copyclip updated successfully."))
                 return True
 
-        # Fall back to pip
-        pip_cmd = [sys.executable, "-m", "pip", "install", "--upgrade", f"copyclip @ {REPO_URL}"]
+        # Fall back to pip (--force-reinstall ensures code updates even with same version)
+        pip_cmd = [sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", f"copyclip @ {REPO_URL}"]
+        # Then install deps separately without force
+        deps_cmd = [sys.executable, "-m", "pip", "install", f"copyclip @ {REPO_URL}"]
         print(_info("Upgrading via pip..."))
         result = subprocess.run(pip_cmd)
+        subprocess.run(deps_cmd, capture_output=True)
         if result.returncode == 0:
             print(_ok("copyclip updated successfully."))
         else:
