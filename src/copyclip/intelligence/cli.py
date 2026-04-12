@@ -110,6 +110,92 @@ def _pick_open_port(base_port: int, max_scan: int = 50) -> int:
                 return port
     raise OSError(f"No open port near {base_port}")
 
+def _run_onboarding(root: str, providers) -> bool:
+    """Interactive onboarding wizard for first-time LLM configuration."""
+    print("")
+    print(_c("  ╔══════════════════════════════════════════╗", "36"))
+    print(_c("  ║     CopyClip — First-Time Setup          ║", "36"))
+    print(_c("  ╚══════════════════════════════════════════╝", "36"))
+    print("")
+    print(_info("CopyClip uses an LLM for semantic analysis (project narrative,"))
+    print(_info("risk detection, decision advising). Let's configure one."))
+    print("")
+
+    # Step 1: Select provider
+    print(_c("  Step 1/3", "35") + " — Select your LLM provider:")
+    print("")
+    opts = list(providers.keys())
+    cols = ["36", "32", "33"]  # Cyan, Green, Yellow
+    try:
+        provider = _interactive_select(opts, cols)
+    except (KeyboardInterrupt, EOFError):
+        print("\n" + _info("Skipped. Running in basic mode (no semantic analysis)."))
+        return False
+    print(f"  Selected: \033[1m{provider}\033[0m")
+    print("")
+
+    meta = providers[provider]
+
+    # Step 2: API key
+    print(_c("  Step 2/3", "35") + f" — Enter your {provider.upper()} API key:")
+    print(_c(f"          (env var: {meta.api_key_env})", "2"))
+    print("")
+    try:
+        api_key = input(_c("  API Key: ", "37")).strip()
+    except (KeyboardInterrupt, EOFError):
+        print("\n" + _info("Skipped. Running in basic mode."))
+        return False
+
+    if not api_key:
+        print(_warn("No API key provided. Running in basic mode."))
+        return False
+
+    # Step 3: Model selection (optional)
+    model = ""
+    if meta.default_model_env:
+        print("")
+        print(_c("  Step 3/3", "35") + " — Choose a model (press Enter for default):")
+        default_models = {
+            "deepseek": "deepseek-chat",
+            "openai": "gpt-4o",
+            "anthropic": "claude-sonnet-4-20250514",
+        }
+        default = default_models.get(provider, "")
+        try:
+            model = input(_c(f"  Model [{default}]: ", "37")).strip()
+        except (KeyboardInterrupt, EOFError):
+            model = ""
+        if not model:
+            model = default
+        print(f"  Using: \033[1m{model}\033[0m")
+    else:
+        print("")
+        print(_c("  Step 3/3", "35") + " — No model selection needed for this provider.")
+
+    # Save to .env
+    from dotenv import load_dotenv
+    env_path = os.path.join(root, ".env")
+
+    lines_to_write = [
+        "\n# CopyClip LLM Configuration\n",
+        f"COPYCLIP_LLM_PROVIDER={provider}\n",
+        f"{meta.api_key_env}={api_key}\n",
+    ]
+    if model and meta.default_model_env:
+        lines_to_write.append(f"{meta.default_model_env}={model}\n")
+
+    with open(env_path, "a" if os.path.exists(env_path) else "w") as f:
+        f.writelines(lines_to_write)
+
+    load_dotenv(env_path, override=True)
+
+    print("")
+    print(_ok(f"Configuration saved to {env_path}"))
+    print(_ok("Semantic intelligence enabled."))
+    print("")
+    return True
+
+
 def maybe_handle(argv) -> bool:
     try:
         return _maybe_handle_internal(argv)
@@ -142,45 +228,18 @@ def _maybe_handle_internal(argv) -> bool:
             print(_err(f"'{root}' is not a project folder."))
             return True
 
-        # 1) Check LLM Configuration interactively
+        # 1) Check LLM Configuration — launch onboarding if not configured
         llm_ok = True
         try:
             cfg = load_config(os.getenv("COPYCLIP_LLM_CONFIG"))
             _ = resolve_provider(os.getenv("COPYCLIP_LLM_PROVIDER"), cfg)
             print(_ok("LLM provider configured."))
-        except Exception as e:
+        except Exception:
             llm_ok = False
-            print(_warn(f"LLM configuration issue: {str(e)}"))
             if sys.stdin.isatty():
-                choice = input(_c("? ", "35") + "Do you want to configure an LLM provider now? (y/N): ").strip().lower()
-                if choice == 'y':
-                    opts = ["deepseek", "openai", "anthropic", "gemini", "local"]
-                    cols = ["36", "32", "33", "35", "34"] # Cyan, Green, Yellow, Magenta, Blue
-                    
-                    print(_info("Select provider (Arrows to navigate, Space/Enter to select):"))
-                    provider = _interactive_select(opts, cols)
-                    print(f"  Selected: \033[1m{provider}\033[0m")
-                    
-                    api_key = input(_c("  Enter API Key: ", "37")).strip()
-                    if provider and api_key:
-                        from dotenv import load_dotenv
-                        env_path = os.path.join(root, ".env")
-                        meta = PROVIDERS.get(provider, PROVIDERS["deepseek"])
-                        key_var = meta.api_key_env
-                        
-                        with open(env_path, "a" if os.path.exists(env_path) else "w") as f:
-                            f.write(f"\n# CopyClip Configuration\n")
-                            f.write(f"COPYCLIP_LLM_PROVIDER={provider}\n")
-                            f.write(f"{key_var}={api_key}\n")
-                        
-                        # Load immediately into current process
-                        load_dotenv(env_path, override=True)
-                        print(_ok(f"Settings saved to {env_path}. Semantic intelligence enabled."))
-                        llm_ok = True
-                    else:
-                        print(_warn("Incomplete info. Using basic mode."))
-                else:
-                    print(_info("Continuing in basic mode."))
+                llm_ok = _run_onboarding(root, PROVIDERS)
+            else:
+                print(_warn("No LLM configured. Run copyclip start in a terminal for setup."))
 
         # 2) Ensure initial analysis
         conn = connect(root)
