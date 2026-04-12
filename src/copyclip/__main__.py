@@ -103,16 +103,18 @@ def main():
 
     args = parser.parse_args()
 
-    from copyclip.llm.provider_config import resolve_provider, ProviderConfigError
-    
+    from copyclip.llm.provider_config import resolve_provider, ProviderConfigError, PROVIDERS
+
     try:
-        # Pasa 'None' como configuración para forzar a resolve_provider
-        # a usar únicamente las variables de entorno que acabamos de cargar.
-        _ = resolve_provider(args.provider, config={}) 
-    except ProviderConfigError as e:
-        # Este error ahora te dirá exactamente qué variable falta en TU .env
-        print(f"[ERROR] Provider config error: {e}", file=sys.stderr)
-        sys.exit(2)
+        _ = resolve_provider(args.provider, config={})
+    except ProviderConfigError:
+        if sys.stdin.isatty():
+            from copyclip.intelligence.cli import _run_onboarding
+            configured = _run_onboarding(os.path.abspath(args.folder), PROVIDERS)
+            if not configured:
+                print("[INFO] No LLM configured. Some features will be unavailable.", file=sys.stderr)
+        else:
+            print("[WARN] No LLM configured. Set COPYCLIP_LLM_PROVIDER and API key in .env", file=sys.stderr)
     
     # Always search for .copyclipignore upward from the provided folder
     base_path = os.path.abspath(args.folder)
