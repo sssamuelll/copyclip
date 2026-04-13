@@ -151,11 +151,9 @@ def _safe_git(project_root: str, args: List[str]) -> str:
 
 def _module_from_relpath(rel: str) -> str:
     parts = rel.split("/")
-    if len(parts) == 1:
+    if len(parts) <= 1:
         return "root"
-    if parts[0] in {"src", "app", "lib"} and len(parts) > 1:
-        return parts[1]
-    return parts[0]
+    return "/".join(parts[:-1])
 
 
 # Brief: _extract_import_targets
