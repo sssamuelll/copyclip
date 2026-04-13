@@ -266,6 +266,22 @@ body {
   transition: width 0.2s ease, max-height 0.2s ease;
 }
 
+/* --- Atlas Navigation Hint --- */
+.atlas-nav-hint {
+  position: absolute;
+  bottom: 30px;
+  left: 30px;
+  font-size: 11px;
+  font-family: 'IBM Plex Mono', monospace;
+  color: rgba(0, 238, 255, 0.4);
+  pointer-events: none;
+  line-height: 1.6;
+}
+
+.atlas-nav-hint strong {
+  color: rgba(0, 238, 255, 0.7);
+}
+
 /* --- Atlas Breadcrumb --- */
 .atlas-breadcrumb {
   position: absolute;

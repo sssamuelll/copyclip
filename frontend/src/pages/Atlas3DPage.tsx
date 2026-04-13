@@ -90,7 +90,7 @@ const createHUDLabel = (lines: string[], debtValue?: number): THREE.Sprite => {
   const ctx = canvas.getContext('2d')!
   canvas.width = 512
   canvas.height = 40 * lines.length + 16
-  ctx.font = '300 28px IBM Plex Mono'
+  ctx.font = '300 34px IBM Plex Mono'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'top'
   lines.forEach((line, i) => {
@@ -118,7 +118,7 @@ const createHUDLabel = (lines: string[], debtValue?: number): THREE.Sprite => {
     depthWrite: false,
   })
   const sprite = new THREE.Sprite(mat)
-  sprite.scale.set(140, 140 * (canvas.height / canvas.width), 1)
+  sprite.scale.set(200, 200 * (canvas.height / canvas.width), 1)
   return sprite
 }
 
@@ -1196,16 +1196,15 @@ export function Atlas3DPage() {
       )}
 
       {/* Zoom level indicator */}
-      <div style={{ position: 'absolute', bottom: 30, left: 30, pointerEvents: 'none' }}>
-        <div style={{ fontSize: 9, color: '#444', letterSpacing: 2, textTransform: 'uppercase' }}>
-          {zoomLevel === 1 && 'UNIVERSE'}
-          {zoomLevel === 2 && 'GALAXY'}
-          {zoomLevel === 3 && 'STAR SYSTEM'}
-          {zoomLevel === 4 && 'PLANET DETAIL'}
+      <div className="atlas-nav-hint">
+        <div>
+          <strong>LEVEL {zoomLevel}/4 · {
+            zoomLevel === 1 ? 'UNIVERSE' :
+            zoomLevel === 2 ? 'GALAXY' :
+            zoomLevel === 3 ? 'STAR SYSTEM' : 'PLANET'
+          }</strong>
         </div>
-        <div style={{ fontSize: 10, color: '#333', marginTop: 2 }}>
-          LEVEL {zoomLevel}/4 {zoomLevel < 4 ? '  scroll in to explore' : ''}
-        </div>
+        <div>Scroll to zoom · Click to explore · Right-drag to orbit</div>
       </div>
 
       {/* Detail panel */}
