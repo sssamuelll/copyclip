@@ -1160,6 +1160,88 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 }))
                 return
 
+            if parsed.path == "/api/architecture/tree":
+                if not pid:
+                    self._json(with_meta({"name": "root", "type": "folder", "path": "", "children": [], "file_count": 0, "avg_debt": 0}))
+                    return
+
+                # Get all files with their metrics
+                rows = conn.execute(
+                    """SELECT f.path, f.language, f.size_bytes,
+                              COALESCE(a.cognitive_debt, 0) as debt,
+                              (SELECT COUNT(*) FROM symbols s WHERE s.project_id=? AND s.file_path=f.path) as symbol_count
+                       FROM files f
+                       LEFT JOIN analysis_file_insights a ON a.project_id=f.project_id AND a.path=f.path
+                       WHERE f.project_id=?
+                       ORDER BY f.path""",
+                    (pid, pid),
+                ).fetchall()
+
+                # Build nested tree from flat file paths
+                tree = {"name": "root", "type": "folder", "path": "", "children": [], "file_count": 0, "avg_debt": 0}
+
+                for fpath, lang, size_bytes, debt, sym_count in rows:
+                    parts = fpath.split("/")
+                    current = tree
+                    # Navigate/create folder nodes
+                    for i, part in enumerate(parts[:-1]):
+                        folder_path = "/".join(parts[:i+1])
+                        existing = None
+                        for child in current["children"]:
+                            if child["name"] == part and child["type"] == "folder":
+                                existing = child
+                                break
+                        if not existing:
+                            existing = {"name": part, "type": "folder", "path": folder_path, "children": [], "file_count": 0, "avg_debt": 0}
+                            current["children"].append(existing)
+                        current = existing
+                    # Add file node
+                    lines = 0
+                    if size_bytes:
+                        try:
+                            fp = Path(root) / fpath
+                            if fp.exists():
+                                lines = sum(1 for _ in open(fp, "rb"))
+                        except Exception:
+                            lines = max(1, size_bytes // 40)
+                    current["children"].append({
+                        "name": parts[-1], "type": "file", "path": fpath,
+                        "lines": lines, "debt": round(debt, 1),
+                        "symbol_count": sym_count or 0, "language": lang or "",
+                    })
+
+                # Aggregate folder metrics (file_count, avg_debt) bottom-up
+                def _aggregate(node):
+                    if node["type"] == "file":
+                        return 1, node.get("debt", 0)
+                    total_files = 0
+                    total_debt = 0.0
+                    for child in node.get("children", []):
+                        fc, td = _aggregate(child)
+                        total_files += fc
+                        total_debt += td
+                    node["file_count"] = total_files
+                    node["avg_debt"] = round(total_debt / max(total_files, 1), 1)
+                    return total_files, total_debt
+
+                _aggregate(tree)
+
+                # Collapse single-child folders (e.g. src/copyclip → src/copyclip)
+                def _collapse(node):
+                    if node["type"] == "file":
+                        return node
+                    node["children"] = [_collapse(c) for c in node["children"]]
+                    if len(node["children"]) == 1 and node["children"][0]["type"] == "folder" and node["name"] != "root":
+                        child = node["children"][0]
+                        child["name"] = node["name"] + "/" + child["name"]
+                        return child
+                    return node
+
+                tree = _collapse(tree)
+
+                self._json(with_meta(tree))
+                return
+
             if parsed.path == "/api/architecture/graph":
                 if not pid:
                     self._json(with_meta({"nodes": [], "edges": []}))
