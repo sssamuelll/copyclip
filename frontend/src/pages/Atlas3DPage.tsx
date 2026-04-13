@@ -765,20 +765,38 @@ export function Atlas3DPage() {
           // Reset previous
           if (T.hoveredMesh && T.hoveredMesh !== T.selectedMesh) {
             const mat = T.hoveredMesh.material as THREE.MeshStandardMaterial
-            mat.emissiveIntensity = 0.3
+            mat.emissiveIntensity = 0.4
           }
           T.hoveredMesh = mesh
           const mat = mesh.material as THREE.MeshStandardMaterial
-          mat.emissiveIntensity = 0.8
+          mat.emissiveIntensity = 1.0
+          // Dim other nodes
+          nodesGroup.children.forEach(g => {
+            const m = g.children.find(c => (c as any).isMesh && (c as THREE.Mesh).userData?.level && !(c as THREE.Mesh).userData?._glow) as THREE.Mesh | undefined
+            if (m && m !== mesh) {
+              const mmat = m.material as THREE.MeshStandardMaterial
+              mmat.opacity = 0.2
+              mmat.emissiveIntensity = 0.1
+            }
+          })
           setHoveredMeta(mesh.userData as NodeMeta)
         }
         renderer.domElement.style.cursor = 'pointer'
       } else {
         if (T.hoveredMesh && T.hoveredMesh !== T.selectedMesh) {
           const mat = T.hoveredMesh.material as THREE.MeshStandardMaterial
-          mat.emissiveIntensity = 0.3
+          mat.emissiveIntensity = 0.4
         }
         T.hoveredMesh = null
+        // Restore all nodes
+        nodesGroup.children.forEach(g => {
+          const m = g.children.find(c => (c as any).isMesh && (c as THREE.Mesh).userData?.level && !(c as THREE.Mesh).userData?._glow) as THREE.Mesh | undefined
+          if (m && m !== T.selectedMesh) {
+            const mmat = m.material as THREE.MeshStandardMaterial
+            mmat.opacity = 1.0
+            mmat.emissiveIntensity = 0.4
+          }
+        })
         setHoveredMeta(null)
         renderer.domElement.style.cursor = 'default'
       }
