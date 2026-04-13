@@ -139,8 +139,8 @@ const forceLayout = (count: number, sizeFn: (i: number) => number, spread: numbe
     if (d > maxDist) maxDist = d
   })
   const scale = spread * 2.5 / maxDist
-  // Flatten Y to 15% — disc shape, not sphere
-  return nodes.map((n: any) => new THREE.Vector3(n.x * scale, n.y * scale * 0.15, n.z * scale))
+  // Compress Y to 40% — organic spread, not flat disc or sphere
+  return nodes.map((n: any) => new THREE.Vector3(n.x * scale, n.y * scale * 0.4, n.z * scale))
 }
 
 /** Spread items in an orbit around center. */
@@ -249,18 +249,22 @@ export function Atlas3DPage() {
     const center = new THREE.PointLight(0x00f0ff, 1, 3000)
     scene.add(center)
 
-    // ---- Starfield ----
+    // ---- Starfield (background — far away and dim so nodes stand out) ----
     const starGeo = new THREE.BufferGeometry()
     const sp: number[] = [], sc: number[] = []
-    for (let i = 0; i < 12000; i++) {
-      sp.push(Math.random() * 8000 - 4000, Math.random() * 8000 - 4000, Math.random() * 8000 - 4000)
-      const b = 0.7 + Math.random() * 0.3
+    for (let i = 0; i < 8000; i++) {
+      // Stars much further out (5000-10000 units away)
+      const r = 5000 + Math.random() * 5000
+      const theta = Math.random() * Math.PI * 2
+      const phi = Math.acos(2 * Math.random() - 1)
+      sp.push(r * Math.sin(phi) * Math.cos(theta), r * Math.sin(phi) * Math.sin(theta), r * Math.cos(phi))
+      const b = 0.3 + Math.random() * 0.4 // dimmer
       sc.push(b, b, b)
     }
     starGeo.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3))
     starGeo.setAttribute('color', new THREE.Float32BufferAttribute(sc, 3))
     starsGroup.add(new THREE.Points(starGeo, new THREE.PointsMaterial({
-      size: 2, vertexColors: true, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending,
+      size: 1.2, vertexColors: true, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending,
     })))
     scene.add(starsGroup)
 
@@ -308,8 +312,8 @@ export function Atlas3DPage() {
     ) => {
       const g = new THREE.Group()
       const mat = new THREE.MeshStandardMaterial({
-        color, roughness: 0.3, metalness: 0.4,
-        emissive: color, emissiveIntensity: 0.4,
+        color, roughness: 0.2, metalness: 0.5,
+        emissive: color, emissiveIntensity: 0.7,
         transparent: true, opacity: 1.0,
       })
       const mesh = new THREE.Mesh(geometry, mat)
@@ -318,9 +322,9 @@ export function Atlas3DPage() {
 
       // Glow halo — outer transparent sphere
       geometry.computeBoundingSphere()
-      const glowGeo = new THREE.SphereGeometry((geometry.boundingSphere?.radius || 10) * 1.6, 16, 12)
+      const glowGeo = new THREE.SphereGeometry((geometry.boundingSphere?.radius || 10) * 2.0, 16, 12)
       const glowMat = new THREE.MeshBasicMaterial({
-        color, transparent: true, opacity: 0.08,
+        color, transparent: true, opacity: 0.12,
         side: THREE.BackSide, blending: THREE.AdditiveBlending,
       })
       const glow = new THREE.Mesh(glowGeo, glowMat)
@@ -331,6 +335,39 @@ export function Atlas3DPage() {
       g.add(label)
       g.position.copy(pos)
       nodesGroup.add(g)
+    }
+
+    /** Render dependency edges between positioned nodes */
+    const renderEdges = (nodeNames: string[], positions: THREE.Vector3[], edges: { from: string; to: string }[]) => {
+      const nameToPos = new Map<string, THREE.Vector3>()
+      nodeNames.forEach((name, i) => nameToPos.set(name, positions[i]))
+
+      const linePositions: number[] = []
+      for (const edge of edges) {
+        // Match edge modules to node names (edge.from might be a sub-path of a node name)
+        let fromPos: THREE.Vector3 | undefined
+        let toPos: THREE.Vector3 | undefined
+        for (const [name, pos] of nameToPos) {
+          if (edge.from === name || edge.from.startsWith(name + '/') || name.endsWith('/' + edge.from)) fromPos = pos
+          if (edge.to === name || edge.to.startsWith(name + '/') || name.endsWith('/' + edge.to)) toPos = pos
+        }
+        if (fromPos && toPos && fromPos !== toPos) {
+          linePositions.push(fromPos.x, fromPos.y, fromPos.z)
+          linePositions.push(toPos.x, toPos.y, toPos.z)
+        }
+      }
+
+      if (linePositions.length > 0) {
+        const geo = new THREE.BufferGeometry()
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(linePositions, 3))
+        const mat = new THREE.LineBasicMaterial({
+          color: 0x00eeff, transparent: true, opacity: 0.12,
+          blending: THREE.AdditiveBlending,
+        })
+        const lines = new THREE.LineSegments(geo, mat)
+        lines.userData = { _edges: true }
+        nodesGroup.add(lines)
+      }
     }
 
     /* ---------- Level 1: Universe (top-level folders as diamonds) ---- */
@@ -353,6 +390,12 @@ export function Atlas3DPage() {
         )
         addNodeMesh(geo, getNodeColor(child.name, debt), positions[i], lbl, { treeNode: child, level: 1 }, -(sizes[i] + 18))
       })
+
+      // Fetch and render edges between folders
+      api.architecture().then(({ edges }) => {
+        const folderNames = children.map(c => c.path || c.name)
+        renderEdges(folderNames, positions, edges)
+      }).catch(() => {})
 
       camera.position.set(0, 300, 800)
       controls.target.set(0, 0, 0)
@@ -388,8 +431,14 @@ export function Atlas3DPage() {
         addNodeMesh(geo, color, positions[i], lbl, { treeNode: child, level: 2 }, -(sizes[i] + 16))
       })
 
+      // Render edges between files
+      api.architecture().then(({ edges }) => {
+        const nodeNames = children.map(c => c.path || c.name)
+        renderEdges(nodeNames, positions, edges)
+      }).catch(() => {})
+
       // Camera distance adapts to node count
-      const camDist = Math.max(1000, dynamicSpread * 4)
+      const camDist = Math.max(600, dynamicSpread * 2.5)
       camera.position.set(0, camDist * 0.35, camDist)
       controls.target.set(0, 0, 0)
     }
