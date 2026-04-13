@@ -229,10 +229,14 @@ def _maybe_handle_internal(argv) -> bool:
         from ..llm.config import load_config
         from ..llm.provider_config import resolve_provider, PROVIDERS
 
-        p = argparse.ArgumentParser("copyclip start")
-        p.add_argument("--path", default=".")
-        p.add_argument("--port", type=int, default=4310)
-        p.add_argument("--open", dest="open_browser", action=argparse.BooleanOptionalAction, default=True)
+        p = argparse.ArgumentParser(
+            prog="copyclip start",
+            description="Launch the CopyClip intelligence dashboard.\n"
+                        "Runs semantic analysis on first start and opens the web UI.",
+        )
+        p.add_argument("--path", default=".", help="Project root path (default: current directory)")
+        p.add_argument("--port", type=int, default=4310, help="Dashboard port (default: 4310)")
+        p.add_argument("--open", dest="open_browser", action=argparse.BooleanOptionalAction, default=True, help="Open browser automatically (default: yes)")
         args = p.parse_args(argv[2:])
 
         root = os.path.abspath(args.path)
@@ -283,22 +287,38 @@ def _maybe_handle_internal(argv) -> bool:
             print("\n" + _info("Stopped."))
         return True
 
-    # Other commands (simplified for this fix)
     if cmd == "analyze":
         import asyncio
-        res = asyncio.run(analyze("."))
+        p = argparse.ArgumentParser(
+            prog="copyclip analyze",
+            description="Index project files, extract symbols, build dependency graph, and detect risks.",
+        )
+        p.add_argument("--path", default=".", help="Project root path (default: current directory)")
+        args = p.parse_args(argv[2:])
+        root = os.path.abspath(args.path)
+        res = asyncio.run(analyze(root))
         print(_ok(f"Indexed {res['files']} files."))
         return True
 
     if cmd == "mcp":
         import asyncio
         from ..mcp_server import main as run_mcp_server
+        p = argparse.ArgumentParser(
+            prog="copyclip mcp",
+            description="Start the MCP Intent Authority server for AI agent integration.",
+        )
+        p.parse_args(argv[2:])
         print(_info("Starting MCP Oracle..."))
         asyncio.run(run_mcp_server())
         return True
 
     if cmd == "update":
         import shutil
+        p = argparse.ArgumentParser(
+            prog="copyclip update",
+            description="Update copyclip to the latest version from GitHub.",
+        )
+        p.parse_args(argv[2:])
         REPO_URL = "git+https://github.com/sssamuelll/copyclip.git"
         print(_info("Updating copyclip..."))
 

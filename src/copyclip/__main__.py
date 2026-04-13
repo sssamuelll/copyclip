@@ -78,43 +78,50 @@ def _main_inner():
     if maybe_handle_intelligence(sys.argv):
         return
     parser = argparse.ArgumentParser(
-        description=(
-            "Copies the content of all files in a folder to the clipboard, "
-            "respecting .copyclipignore and supporting presets and token minimization."
-        ),
+        prog="copyclip",
+        description="CopyClip v0.4.0 — Project Intelligence & Intent Authority\n\n"
+                    "Scan, analyze, and maintain cognitive ownership of your codebase.\n"
+                    "Provides semantic analysis, architectural decision tracking,\n"
+                    "risk detection, and AI-agent governance via MCP.",
+        epilog="commands:\n"
+               "  start             Launch the intelligence dashboard\n"
+               "  analyze            Index project files, build dependency graph\n"
+               "  update             Update copyclip to the latest version\n"
+               "  decision           Manage architectural decisions\n"
+               "  mcp                Start the MCP Intent Authority server\n"
+               "\n"
+               "examples:\n"
+               "  copyclip start                Start dashboard for current project\n"
+               "  copyclip start --path ./myapp  Start dashboard for a specific project\n"
+               "  copyclip analyze               Re-index the current project\n"
+               "  copyclip update                Update to latest version\n"
+               "  copyclip .                     Copy project context to clipboard\n"
+               "  copyclip . --minimize basic    Copy with token reduction\n"
+               "  copyclip . --prompt \"fix auth\" Copy files relevant to a task\n",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("folder", nargs="?", default=".", help="Path to the base folder (default: current directory).")
-    parser.add_argument("--extension", help="File extension to include, e.g., .go (optional).", default=None)
-    parser.add_argument("--preset", help="Use predefined filters (code, docs, styles, configs)", default=None)
+    parser.add_argument("folder", nargs="?", default=".", help="Path to scan (default: current directory)")
+    parser.add_argument("--extension", help="File extension filter, e.g., .py", default=None)
+    parser.add_argument("--preset", help="Predefined filters: code, docs, styles, configs", default=None)
     parser.add_argument("--include", help="Glob patterns to include (comma-separated)", default=None)
     parser.add_argument("--exclude", help="Glob patterns to exclude (comma-separated)", default=None)
     parser.add_argument("--only", help="Restrict to specific subpaths (comma-separated)", default=None)
-    parser.add_argument("--max-file-size", type=int, default=DEFAULT_MAX_FILE_SIZE, help=f"Skip files larger than this (bytes, default: {DEFAULT_MAX_FILE_SIZE})")
-    parser.add_argument("--concurrency", type=int, default=None, help="Max concurrent file reads (auto-detected if not set)")
+    parser.add_argument("--max-file-size", type=int, default=DEFAULT_MAX_FILE_SIZE, help=f"Skip files larger than N bytes (default: {DEFAULT_MAX_FILE_SIZE})")
+    parser.add_argument("--concurrency", type=int, default=None, help="Max concurrent file reads (auto-detected)")
     parser.add_argument("--no-progress", action="store_true", help="Disable progress bars")
-    
-    # --- START: Nuevos argumentos para LLM ---
-    parser.add_argument("--provider", default=os.environ.get("COPYCLIP_LLM_PROVIDER"), help="Specify the LLM provider to use (e.g., openai, anthropic)")
-    # --- END: Nuevos argumentos para LLM ---
-    # Removed: --ignore-file (now always uses .copyclipignore if found)
+    parser.add_argument("--provider", default=os.environ.get("COPYCLIP_LLM_PROVIDER"), help="LLM provider: openai, deepseek, anthropic")
     parser.add_argument("--output", help="Write output to file in addition to clipboard", default=None)
-    parser.add_argument("--minimize", choices=["basic", "aggressive", "structural", "contextual"], help="Reduce token count")
-    parser.add_argument("--model", default=os.environ.get("COPYCLIP_MODEL"), help="AI Model for precise token counting")
+    parser.add_argument("--minimize", choices=["basic", "aggressive", "structural", "contextual"], help="Token reduction level")
+    parser.add_argument("--model", default=os.environ.get("COPYCLIP_MODEL"), help="LLM model for token counting")
     parser.add_argument("--follow-symlinks", action="store_true", help="Follow symlinks during scan")
-    parser.add_argument("--flow-diagram", action="store_true", help="Deprecated, use --view=flow or --view=both")
-    parser.add_argument("--view", choices=["text", "flow", "both"], help="Output view mode: text, flow, or both", default=None)
-    # Opt-in flag to print final assembled output to stdout (keeps default CLI quiet)
-    parser.add_argument("--print", dest="print_output", action="store_true", help="Print final output to stdout (opt-in)")
-
-    parser.add_argument("--docstrings", choices=["off", "generate", "overwrite"], default=os.environ.get("COPYCLIP_DOCSTRINGS", "off"))
-    parser.add_argument("--doc-lang", choices=["en","es"], default=os.environ.get("COPYCLIP_DOC_LANG","en"))
-    parser.add_argument("--with-dependencies", action="store_true",
-                        help="When used with --minimize contextual, prepend a Mermaid module dependency graph.")
-    parser.add_argument("--no-decisions", action="store_true", help="Do not inject active project decisions into the context")
-    parser.add_argument("--prompt", help="Select relevant files based on this task/intent using LLM")
-
-    # Removed: --discover-ignore and --no-discover-ignore arguments
+    parser.add_argument("--view", choices=["text", "flow", "both"], help="Output view: text, flow diagram, or both", default=None)
+    parser.add_argument("--flow-diagram", action="store_true", help=argparse.SUPPRESS)  # deprecated
+    parser.add_argument("--print", dest="print_output", action="store_true", help="Print output to stdout")
+    parser.add_argument("--docstrings", choices=["off", "generate", "overwrite"], default=os.environ.get("COPYCLIP_DOCSTRINGS", "off"), help="Docstring handling mode")
+    parser.add_argument("--doc-lang", choices=["en","es"], default=os.environ.get("COPYCLIP_DOC_LANG","en"), help="Docstring language")
+    parser.add_argument("--with-dependencies", action="store_true", help="Prepend Mermaid dependency graph (with --minimize contextual)")
+    parser.add_argument("--no-decisions", action="store_true", help="Exclude architectural decisions from context")
+    parser.add_argument("--prompt", help="Select files relevant to this task/intent via LLM")
 
     args = parser.parse_args()
 
