@@ -266,6 +266,43 @@ body {
   transition: width 0.2s ease, max-height 0.2s ease;
 }
 
+/* --- Atlas Breadcrumb --- */
+.atlas-breadcrumb {
+  position: absolute;
+  top: 70px;
+  left: 30px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-family: 'IBM Plex Mono', monospace;
+  z-index: 10;
+  pointer-events: auto;
+}
+
+.atlas-breadcrumb-segment {
+  color: #555;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.atlas-breadcrumb-segment:hover {
+  color: #00eeff;
+  background: rgba(0, 238, 255, 0.05);
+}
+
+.atlas-breadcrumb-segment--active {
+  color: #00eeff;
+}
+
+.atlas-breadcrumb-separator {
+  color: #333;
+  font-size: 9px;
+  user-select: none;
+}
+
 /* --- Atlas Code Viewer --- */
 .atlas-file-tabs {
   display: flex;
