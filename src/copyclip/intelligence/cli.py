@@ -424,13 +424,37 @@ def _maybe_handle_internal(argv) -> bool:
             print(_ok("Already up to date."))
             sys.exit(0)
 
-        print(_info("Update available. Upgrading via pip..."))
+        print(_info("Update available. Downloading and installing..."))
         if sys.platform == "win32":
-            # Windows: can't overwrite running .exe — schedule deferred install and exit immediately.
-            install_cmd = f'"{sys.executable}" -m pip install --force-reinstall --no-deps "copyclip @ {REPO_URL}" >nul 2>&1 && "{sys.executable}" -m pip install "copyclip @ {REPO_URL}" >nul 2>&1'
-            subprocess.Popen(f'cmd /c "timeout /t 1 /nobreak >nul && {install_cmd}"', shell=True,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
-            print(_ok("Update installing in background. Ready in a few seconds."))
+            # Windows: copyclip.exe locks itself. Use a temp Python script run via
+            # the Python interpreter (not copyclip.exe) so pip can replace the exe.
+            import tempfile
+            update_script = os.path.join(tempfile.gettempdir(), "_copyclip_update.py")
+            with open(update_script, "w") as f:
+                f.write(f"""
+import subprocess, sys
+url = "copyclip @ {REPO_URL}"
+print("[copyclip] Downloading latest version...")
+r1 = subprocess.run([sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", url],
+                     stdin=subprocess.DEVNULL)
+if r1.returncode != 0:
+    print("[copyclip] ERROR: Download failed.")
+    sys.exit(1)
+print("[copyclip] Installing dependencies...")
+subprocess.run([sys.executable, "-m", "pip", "install", url],
+               capture_output=True, stdin=subprocess.DEVNULL)
+print("[copyclip] Updated successfully!")
+""")
+            # Run the update script via Python directly (not copyclip.exe)
+            result = subprocess.run([sys.executable, update_script], stdin=subprocess.DEVNULL)
+            try:
+                os.unlink(update_script)
+            except Exception:
+                pass
+            if result.returncode == 0:
+                print(_ok("copyclip updated successfully."))
+            else:
+                print(_err("Update failed. Try: pip install --force-reinstall copyclip"))
         else:
             result = subprocess.run(
                 [sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", f"copyclip @ {REPO_URL}"],
