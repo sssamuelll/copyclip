@@ -138,7 +138,7 @@ const forceLayout = (count: number, sizeFn: (i: number) => number, spread: numbe
     const d = Math.sqrt(n.x * n.x + n.z * n.z) // ignore Y for normalization
     if (d > maxDist) maxDist = d
   })
-  const scale = spread * 4 / maxDist
+  const scale = spread * 2.5 / maxDist
   // Flatten Y to 15% — disc shape, not sphere
   return nodes.map((n: any) => new THREE.Vector3(n.x * scale, n.y * scale * 0.15, n.z * scale))
 }
@@ -342,7 +342,7 @@ export function Atlas3DPage() {
         return
       }
       const sizes = children.map(c => clamp(Math.log2((c.file_count || 1) + 1) * 8, 8, 50))
-      const positions = forceLayout(children.length, i => sizes[i], 250)
+      const positions = forceLayout(children.length, i => sizes[i], 150)
 
       children.forEach((child, i) => {
         const debt = child.avg_debt || 0
@@ -354,7 +354,7 @@ export function Atlas3DPage() {
         addNodeMesh(geo, getNodeColor(child.name, debt), positions[i], lbl, { treeNode: child, level: 1 }, -(sizes[i] + 18))
       })
 
-      camera.position.set(0, 500, 1500)
+      camera.position.set(0, 300, 800)
       controls.target.set(0, 0, 0)
     }
 
@@ -370,7 +370,7 @@ export function Atlas3DPage() {
           : clamp(Math.log2((c.file_count || 1) + 1) * 5 * scaleFactor, 4, 20),
       )
       // More spread when there are many nodes
-      const dynamicSpread = Math.max(200, children.length * 8)
+      const dynamicSpread = Math.max(120, children.length * 4)
       const positions = forceLayout(children.length, i => sizes[i], dynamicSpread)
 
       children.forEach((child, i) => {
