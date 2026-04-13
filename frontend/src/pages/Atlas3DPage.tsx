@@ -122,24 +122,25 @@ const createHUDLabel = (lines: string[], debtValue?: number): THREE.Sprite => {
   return sprite
 }
 
-/** Run d3-force-3d on a list of items, return positions. */
+/** Run d3-force-3d on a list of items, return FLAT disc positions (Y compressed). */
 const forceLayout = (count: number, sizeFn: (i: number) => number, spread: number): THREE.Vector3[] => {
   if (count === 0) return []
   const nodes = Array.from({ length: count }, (_, i) => ({ index: i, x: 0, y: 0, z: 0 }))
   const sim = forceSimulation(nodes, 3)
-    .force('charge', forceManyBody().strength(-spread))
+    .force('charge', forceManyBody().strength(-spread * 1.5))
     .force('center', forceCenter(0, 0, 0))
-    .force('collide', forceCollide().radius((d: any) => sizeFn(d.index) + 5))
+    .force('collide', forceCollide().radius((d: any) => sizeFn(d.index) + 8))
     .stop()
-  for (let t = 0; t < 200; t++) sim.tick()
+  for (let t = 0; t < 300; t++) sim.tick()
   // Normalize positions to fit within a reasonable radius
   let maxDist = 1
   nodes.forEach((n: any) => {
-    const d = Math.sqrt(n.x * n.x + n.y * n.y + n.z * n.z)
+    const d = Math.sqrt(n.x * n.x + n.z * n.z) // ignore Y for normalization
     if (d > maxDist) maxDist = d
   })
-  const scale = spread * 3 / maxDist
-  return nodes.map((n: any) => new THREE.Vector3(n.x * scale, n.y * scale, n.z * scale))
+  const scale = spread * 4 / maxDist
+  // Flatten Y to 15% — disc shape, not sphere
+  return nodes.map((n: any) => new THREE.Vector3(n.x * scale, n.y * scale * 0.15, n.z * scale))
 }
 
 /** Spread items in an orbit around center. */
@@ -233,7 +234,7 @@ export function Atlas3DPage() {
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
     controls.dampingFactor = 0.05
-    controls.enableZoom = false   // scroll is repurposed for level navigation
+    controls.enableZoom = true    // default zoom works, wheel handler intercepts when hovering a node
 
     const raycaster = new THREE.Raycaster()
     const nodesGroup = new THREE.Group()
@@ -361,12 +362,16 @@ export function Atlas3DPage() {
     const renderLevel2 = (folder: TreeNode) => {
       clearNodes()
       const children = folder.children || []
+      // Adaptive sizing: shrink nodes when there are many
+      const scaleFactor = children.length > 50 ? 0.5 : children.length > 20 ? 0.7 : 1.0
       const sizes = children.map(c =>
         c.type === 'file'
-          ? clamp(Math.log2((c.lines || 100) + 1) * 3, 5, 35)
-          : clamp(Math.log2((c.file_count || 1) + 1) * 7, 6, 30),
+          ? clamp(Math.log2((c.lines || 100) + 1) * 2.5 * scaleFactor, 3, 25)
+          : clamp(Math.log2((c.file_count || 1) + 1) * 5 * scaleFactor, 4, 20),
       )
-      const positions = forceLayout(children.length, i => sizes[i], 180)
+      // More spread when there are many nodes
+      const dynamicSpread = Math.max(200, children.length * 8)
+      const positions = forceLayout(children.length, i => sizes[i], dynamicSpread)
 
       children.forEach((child, i) => {
         const debt = child.type === 'file' ? (child.debt || 0) : (child.avg_debt || 0)
@@ -383,7 +388,9 @@ export function Atlas3DPage() {
         addNodeMesh(geo, color, positions[i], lbl, { treeNode: child, level: 2 }, -(sizes[i] + 16))
       })
 
-      camera.position.set(0, 350, 1000)
+      // Camera distance adapts to node count
+      const camDist = Math.max(1000, dynamicSpread * 4)
+      camera.position.set(0, camDist * 0.35, camDist)
       controls.target.set(0, 0, 0)
     }
 
@@ -833,38 +840,17 @@ export function Atlas3DPage() {
     }
 
     const onWheel = (event: WheelEvent) => {
-      event.preventDefault()
       if (T.transitioning) return
-      if (event.deltaY < 0) {
-        // Scroll in: zoom into hovered node, or nearest node if hovering space
-        let targetMesh = T.hoveredMesh
-        if (!targetMesh) {
-          // Find nearest node to mouse ray
-          const rect = renderer.domElement.getBoundingClientRect()
-          mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
-          mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
-          raycaster.setFromCamera(mouse, camera)
-          let nearest: THREE.Mesh | null = null
-          let nearestDist = Infinity
-          nodesGroup.children.forEach(g => {
-            const mesh = g.children.find(c => (c as any).isMesh && (c as THREE.Mesh).userData?.level) as THREE.Mesh | undefined
-            if (mesh) {
-              const dist = raycaster.ray.distanceToPoint(g.position)
-              if (dist < nearestDist) {
-                nearestDist = dist
-                nearest = mesh
-              }
-            }
-          })
-          if (nearest && nearestDist < 200) targetMesh = nearest
-        }
-        if (targetMesh) {
-          const meta = targetMesh.userData as NodeMeta
-          zoomInto(meta)
-        }
-      } else if (event.deltaY > 0 && T.zoomLevel > 1) {
-        zoomOut()
+
+      // Only intercept scroll when directly hovering a node — otherwise let OrbitControls zoom
+      if (T.hoveredMesh && event.deltaY < 0) {
+        event.preventDefault()
+        event.stopPropagation()
+        const meta = T.hoveredMesh.userData as NodeMeta
+        zoomInto(meta)
       }
+      // Scroll out only at deeper levels, not at Level 1
+      // At Level 1, scroll out = normal camera zoom (OrbitControls handles it)
     }
 
     const onResize = () => {
@@ -875,7 +861,7 @@ export function Atlas3DPage() {
     }
 
     // ---- Attach events ----
-    renderer.domElement.addEventListener('wheel', onWheel, { passive: false })
+    renderer.domElement.addEventListener('wheel', onWheel)
     renderer.domElement.addEventListener('mousemove', onMouseMove)
     renderer.domElement.addEventListener('click', onClick)
     window.addEventListener('resize', onResize)
