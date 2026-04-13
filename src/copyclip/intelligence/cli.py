@@ -335,47 +335,56 @@ def _maybe_handle_internal(argv) -> bool:
             else:
                 print(_warn(f"Git pull issue: {result.stderr.strip()}"))
 
-            # Reinstall in the current Python environment to pick up new deps
             print(_info("Installing updated dependencies..."))
-            pip_result = subprocess.run([sys.executable, "-m", "pip", "install", "-e", repo_root, "--quiet"])
+            pip_result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-e", repo_root, "--quiet"],
+                capture_output=True, text=True, stdin=subprocess.DEVNULL,
+            )
             if pip_result.returncode == 0:
                 print(_ok("copyclip updated successfully."))
             else:
                 print(_err("Dependency install failed. Try: pip install -e ."))
-            return True
+            sys.exit(0)
 
         # Non-editable: try pipx first
         if shutil.which("pipx"):
             pipx_list = subprocess.run(["pipx", "list"], capture_output=True, text=True)
             if "copyclip" in (pipx_list.stdout or ""):
                 print(_info("Upgrading via pipx..."))
-                result = subprocess.run(["pipx", "upgrade", "copyclip"])
+                result = subprocess.run(
+                    ["pipx", "upgrade", "copyclip"],
+                    capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                )
                 if result.returncode != 0:
                     print(_warn("pipx upgrade failed, reinstalling..."))
-                    subprocess.run(["pipx", "install", f"copyclip @ {REPO_URL}", "--force"])
+                    subprocess.run(
+                        ["pipx", "install", f"copyclip @ {REPO_URL}", "--force"],
+                        capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                    )
                 print(_ok("copyclip updated successfully."))
-                return True
+                sys.exit(0)
 
         # Fall back to pip
-        # On Windows, the running copyclip.exe locks itself — use a subprocess
-        # that downloads, builds, and replaces after this process exits.
         print(_info("Upgrading via pip..."))
         if sys.platform == "win32":
-            # Windows: can't overwrite running .exe. Use a delayed install via cmd /c.
-            pip_path = shutil.which("pip") or shutil.which("pip3") or f"{sys.executable} -m pip"
-            install_cmd = f'"{sys.executable}" -m pip install --force-reinstall --no-deps "copyclip @ {REPO_URL}" && "{sys.executable}" -m pip install "copyclip @ {REPO_URL}" >nul 2>&1'
-            print(_info("Scheduling update (Windows requires restart)..."))
-            subprocess.Popen(f'cmd /c "timeout /t 2 /nobreak >nul && {install_cmd}"', shell=True)
-            print(_ok("Update scheduled. Restart your terminal in a few seconds."))
+            # Windows: can't overwrite running .exe — schedule deferred install and exit immediately.
+            install_cmd = f'"{sys.executable}" -m pip install --force-reinstall --no-deps "copyclip @ {REPO_URL}" >nul 2>&1 && "{sys.executable}" -m pip install "copyclip @ {REPO_URL}" >nul 2>&1'
+            subprocess.Popen(f'cmd /c "timeout /t 1 /nobreak >nul && {install_cmd}"', shell=True,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+            print(_ok("Update installing in background. Ready in a few seconds."))
         else:
-            pip_cmd = [sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", f"copyclip @ {REPO_URL}"]
-            deps_cmd = [sys.executable, "-m", "pip", "install", f"copyclip @ {REPO_URL}"]
-            result = subprocess.run(pip_cmd)
-            subprocess.run(deps_cmd, capture_output=True)
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", f"copyclip @ {REPO_URL}"],
+                capture_output=True, text=True, stdin=subprocess.DEVNULL,
+            )
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", f"copyclip @ {REPO_URL}"],
+                capture_output=True, text=True, stdin=subprocess.DEVNULL,
+            )
             if result.returncode == 0:
                 print(_ok("copyclip updated successfully."))
             else:
                 print(_err("Update failed. Try manually: pip install --upgrade copyclip"))
-        return True
+        sys.exit(0)
 
     return False
