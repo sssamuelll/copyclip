@@ -320,7 +320,7 @@ def _maybe_handle_internal(argv) -> bool:
         )
         p.parse_args(argv[2:])
         REPO_URL = "git+https://github.com/sssamuelll/copyclip.git"
-        print(_info("Updating copyclip..."))
+        print(_info("Checking for updates..."))
 
         # Detect if running from a local git repo (editable install)
         # __file__ = src/copyclip/intelligence/cli.py → need 4 levels up to reach repo root
@@ -328,7 +328,16 @@ def _maybe_handle_internal(argv) -> bool:
         is_editable = os.path.exists(os.path.join(repo_root, ".git")) and os.path.exists(os.path.join(repo_root, "pyproject.toml"))
 
         if is_editable:
-            print(_info("Detected editable install — pulling latest from git..."))
+            # Fetch remote to compare
+            subprocess.run(["git", "-C", repo_root, "fetch", "origin", "main"], capture_output=True, text=True)
+            local = subprocess.run(["git", "-C", repo_root, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+            remote = subprocess.run(["git", "-C", repo_root, "rev-parse", "origin/main"], capture_output=True, text=True).stdout.strip()
+
+            if local == remote:
+                print(_ok("Already up to date."))
+                sys.exit(0)
+
+            print(_info(f"Update available. Pulling latest..."))
             result = subprocess.run(["git", "-C", repo_root, "pull", "origin", "main"], capture_output=True, text=True)
             if result.returncode == 0:
                 print(_ok(f"Git pull: {result.stdout.strip()}"))
@@ -346,26 +355,76 @@ def _maybe_handle_internal(argv) -> bool:
                 print(_err("Dependency install failed. Try: pip install -e ."))
             sys.exit(0)
 
-        # Non-editable: try pipx first
+        # Non-editable: check remote version before downloading
+        # Get latest commit SHA from GitHub
+        remote_sha = ""
+        if shutil.which("git"):
+            r = subprocess.run(
+                ["git", "ls-remote", "https://github.com/sssamuelll/copyclip.git", "refs/heads/main"],
+                capture_output=True, text=True, stdin=subprocess.DEVNULL,
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                remote_sha = r.stdout.strip().split()[0][:12]
+
+        # Get installed version's commit (stored during pip install from git)
+        installed_sha = ""
+        pip_show = subprocess.run(
+            [sys.executable, "-m", "pip", "show", "copyclip"],
+            capture_output=True, text=True, stdin=subprocess.DEVNULL,
+        )
+        # pip show doesn't include commit SHA, so compare version instead
+        # Check if the installed version matches by trying pip install --dry-run
+        if remote_sha:
+            # Quick check: if we can detect the installed source, compare
+            for line in (pip_show.stdout or "").splitlines():
+                if "Location" in line and "site-packages" in line:
+                    # Non-editable pip install — check version file in the installed package
+                    try:
+                        from importlib.metadata import metadata
+                        meta = metadata("copyclip")
+                        installed_version = meta["Version"]
+                    except Exception:
+                        installed_version = "unknown"
+                    break
+
+        # Try pipx first
         if shutil.which("pipx"):
             pipx_list = subprocess.run(["pipx", "list"], capture_output=True, text=True)
             if "copyclip" in (pipx_list.stdout or ""):
-                print(_info("Upgrading via pipx..."))
+                print(_info("Checking pipx for updates..."))
                 result = subprocess.run(
                     ["pipx", "upgrade", "copyclip"],
                     capture_output=True, text=True, stdin=subprocess.DEVNULL,
                 )
-                if result.returncode != 0:
+                if "is already at latest version" in (result.stdout + result.stderr):
+                    print(_ok("Already up to date."))
+                elif result.returncode == 0:
+                    print(_ok("copyclip updated successfully."))
+                else:
                     print(_warn("pipx upgrade failed, reinstalling..."))
                     subprocess.run(
                         ["pipx", "install", f"copyclip @ {REPO_URL}", "--force"],
                         capture_output=True, text=True, stdin=subprocess.DEVNULL,
                     )
-                print(_ok("copyclip updated successfully."))
+                    print(_ok("copyclip reinstalled."))
                 sys.exit(0)
 
-        # Fall back to pip
-        print(_info("Upgrading via pip..."))
+        # Fall back to pip — use git ls-remote to check if update is needed
+        # Compare the remote HEAD with a marker file we store after each update
+        marker_dir = os.path.join(os.path.expanduser("~"), ".copyclip")
+        marker_file = os.path.join(marker_dir, "last_update_sha")
+        last_sha = ""
+        if os.path.exists(marker_file):
+            try:
+                last_sha = open(marker_file).read().strip()
+            except Exception:
+                pass
+
+        if remote_sha and last_sha == remote_sha:
+            print(_ok("Already up to date."))
+            sys.exit(0)
+
+        print(_info("Update available. Upgrading via pip..."))
         if sys.platform == "win32":
             # Windows: can't overwrite running .exe — schedule deferred install and exit immediately.
             install_cmd = f'"{sys.executable}" -m pip install --force-reinstall --no-deps "copyclip @ {REPO_URL}" >nul 2>&1 && "{sys.executable}" -m pip install "copyclip @ {REPO_URL}" >nul 2>&1'
@@ -385,6 +444,16 @@ def _maybe_handle_internal(argv) -> bool:
                 print(_ok("copyclip updated successfully."))
             else:
                 print(_err("Update failed. Try manually: pip install --upgrade copyclip"))
+
+        # Save the SHA marker for next check
+        if remote_sha:
+            try:
+                os.makedirs(marker_dir, exist_ok=True)
+                with open(marker_file, "w") as f:
+                    f.write(remote_sha)
+            except Exception:
+                pass
+
         sys.exit(0)
 
     return False
