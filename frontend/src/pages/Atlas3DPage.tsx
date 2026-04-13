@@ -2,9 +2,9 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 // @ts-ignore — d3-force-3d has no type declarations
-import { forceSimulation, forceManyBody, forceCenter, forceCollide } from 'd3-force-3d'
+import { forceSimulation, forceManyBody, forceCenter, forceCollide, forceLink } from 'd3-force-3d'
 import { api } from '../api/client'
-import type { TreeNode, SymbolItem, ModuleSourceFile } from '../types/api'
+import type { TreeNode, ArchNode, ArchEdge, SymbolItem, ModuleSourceFile } from '../types/api'
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */
@@ -82,6 +82,22 @@ const getLanguageColor = (lang: string, debt: number): number => {
     other: 0x666666,
   }
   return langColors[lang] || 0x888888
+}
+
+/** Color by cluster/role — groups related modules visually */
+const getClusterColor = (moduleName: string): number => {
+  const m = moduleName.toLowerCase()
+  if (m.startsWith('src/copyclip/intelligence') || m === 'copyclip' || m.startsWith('copyclip')) return 0x5e91f2   // backend — blue
+  if (m.startsWith('src/copyclip/llm')) return 0xae63e4    // LLM — purple
+  if (m.startsWith('frontend') || m.includes('frontend')) return 0xf0e130  // frontend — yellow
+  if (m.startsWith('tests') || m.includes('test')) return 0x47cf73         // tests — green
+  if (m.startsWith('docs') || m.includes('docs')) return 0x888888          // docs — gray
+  if (m.startsWith('scripts')) return 0xff8d41              // scripts — orange
+  if (m.startsWith('.')) return 0x555555                    // dotfiles — dim
+  // External deps — dim teal
+  if (!m.includes('/')) return 0x2bc7b9
+  // Fallback to palette
+  return getNodeColor(moduleName, 0)
 }
 
 /** Create a HUD label Sprite that always faces the camera. */
@@ -370,35 +386,128 @@ export function Atlas3DPage() {
       }
     }
 
-    /* ---------- Level 1: Universe (top-level folders as diamonds) ---- */
+    /* ---------- Level 1: Obsidian-style force graph with clusters ---- */
     const renderLevel1 = (root: TreeNode) => {
       clearNodes()
-      const children = (root.children || []).filter(c => c.type === 'folder')
-      if (children.length === 0 && root.children) {
-        renderLevel2(root)
-        return
-      }
-      const sizes = children.map(c => clamp(Math.log2((c.file_count || 1) + 1) * 8, 8, 50))
-      const positions = forceLayout(children.length, i => sizes[i], 150)
 
-      children.forEach((child, i) => {
-        const debt = child.avg_debt || 0
-        const geo = new THREE.OctahedronGeometry(sizes[i], 0)
-        const lbl = createHUDLabel(
-          [child.name, `${child.file_count || 0} files  ${Math.round(debt)}%`],
-          debt,
-        )
-        addNodeMesh(geo, getNodeColor(child.name, debt), positions[i], lbl, { treeNode: child, level: 1 }, -(sizes[i] + 18))
+      // Use architecture graph for Obsidian-style layout
+      api.architecture().then(({ nodes: archNodes, edges: archEdges }) => {
+        // Filter out very small/noisy nodes (keep project modules, not stdlib)
+        const nodeSet = new Set(archNodes.map(n => n.name))
+        const internalNodes = archNodes.filter(n => {
+          // Keep nodes that have at least one edge connecting to another internal node
+          return archEdges.some(e =>
+            (e.from === n.name && nodeSet.has(e.to)) ||
+            (e.to === n.name && nodeSet.has(e.from))
+          )
+        })
+        if (internalNodes.length === 0) {
+          // Fallback: show all nodes
+          internalNodes.push(...archNodes)
+        }
+
+        // Build index maps
+        const nameToIdx = new Map<string, number>()
+        internalNodes.forEach((n, i) => nameToIdx.set(n.name, i))
+
+        // Build force links from edges (only between nodes we're showing)
+        const links: { source: number; target: number }[] = []
+        const edgeSet = new Set<string>()
+        for (const e of archEdges) {
+          const si = nameToIdx.get(e.from)
+          const ti = nameToIdx.get(e.to)
+          if (si !== undefined && ti !== undefined && si !== ti) {
+            const key = `${Math.min(si, ti)}-${Math.max(si, ti)}`
+            if (!edgeSet.has(key)) {
+              edgeSet.add(key)
+              links.push({ source: si, target: ti })
+            }
+          }
+        }
+
+        // Count connections per node for sizing
+        const connCount = new Array(internalNodes.length).fill(0)
+        for (const l of links) {
+          connCount[l.source]++
+          connCount[l.target]++
+        }
+
+        // Sizes: based on connection count (hub nodes are bigger)
+        const sizes = internalNodes.map((_, i) => clamp(6 + Math.sqrt(connCount[i]) * 3, 6, 35))
+
+        // Force simulation WITH links — connected nodes attract (Obsidian behavior)
+        const simNodes = internalNodes.map((_, i) => ({ index: i, x: 0, y: 0, z: 0 }))
+        const sim = forceSimulation(simNodes, 3)
+          .force('charge', forceManyBody().strength(-100))
+          .force('center', forceCenter(0, 0, 0))
+          .force('collide', forceCollide().radius((d: any) => sizes[d.index] + 5))
+          .force('link', forceLink(links.map(l => ({ ...l }))).distance(80).strength(0.3))
+          .stop()
+        for (let t = 0; t < 300; t++) sim.tick()
+
+        // Normalize
+        let maxDist = 1
+        simNodes.forEach((n: any) => {
+          const d = Math.sqrt(n.x * n.x + n.z * n.z)
+          if (d > maxDist) maxDist = d
+        })
+        const scale = 350 / maxDist
+        const positions = simNodes.map((n: any) => new THREE.Vector3(n.x * scale, n.y * scale * 0.4, n.z * scale))
+
+        // Render nodes
+        internalNodes.forEach((archNode, i) => {
+          const color = getClusterColor(archNode.name)
+          const isHub = connCount[i] > 5
+          const geo = isHub
+            ? new THREE.OctahedronGeometry(sizes[i], 0) // hubs are diamonds
+            : new THREE.SphereGeometry(sizes[i], 16, 12) // regular nodes are spheres
+          const shortName = archNode.name.split('/').pop() || archNode.name
+          const lbl = createHUDLabel([shortName, `${connCount[i]} connections`])
+
+          // Find matching tree node for drill-down
+          const treeNode = findTreeNodeByModulePath(root, archNode.name)
+          addNodeMesh(geo, color, positions[i], lbl, {
+            treeNode: treeNode || { name: archNode.name, type: 'folder', path: archNode.name } as TreeNode,
+            level: 1,
+          }, -(sizes[i] + 16))
+        })
+
+        // Render edges as visible lines
+        const linePositions: number[] = []
+        for (const link of links) {
+          const from = positions[link.source]
+          const to = positions[link.target]
+          linePositions.push(from.x, from.y, from.z, to.x, to.y, to.z)
+        }
+        if (linePositions.length > 0) {
+          const geo = new THREE.BufferGeometry()
+          geo.setAttribute('position', new THREE.Float32BufferAttribute(linePositions, 3))
+          const mat = new THREE.LineBasicMaterial({
+            color: 0x00eeff, transparent: true, opacity: 0.2,
+            blending: THREE.AdditiveBlending,
+          })
+          const lines = new THREE.LineSegments(geo, mat)
+          lines.userData = { _edges: true }
+          nodesGroup.add(lines)
+        }
+
+        camera.position.set(0, 250, 700)
+        controls.target.set(0, 0, 0)
+      }).catch(err => {
+        console.error('Failed to load architecture graph', err)
       })
+    }
 
-      // Fetch and render edges between folders
-      api.architecture().then(({ edges }) => {
-        const folderNames = children.map(c => c.path || c.name)
-        renderEdges(folderNames, positions, edges)
-      }).catch(() => {})
-
-      camera.position.set(0, 300, 800)
-      controls.target.set(0, 0, 0)
+    /** Walk tree to find a node matching a module path */
+    const findTreeNodeByModulePath = (root: TreeNode, modulePath: string): TreeNode | null => {
+      if (root.path === modulePath) return root
+      for (const child of root.children || []) {
+        if (modulePath.startsWith(child.path || child.name)) {
+          const found = findTreeNodeByModulePath(child, modulePath)
+          if (found) return found
+        }
+      }
+      return null
     }
 
     /* ---------- Level 2: Galaxy (files as spheres, sub-folders as diamonds) */
