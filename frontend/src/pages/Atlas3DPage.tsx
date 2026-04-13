@@ -469,7 +469,9 @@ export function Atlas3DPage() {
             ? new THREE.OctahedronGeometry(sizes[i], 0) // hubs are diamonds
             : new THREE.SphereGeometry(sizes[i], 16, 12) // regular nodes are spheres
           const shortName = archNode.name.split('/').pop() || archNode.name
-          const lbl = createHUDLabel([shortName, `${connCount[i]} connections`])
+          const lbl = createHUDLabel([shortName])
+          // Labels hidden by default in Obsidian mode — shown on hover
+          ;(lbl.material as THREE.SpriteMaterial).opacity = isHub ? 0.5 : 0
 
           // Find matching tree node for drill-down
           const treeNode = findTreeNodeByModulePath(root, archNode.name)
@@ -506,31 +508,42 @@ export function Atlas3DPage() {
       })
     }
 
-    /** Fallback: render Level 1 from the tree (for projects with sparse architecture graph) */
+    /** Fallback: render Level 1 from the tree — ONLY folders, never individual files */
     const renderLevel1FromTree = (root: TreeNode) => {
-      const children = (root.children || []).filter(c => c.type === 'folder')
-      if (children.length === 0 && root.children) {
-        // All files, no folders — show everything
-        const allChildren = root.children
-        const sizes = allChildren.map(c => clamp(Math.log2((c.lines || 100) + 1) * 2.5, 4, 20))
-        const positions = forceLayout(allChildren.length, i => sizes[i], 150)
-        allChildren.forEach((child, i) => {
-          const debt = child.debt || child.avg_debt || 0
-          const color = child.type === 'file' ? getLanguageColor(child.language || 'other', debt) : getNodeColor(child.name, debt)
-          const geo = new THREE.SphereGeometry(sizes[i], 16, 12)
-          const lbl = createHUDLabel([child.name, `${child.lines || '?'} ln`])
-          addNodeMesh(geo, color, positions[i], lbl, { treeNode: child, level: 1 }, -(sizes[i] + 14))
-        })
-      } else {
-        const sizes = children.map(c => clamp(Math.log2((c.file_count || 1) + 1) * 8, 8, 50))
-        const positions = forceLayout(children.length, i => sizes[i], 150)
-        children.forEach((child, i) => {
-          const debt = child.avg_debt || 0
-          const geo = new THREE.OctahedronGeometry(sizes[i], 0)
-          const lbl = createHUDLabel([child.name, `${child.file_count || 0} files  ${Math.round(debt)}%`], debt)
-          addNodeMesh(geo, getNodeColor(child.name, debt), positions[i], lbl, { treeNode: child, level: 1 }, -(sizes[i] + 18))
-        })
+      let folders = (root.children || []).filter(c => c.type === 'folder')
+
+      // If no folders at all, group root files by extension into virtual folders
+      if (folders.length === 0 && root.children && root.children.length > 0) {
+        const groups = new Map<string, TreeNode[]>()
+        for (const f of root.children) {
+          const ext = f.name.split('.').pop() || 'other'
+          if (!groups.has(ext)) groups.set(ext, [])
+          groups.get(ext)!.push(f)
+        }
+        folders = Array.from(groups.entries()).map(([ext, files]) => ({
+          name: `*.${ext}`, type: 'folder' as const, path: '', children: files,
+          file_count: files.length, avg_debt: 0,
+        }))
       }
+
+      // Cap at 20 visible folders — merge smallest into "other"
+      if (folders.length > 20) {
+        folders.sort((a, b) => (b.file_count || 0) - (a.file_count || 0))
+        const top = folders.slice(0, 19)
+        const rest = folders.slice(19)
+        const otherCount = rest.reduce((s, f) => s + (f.file_count || 1), 0)
+        top.push({ name: 'other', type: 'folder', path: '', children: rest.flatMap(f => f.children || []), file_count: otherCount, avg_debt: 0 })
+        folders = top
+      }
+
+      const sizes = folders.map(c => clamp(Math.log2((c.file_count || 1) + 1) * 8, 8, 50))
+      const positions = forceLayout(folders.length, i => sizes[i], 150)
+      folders.forEach((child, i) => {
+        const debt = child.avg_debt || 0
+        const geo = new THREE.OctahedronGeometry(sizes[i], 0)
+        const lbl = createHUDLabel([child.name, `${child.file_count || 0} files`], debt)
+        addNodeMesh(geo, getNodeColor(child.name, debt), positions[i], lbl, { treeNode: child, level: 1 }, -(sizes[i] + 18))
+      })
       camera.position.set(0, 300, 800)
       controls.target.set(0, 0, 0)
     }
