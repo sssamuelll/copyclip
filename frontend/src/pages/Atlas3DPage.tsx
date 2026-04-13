@@ -340,8 +340,8 @@ export function Atlas3DPage() {
         renderLevel2(root)
         return
       }
-      const sizes = children.map(c => clamp(Math.sqrt(c.file_count || 1) * 4, 6, 40))
-      const positions = forceLayout(children.length, i => sizes[i], 80)
+      const sizes = children.map(c => clamp(Math.log2((c.file_count || 1) + 1) * 8, 8, 50))
+      const positions = forceLayout(children.length, i => sizes[i], 250)
 
       children.forEach((child, i) => {
         const debt = child.avg_debt || 0
@@ -353,7 +353,7 @@ export function Atlas3DPage() {
         addNodeMesh(geo, getNodeColor(child.name, debt), positions[i], lbl, { treeNode: child, level: 1 }, -(sizes[i] + 18))
       })
 
-      camera.position.set(0, 300, 900)
+      camera.position.set(0, 500, 1500)
       controls.target.set(0, 0, 0)
     }
 
@@ -363,10 +363,10 @@ export function Atlas3DPage() {
       const children = folder.children || []
       const sizes = children.map(c =>
         c.type === 'file'
-          ? clamp(Math.sqrt(c.lines || 100) * 0.6, 5, 30)
-          : clamp(Math.sqrt(c.file_count || 1) * 3, 5, 25),
+          ? clamp(Math.log2((c.lines || 100) + 1) * 3, 5, 35)
+          : clamp(Math.log2((c.file_count || 1) + 1) * 7, 6, 30),
       )
-      const positions = forceLayout(children.length, i => sizes[i], 60)
+      const positions = forceLayout(children.length, i => sizes[i], 180)
 
       children.forEach((child, i) => {
         const debt = child.type === 'file' ? (child.debt || 0) : (child.avg_debt || 0)
@@ -383,7 +383,7 @@ export function Atlas3DPage() {
         addNodeMesh(geo, color, positions[i], lbl, { treeNode: child, level: 2 }, -(sizes[i] + 16))
       })
 
-      camera.position.set(0, 200, 600)
+      camera.position.set(0, 350, 1000)
       controls.target.set(0, 0, 0)
     }
 
