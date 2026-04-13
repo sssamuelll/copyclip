@@ -392,6 +392,12 @@ export function Atlas3DPage() {
 
       // Use architecture graph for Obsidian-style layout
       api.architecture().then(({ nodes: archNodes, edges: archEdges }) => {
+        // If graph is too sparse (< 4 nodes), fall back to tree-based folder view
+        if (archNodes.length < 4) {
+          renderLevel1FromTree(root)
+          return
+        }
+
         // Filter out very small/noisy nodes (keep project modules, not stdlib)
         const nodeSet = new Set(archNodes.map(n => n.name))
         const internalNodes = archNodes.filter(n => {
@@ -401,8 +407,9 @@ export function Atlas3DPage() {
             (e.to === n.name && nodeSet.has(e.from))
           )
         })
-        if (internalNodes.length === 0) {
-          // Fallback: show all nodes
+        if (internalNodes.length < 4) {
+          // Not enough connected nodes — use all nodes from the graph
+          internalNodes.length = 0
           internalNodes.push(...archNodes)
         }
 
@@ -493,9 +500,39 @@ export function Atlas3DPage() {
 
         camera.position.set(0, 250, 700)
         controls.target.set(0, 0, 0)
-      }).catch(err => {
-        console.error('Failed to load architecture graph', err)
+      }).catch(() => {
+        // Architecture graph failed — fall back to tree view
+        renderLevel1FromTree(root)
       })
+    }
+
+    /** Fallback: render Level 1 from the tree (for projects with sparse architecture graph) */
+    const renderLevel1FromTree = (root: TreeNode) => {
+      const children = (root.children || []).filter(c => c.type === 'folder')
+      if (children.length === 0 && root.children) {
+        // All files, no folders — show everything
+        const allChildren = root.children
+        const sizes = allChildren.map(c => clamp(Math.log2((c.lines || 100) + 1) * 2.5, 4, 20))
+        const positions = forceLayout(allChildren.length, i => sizes[i], 150)
+        allChildren.forEach((child, i) => {
+          const debt = child.debt || child.avg_debt || 0
+          const color = child.type === 'file' ? getLanguageColor(child.language || 'other', debt) : getNodeColor(child.name, debt)
+          const geo = new THREE.SphereGeometry(sizes[i], 16, 12)
+          const lbl = createHUDLabel([child.name, `${child.lines || '?'} ln`])
+          addNodeMesh(geo, color, positions[i], lbl, { treeNode: child, level: 1 }, -(sizes[i] + 14))
+        })
+      } else {
+        const sizes = children.map(c => clamp(Math.log2((c.file_count || 1) + 1) * 8, 8, 50))
+        const positions = forceLayout(children.length, i => sizes[i], 150)
+        children.forEach((child, i) => {
+          const debt = child.avg_debt || 0
+          const geo = new THREE.OctahedronGeometry(sizes[i], 0)
+          const lbl = createHUDLabel([child.name, `${child.file_count || 0} files  ${Math.round(debt)}%`], debt)
+          addNodeMesh(geo, getNodeColor(child.name, debt), positions[i], lbl, { treeNode: child, level: 1 }, -(sizes[i] + 18))
+        })
+      }
+      camera.position.set(0, 300, 800)
+      controls.target.set(0, 0, 0)
     }
 
     /** Walk tree to find a node matching a module path */
