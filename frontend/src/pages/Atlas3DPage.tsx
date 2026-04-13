@@ -40,6 +40,50 @@ const getDebtCSS = (debt: number): string => {
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 
+/** Color palette for cosmic objects — each folder/file gets a distinct hue */
+const COSMIC_PALETTE = [
+  0x00eeff, // cyan
+  0xae63e4, // purple
+  0xff6b6b, // coral
+  0xffaa00, // amber
+  0x47cf73, // green
+  0x5e91f2, // blue
+  0xff3c96, // pink
+  0x2bc7b9, // teal
+  0xf0e130, // gold
+  0xff8d41, // orange
+]
+
+/** Get a consistent color for a node based on its name hash */
+const getNodeColor = (name: string, debt: number): number => {
+  // High debt always shows red/amber regardless of palette
+  if (debt > 70) return 0xff3333
+  if (debt > 50) return 0xffaa00
+  // Otherwise, assign from palette based on name
+  let hash = 0
+  for (let i = 0; i < name.length; i++) hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0
+  return COSMIC_PALETTE[Math.abs(hash) % COSMIC_PALETTE.length]
+}
+
+/** Color for file nodes based on language */
+const getLanguageColor = (lang: string, debt: number): number => {
+  if (debt > 70) return 0xff3333
+  if (debt > 50) return 0xffaa00
+  const langColors: Record<string, number> = {
+    python: 0x3572A5,
+    javascript: 0xf0e130,
+    typescript: 0x3178c6,
+    css: 0x563d7c,
+    cpp: 0xf34b7d,
+    rust: 0xdea584,
+    json: 0x47cf73,
+    markdown: 0x888888,
+    html: 0xe34c26,
+    other: 0x666666,
+  }
+  return langColors[lang] || 0x888888
+}
+
 /** Create a HUD label Sprite that always faces the camera. */
 const createHUDLabel = (lines: string[], debtValue?: number): THREE.Sprite => {
   const canvas = document.createElement('canvas')
@@ -294,7 +338,7 @@ export function Atlas3DPage() {
           [child.name, `${child.file_count || 0} files  ${Math.round(debt)}%`],
           debt,
         )
-        addNodeMesh(geo, getDebtColor(debt), positions[i], lbl, { treeNode: child, level: 1 }, -(sizes[i] + 18))
+        addNodeMesh(geo, getNodeColor(child.name, debt), positions[i], lbl, { treeNode: child, level: 1 }, -(sizes[i] + 18))
       })
 
       camera.position.set(0, 300, 900)
@@ -314,6 +358,9 @@ export function Atlas3DPage() {
 
       children.forEach((child, i) => {
         const debt = child.type === 'file' ? (child.debt || 0) : (child.avg_debt || 0)
+        const color = child.type === 'file'
+          ? getLanguageColor(child.language || 'other', debt)
+          : getNodeColor(child.name, debt)
         const geo = child.type === 'file'
           ? new THREE.SphereGeometry(sizes[i], 24, 24)
           : new THREE.OctahedronGeometry(sizes[i], 0)
@@ -321,7 +368,7 @@ export function Atlas3DPage() {
           ? [`${child.name}`, `${child.lines || '?'} ln  ${Math.round(debt)}%`]
           : [`${child.name}`, `${child.file_count || 0} files  ${Math.round(debt)}%`]
         const lbl = createHUDLabel(info, debt)
-        addNodeMesh(geo, getDebtColor(debt), positions[i], lbl, { treeNode: child, level: 2 }, -(sizes[i] + 16))
+        addNodeMesh(geo, color, positions[i], lbl, { treeNode: child, level: 2 }, -(sizes[i] + 16))
       })
 
       camera.position.set(0, 200, 600)
