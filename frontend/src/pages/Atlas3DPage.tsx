@@ -817,12 +817,34 @@ export function Atlas3DPage() {
     const onWheel = (event: WheelEvent) => {
       event.preventDefault()
       if (T.transitioning) return
-      if (event.deltaY < 0 && T.hoveredMesh) {
-        // Scroll in: zoom into hovered node
-        const meta = T.hoveredMesh.userData as NodeMeta
-        zoomInto(meta)
+      if (event.deltaY < 0) {
+        // Scroll in: zoom into hovered node, or nearest node if hovering space
+        let targetMesh = T.hoveredMesh
+        if (!targetMesh) {
+          // Find nearest node to mouse ray
+          const rect = renderer.domElement.getBoundingClientRect()
+          mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
+          mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
+          raycaster.setFromCamera(mouse, camera)
+          let nearest: THREE.Mesh | null = null
+          let nearestDist = Infinity
+          nodesGroup.children.forEach(g => {
+            const mesh = g.children.find(c => (c as any).isMesh && (c as THREE.Mesh).userData?.level) as THREE.Mesh | undefined
+            if (mesh) {
+              const dist = raycaster.ray.distanceToPoint(g.position)
+              if (dist < nearestDist) {
+                nearestDist = dist
+                nearest = mesh
+              }
+            }
+          })
+          if (nearest && nearestDist < 200) targetMesh = nearest
+        }
+        if (targetMesh) {
+          const meta = targetMesh.userData as NodeMeta
+          zoomInto(meta)
+        }
       } else if (event.deltaY > 0 && T.zoomLevel > 1) {
-        // Scroll out: go up one level
         zoomOut()
       }
     }
