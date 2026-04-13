@@ -307,13 +307,25 @@ export function Atlas3DPage() {
     ) => {
       const g = new THREE.Group()
       const mat = new THREE.MeshStandardMaterial({
-        color, roughness: 0.4, metalness: 0.3,
-        emissive: color, emissiveIntensity: 0.3,
+        color, roughness: 0.3, metalness: 0.4,
+        emissive: color, emissiveIntensity: 0.4,
         transparent: true, opacity: 1.0,
       })
       const mesh = new THREE.Mesh(geometry, mat)
       mesh.userData = meta
       g.add(mesh)
+
+      // Glow halo — outer transparent sphere
+      geometry.computeBoundingSphere()
+      const glowGeo = new THREE.SphereGeometry((geometry.boundingSphere?.radius || 10) * 1.6, 16, 12)
+      const glowMat = new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity: 0.08,
+        side: THREE.BackSide, blending: THREE.AdditiveBlending,
+      })
+      const glow = new THREE.Mesh(glowGeo, glowMat)
+      glow.userData = { _glow: true } // mark as glow, skip raycasting
+      g.add(glow)
+
       label.position.set(0, labelOffset, 0)
       g.add(label)
       g.position.copy(pos)
@@ -742,7 +754,7 @@ export function Atlas3DPage() {
       mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
       raycaster.setFromCamera(mouse, camera)
       const hits = raycaster.intersectObjects(nodesGroup.children, true)
-      const hit = hits.find(h => (h.object as any).isMesh && (h.object as THREE.Mesh).userData?.level)
+      const hit = hits.find(h => (h.object as any).isMesh && (h.object as THREE.Mesh).userData?.level && !(h.object as THREE.Mesh).userData?._glow)
       return hit ? hit.object as THREE.Mesh : null
     }
 
