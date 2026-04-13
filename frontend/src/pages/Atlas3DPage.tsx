@@ -80,14 +80,22 @@ const createHUDLabel = (lines: string[], debtValue?: number): THREE.Sprite => {
 
 /** Run d3-force-3d on a list of items, return positions. */
 const forceLayout = (count: number, sizeFn: (i: number) => number, spread: number): THREE.Vector3[] => {
+  if (count === 0) return []
   const nodes = Array.from({ length: count }, (_, i) => ({ index: i, x: 0, y: 0, z: 0 }))
   const sim = forceSimulation(nodes, 3)
-    .force('charge', forceManyBody().strength(-spread * 1.5))
+    .force('charge', forceManyBody().strength(-spread))
     .force('center', forceCenter(0, 0, 0))
-    .force('collide', forceCollide().radius((d: any) => sizeFn(d.index) + 8))
+    .force('collide', forceCollide().radius((d: any) => sizeFn(d.index) + 5))
     .stop()
   for (let t = 0; t < 200; t++) sim.tick()
-  return nodes.map((n: any) => new THREE.Vector3(n.x * 2, n.y * 2, n.z * 2))
+  // Normalize positions to fit within a reasonable radius
+  let maxDist = 1
+  nodes.forEach((n: any) => {
+    const d = Math.sqrt(n.x * n.x + n.y * n.y + n.z * n.z)
+    if (d > maxDist) maxDist = d
+  })
+  const scale = spread * 3 / maxDist
+  return nodes.map((n: any) => new THREE.Vector3(n.x * scale, n.y * scale, n.z * scale))
 }
 
 /** Spread items in an orbit around center. */
@@ -273,7 +281,6 @@ export function Atlas3DPage() {
       clearNodes()
       const children = (root.children || []).filter(c => c.type === 'folder')
       if (children.length === 0 && root.children) {
-        // If all children are files, show them as spheres directly
         renderLevel2(root)
         return
       }
