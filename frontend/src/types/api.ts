@@ -153,6 +153,19 @@ export type AnalyzeJob = {
   eta_sec?: number | null
 }
 
+export type TreeNode = {
+  name: string
+  type: 'folder' | 'file'
+  path: string
+  children?: TreeNode[]
+  lines?: number
+  debt?: number
+  symbol_count?: number
+  file_count?: number
+  avg_debt?: number
+  language?: string
+}
+
 export type ArchNode = { name: string }
 export type ArchEdge = { from: string; to: string; type: string }
 
