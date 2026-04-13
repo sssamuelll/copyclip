@@ -68,7 +68,12 @@ def main():
 
 
 def _main_inner():
-    load_dotenv(override=True)
+    # Explicitly load .env from CWD to ensure it's found on all platforms
+    _cwd_env = os.path.join(os.getcwd(), ".env")
+    if os.path.exists(_cwd_env):
+        load_dotenv(_cwd_env, override=True)
+    else:
+        load_dotenv(override=True)
     # Intelligence commands are handled first and remain additive.
     if maybe_handle_intelligence(sys.argv):
         return
