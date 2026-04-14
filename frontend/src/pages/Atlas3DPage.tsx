@@ -48,6 +48,9 @@ const DEFAULT_EDGE_COLORS: Record<string, string> = {
   HAS_PARAMETER: '#ffca28',
 }
 
+const COLLAPSE_THRESHOLD = 14
+const COLLAPSE_CHUNK_SIZE = 12
+
 type FlowNodeType = keyof typeof DEFAULT_NODE_COLORS
 type FlowEdgeType = keyof typeof DEFAULT_EDGE_COLORS
 
@@ -181,6 +184,29 @@ function buildFlowData(tree: TreeNode | null, archNodes: ArchNode[], archEdges: 
 
   const rootId = addNode('root', 'root', 'Repository')
 
+  const ensureDirectoryChain = (directoryPath: string) => {
+    const normalized = normalizePath(directoryPath)
+    if (!normalized || normalized === 'root') return rootId
+    const existing = pathToId.get(normalized)
+    if (existing) return existing
+
+    const parts = normalized.split('/').filter(Boolean)
+    let parentId = rootId
+    let currentPath = ''
+    parts.forEach((part) => {
+      currentPath = currentPath ? `${currentPath}/${part}` : part
+      const knownId = pathToId.get(currentPath)
+      if (knownId) {
+        parentId = knownId
+        return
+      }
+      const nextId = addNode(currentPath, part, 'Directory')
+      addLink(parentId, nextId, 'CONTAINS')
+      parentId = nextId
+    })
+    return parentId
+  }
+
   const walkTree = (node: TreeNode, parentId: number, depth: number) => {
     const rawPath = node.path || node.name || 'root'
     const normalizedPath = rawPath === 'root' ? 'root' : normalizePath(rawPath)
@@ -234,8 +260,70 @@ function buildFlowData(tree: TreeNode | null, archNodes: ArchNode[], archEdges: 
     const key = `${link.source}:${link.target}:${link.type}`
     if (!dedupedLinks.has(key)) dedupedLinks.set(key, link)
   })
+  let normalizedLinks = [...dedupedLinks.values()]
 
-  return { nodes, links: [...dedupedLinks.values()] }
+  const rewireContainsParents = () => {
+    const parentByChild = new Map<number, number>()
+    normalizedLinks.forEach((link) => {
+      if (link.type === 'CONTAINS') parentByChild.set(link.target, link.source)
+    })
+
+    nodes.forEach((node) => {
+      if (node.type !== 'File') return
+      const parentPath = normalizePath(node.path.split('/').slice(0, -1).join('/'))
+      const desiredParent = parentPath ? ensureDirectoryChain(parentPath) : rootId
+      const currentParent = parentByChild.get(node.id)
+      if (currentParent === desiredParent) return
+      normalizedLinks = normalizedLinks.filter((link) => !(link.type === 'CONTAINS' && link.target === node.id))
+      normalizedLinks.push({ source: desiredParent, target: node.id, type: 'CONTAINS' })
+      parentByChild.set(node.id, desiredParent)
+    })
+  }
+
+  const collapseLargeSiblingSets = () => {
+    const childMap = new Map<number, number[]>()
+    normalizedLinks.forEach((link) => {
+      if (link.type !== 'CONTAINS') return
+      if (!childMap.has(link.source)) childMap.set(link.source, [])
+      childMap.get(link.source)?.push(link.target)
+    })
+
+    childMap.forEach((childIds, parentId) => {
+      const collapsible = childIds
+        .map((id) => nodes[nodeIndexById.get(id) ?? -1])
+        .filter((node): node is FlowNode => Boolean(node))
+        .filter((node) => node.type === 'File' || node.type === 'Module')
+        .sort((a, b) => a.name.localeCompare(b.name))
+
+      if (collapsible.length <= COLLAPSE_THRESHOLD) return
+
+      const collapseIds = new Set(collapsible.map((node) => node.id))
+      normalizedLinks = normalizedLinks.filter(
+        (link) => !(link.type === 'CONTAINS' && link.source === parentId && collapseIds.has(link.target)),
+      )
+
+      for (let index = 0; index < collapsible.length; index += COLLAPSE_CHUNK_SIZE) {
+        const chunk = collapsible.slice(index, index + COLLAPSE_CHUNK_SIZE)
+        const label = `${chunk.length} children collapsed`
+        const collapsedId = addNode(`collapsed:${parentId}:${index}`, label, 'Other')
+        normalizedLinks.push({ source: parentId, target: collapsedId, type: 'CONTAINS' })
+        chunk.forEach((node) => {
+          normalizedLinks.push({ source: collapsedId, target: node.id, type: 'CONTAINS' })
+        })
+      }
+    })
+  }
+
+  rewireContainsParents()
+  collapseLargeSiblingSets()
+
+  const finalLinks = new Map<string, FlowLink>()
+  normalizedLinks.forEach((link) => {
+    const key = `${link.source}:${link.target}:${link.type}`
+    if (!finalLinks.has(key)) finalLinks.set(key, link)
+  })
+
+  return { nodes, links: [...finalLinks.values()] }
 }
 
 const FlowchartCanvas = forwardRef<FlowHandle, FlowchartCanvasProps>(function FlowchartCanvas(
