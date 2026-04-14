@@ -184,29 +184,6 @@ function buildFlowData(tree: TreeNode | null, archNodes: ArchNode[], archEdges: 
 
   const rootId = addNode('root', 'root', 'Repository')
 
-  const ensureDirectoryChain = (directoryPath: string) => {
-    const normalized = normalizePath(directoryPath)
-    if (!normalized || normalized === 'root') return rootId
-    const existing = pathToId.get(normalized)
-    if (existing) return existing
-
-    const parts = normalized.split('/').filter(Boolean)
-    let parentId = rootId
-    let currentPath = ''
-    parts.forEach((part) => {
-      currentPath = currentPath ? `${currentPath}/${part}` : part
-      const knownId = pathToId.get(currentPath)
-      if (knownId) {
-        parentId = knownId
-        return
-      }
-      const nextId = addNode(currentPath, part, 'Directory')
-      addLink(parentId, nextId, 'CONTAINS')
-      parentId = nextId
-    })
-    return parentId
-  }
-
   const walkTree = (node: TreeNode, parentId: number, depth: number) => {
     const rawPath = node.path || node.name || 'root'
     const normalizedPath = rawPath === 'root' ? 'root' : normalizePath(rawPath)
@@ -262,6 +239,36 @@ function buildFlowData(tree: TreeNode | null, archNodes: ArchNode[], archEdges: 
   })
   let normalizedLinks = [...dedupedLinks.values()]
 
+  const addNormalizedLink = (source: number, target: number, type: FlowEdgeType) => {
+    if (source === target) return
+    if (!normalizedLinks.some((link) => link.source === source && link.target === target && link.type === type)) {
+      normalizedLinks.push({ source, target, type })
+    }
+  }
+
+  const ensureDirectoryChain = (directoryPath: string) => {
+    const normalized = normalizePath(directoryPath)
+    if (!normalized || normalized === 'root') return rootId
+    const existing = pathToId.get(normalized)
+    if (existing) return existing
+
+    const parts = normalized.split('/').filter(Boolean)
+    let parentId = rootId
+    let currentPath = ''
+    parts.forEach((part) => {
+      currentPath = currentPath ? `${currentPath}/${part}` : part
+      const knownId = pathToId.get(currentPath)
+      if (knownId) {
+        parentId = knownId
+        return
+      }
+      const nextId = addNode(currentPath, part, 'Directory')
+      addNormalizedLink(parentId, nextId, 'CONTAINS')
+      parentId = nextId
+    })
+    return parentId
+  }
+
   const rewireContainsParents = () => {
     const parentByChild = new Map<number, number>()
     normalizedLinks.forEach((link) => {
@@ -275,7 +282,7 @@ function buildFlowData(tree: TreeNode | null, archNodes: ArchNode[], archEdges: 
       const currentParent = parentByChild.get(node.id)
       if (currentParent === desiredParent) return
       normalizedLinks = normalizedLinks.filter((link) => !(link.type === 'CONTAINS' && link.target === node.id))
-      normalizedLinks.push({ source: desiredParent, target: node.id, type: 'CONTAINS' })
+      addNormalizedLink(desiredParent, node.id, 'CONTAINS')
       parentByChild.set(node.id, desiredParent)
     })
   }
