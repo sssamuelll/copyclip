@@ -838,3 +838,413 @@ body {
     max-height: 40vh;
   }
 }
+
+.atlas-flow-page {
+  position: relative;
+  z-index: 20;
+  margin: -24px;
+  min-height: calc(100vh - 48px);
+  background: #f5f5f7;
+  color: #111827;
+  overflow: hidden;
+}
+
+.atlas-flow-page--dark {
+  background: #020202;
+  color: #f9fafb;
+}
+
+.atlas-flow-topbar {
+  position: absolute;
+  top: 28px;
+  left: 28px;
+  right: 28px;
+  z-index: 40;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  pointer-events: none;
+}
+
+.atlas-flow-brand,
+.atlas-flow-toolbar {
+  pointer-events: auto;
+}
+
+.atlas-flow-brand {
+  display: grid;
+  gap: 4px;
+}
+
+.atlas-flow-brand-kicker {
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgba(148, 163, 184, 0.72);
+}
+
+.atlas-flow-brand-title {
+  font-size: 22px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.atlas-flow-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.atlas-flow-pill,
+.atlas-flow-search {
+  height: 40px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.52);
+  color: #f9fafb;
+  backdrop-filter: blur(16px);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+}
+
+.atlas-flow-page:not(.atlas-flow-page--dark) .atlas-flow-pill,
+.atlas-flow-page:not(.atlas-flow-page--dark) .atlas-flow-search {
+  border-color: rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.84);
+  color: #0f172a;
+}
+
+.atlas-flow-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.atlas-flow-icon-pill {
+  width: 40px;
+  justify-content: center;
+  padding: 0;
+}
+
+.atlas-flow-mode-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #a855f7;
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.72);
+}
+
+.atlas-flow-link-pill {
+  color: inherit;
+  text-decoration: none;
+}
+
+.atlas-flow-search {
+  min-width: 190px;
+  padding: 0 16px;
+  font-size: 13px;
+  outline: none;
+}
+
+.atlas-flow-search::placeholder {
+  color: rgba(148, 163, 184, 0.7);
+}
+
+.atlas-flow-stage {
+  position: relative;
+  width: 100%;
+  min-height: calc(100vh - 48px);
+}
+
+.atlas-flow-svg {
+  display: block;
+  width: 100%;
+  height: calc(100vh - 48px);
+}
+
+.atlas-flow-controls {
+  position: absolute;
+  top: 118px;
+  left: 28px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.58);
+  backdrop-filter: blur(16px);
+}
+
+.atlas-flow-page:not(.atlas-flow-page--dark) .atlas-flow-controls,
+.atlas-flow-page:not(.atlas-flow-page--dark) .atlas-flow-legend,
+.atlas-flow-page:not(.atlas-flow-page--dark) .atlas-flow-filter-panel,
+.atlas-flow-page:not(.atlas-flow-page--dark) .atlas-flow-selection {
+  border-color: rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.atlas-flow-controls button {
+  width: 44px;
+  height: 44px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.atlas-flow-controls button + button {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.atlas-flow-page:not(.atlas-flow-page--dark) .atlas-flow-controls button + button {
+  border-top-color: rgba(15, 23, 42, 0.08);
+}
+
+.atlas-flow-state {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(148, 163, 184, 0.76);
+}
+
+.atlas-flow-state--error {
+  color: #f87171;
+}
+
+.atlas-flow-legend,
+.atlas-flow-filter-panel,
+.atlas-flow-selection {
+  position: absolute;
+  z-index: 40;
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.56);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.22);
+}
+
+.atlas-flow-legend,
+.atlas-flow-filter-panel {
+  right: 28px;
+  bottom: 28px;
+  width: min(520px, calc(100vw - 56px));
+}
+
+.atlas-flow-selection {
+  left: 28px;
+  bottom: 28px;
+  max-width: min(420px, calc(100vw - 112px));
+  display: grid;
+  gap: 4px;
+  padding: 16px 18px;
+}
+
+.atlas-flow-selection-type {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #60a5fa;
+}
+
+.atlas-flow-selection strong {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.atlas-flow-selection small {
+  color: rgba(148, 163, 184, 0.78);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.atlas-flow-legend-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 10px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.atlas-flow-legend-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.atlas-flow-filter-trigger,
+.atlas-flow-filter-close {
+  border: 0;
+  background: transparent;
+  color: #60a5fa;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.atlas-flow-chevron {
+  display: inline-block;
+  color: rgba(148, 163, 184, 0.82);
+  transition: transform 140ms ease;
+}
+
+.atlas-flow-chevron--collapsed {
+  transform: rotate(180deg);
+}
+
+.atlas-flow-legend-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 18px;
+  padding: 0 18px 18px;
+}
+
+.atlas-flow-legend-item,
+.atlas-flow-filter-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.atlas-flow-legend-item {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.atlas-flow-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.atlas-flow-legend-item--muted {
+  color: rgba(148, 163, 184, 0.54);
+  text-decoration: line-through;
+}
+
+.atlas-flow-filter-list {
+  display: grid;
+  gap: 6px;
+  padding: 0 14px 14px;
+  max-height: 50vh;
+  overflow: auto;
+}
+
+.atlas-flow-filter-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+  cursor: pointer;
+}
+
+.atlas-flow-page:not(.atlas-flow-page--dark) .atlas-flow-filter-row {
+  background: rgba(15, 23, 42, 0.04);
+}
+
+.atlas-flow-filter-toggle {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(148, 163, 184, 0.72);
+}
+
+.atlas-flow-filter-toggle--active {
+  color: #34d399;
+}
+
+@media (max-width: 1100px) {
+  .atlas-flow-topbar {
+    position: static;
+    padding: 20px;
+    align-items: stretch;
+    flex-direction: column;
+    background: linear-gradient(to bottom, rgba(2, 2, 2, 0.94), rgba(2, 2, 2, 0));
+  }
+
+  .atlas-flow-page:not(.atlas-flow-page--dark) .atlas-flow-topbar {
+    background: linear-gradient(to bottom, rgba(245, 245, 247, 0.96), rgba(245, 245, 247, 0));
+  }
+
+  .atlas-flow-toolbar {
+    justify-content: flex-start;
+  }
+
+  .atlas-flow-stage,
+  .atlas-flow-svg {
+    min-height: calc(100vh - 48px);
+    height: calc(100vh - 48px);
+  }
+
+  .atlas-flow-controls {
+    top: 160px;
+  }
+}
+
+@media (max-width: 720px) {
+  .atlas-flow-toolbar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .atlas-flow-icon-pill,
+  .atlas-flow-mode-pill,
+  .atlas-flow-link-pill,
+  .atlas-flow-search {
+    width: 100%;
+  }
+
+  .atlas-flow-controls {
+    left: 20px;
+    top: auto;
+    bottom: 124px;
+  }
+
+  .atlas-flow-legend,
+  .atlas-flow-filter-panel,
+  .atlas-flow-selection {
+    left: 20px;
+    right: 20px;
+    width: auto;
+    max-width: none;
+  }
+
+  .atlas-flow-selection {
+    bottom: 20px;
+  }
+
+  .atlas-flow-legend,
+  .atlas-flow-filter-panel {
+    bottom: 120px;
+  }
+}

@@ -1,85 +1,111 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-// @ts-ignore - d3-force-3d has no type declarations
-import { forceSimulation, forceManyBody, forceCenter, forceCollide, forceLink } from 'd3-force-3d'
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { api } from '../api/client'
-import type {
-  ArchEdge,
-  ArchNode,
-  CognitiveLoadItem,
-  ModuleSourceFile,
-  Overview,
-  RiskItem,
-  SymbolItem,
-  TreeNode,
-} from '../types/api'
+import type { ArchEdge, ArchNode, Overview, TreeNode } from '../types/api'
 
-type GraphNode = {
-  id: string
-  label: string
+const NODE_W = 200
+const NODE_H = 40
+const LEVEL_GAP = 280
+const NODE_GAP = 16
+const SLOT_R = 3.5
+const GITHUB_URL = 'https://github.com/sssamuelll/copyclip'
+
+const DEFAULT_NODE_COLORS: Record<string, string> = {
+  Repository: '#ffffff',
+  Directory: '#f59e0b',
+  File: '#42a5f5',
+  Class: '#66bb6a',
+  Interface: '#26a69a',
+  Trait: '#81c784',
+  Function: '#ffca28',
+  Module: '#ef5350',
+  Variable: '#ffa726',
+  Enum: '#7e57c2',
+  Struct: '#5c6bc0',
+  Macro: '#ff7043',
+  Record: '#4db6ac',
+  Union: '#8d6e63',
+  Property: '#dce775',
+  Annotation: '#ec407a',
+  Parameter: '#90a4ae',
+  Other: '#78909c',
+}
+
+const DEFAULT_EDGE_COLORS: Record<string, string> = {
+  CONTAINS: '#ffffff',
+  CALLS: '#ab47bc',
+  IMPORTS: '#42a5f5',
+  INHERITS: '#66bb6a',
+  IMPLEMENTS: '#26a69a',
+  INCLUDES: '#81c784',
+  HAS_PARAMETER: '#ffca28',
+}
+
+type FlowNodeType = keyof typeof DEFAULT_NODE_COLORS
+type FlowEdgeType = keyof typeof DEFAULT_EDGE_COLORS
+
+type FlowNode = {
+  id: number
+  name: string
+  type: FlowNodeType
   path: string
-  kind: 'module' | 'folder' | 'file'
-  group: string
-  degree: number
-  debt: number
-  size: number
-  modulePath: string
 }
 
-type GraphEdge = {
-  id: string
-  source: string
-  target: string
-  type: 'import' | 'contains'
+type FlowLink = {
+  source: number
+  target: number
+  type: FlowEdgeType
 }
 
-type GraphDataset = {
-  nodes: GraphNode[]
-  edges: GraphEdge[]
-  source: 'dependencies' | 'tree'
+type FlowData = {
+  nodes: FlowNode[]
+  links: FlowLink[]
 }
 
-type Viewport = { x: number; y: number; k: number }
+type FlowHandle = {
+  zoomIn: () => void
+  zoomOut: () => void
+  fitView: () => void
+}
 
-const CANVAS_WIDTH = 1200
-const CANVAS_HEIGHT = 760
+type FlowchartCanvasProps = {
+  data: FlowData
+  width: number
+  height: number
+  nodeColors: Record<string, string>
+  edgeColors: Record<string, string>
+  isDark: boolean
+  selectedId: number | null
+  onSelectNode: (id: number | null) => void
+}
 
-const GROUP_COLORS: Record<string, string> = {
-  intelligence: '#67e8f9',
-  llm: '#f59e0b',
-  frontend: '#86efac',
-  tests: '#fda4af',
-  docs: '#c4b5fd',
-  scripts: '#fdba74',
-  config: '#94a3b8',
-  root: '#e5e7eb',
+type FlowEdgeInfo = {
+  key: string
+  type: string
+  d: string
+  mx: number
+  my: number
 }
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
 }
 
+function normalizePath(value: string) {
+  return value.replace(/\\/g, '/').replace(/^\.?\//, '').replace(/\/+/g, '/')
+}
+
 function getLeafLabel(path: string) {
   if (!path) return 'root'
-  const pieces = path.split('/')
+  const pieces = normalizePath(path).split('/')
   return pieces[pieces.length - 1] || path
-}
-
-function getGroup(value: string) {
-  const lower = value.toLowerCase()
-  if (lower.includes('frontend')) return 'frontend'
-  if (lower.includes('intelligence')) return 'intelligence'
-  if (lower.includes('/llm') || lower.startsWith('copyclip/llm') || lower.startsWith('src/copyclip/llm')) return 'llm'
-  if (lower.includes('test')) return 'tests'
-  if (lower.includes('docs')) return 'docs'
-  if (lower.includes('script')) return 'scripts'
-  if (lower.startsWith('.') || lower.includes('package') || lower.includes('pyproject') || lower.includes('requirements')) return 'config'
-  return 'root'
-}
-
-function getDebtColor(debt: number) {
-  if (debt >= 70) return '#f87171'
-  if (debt >= 45) return '#fbbf24'
-  return '#67e8f9'
 }
 
 function collectTreeNodes(root: TreeNode | null) {
@@ -93,723 +119,879 @@ function collectTreeNodes(root: TreeNode | null) {
   return out
 }
 
-function findTreeNode(root: TreeNode | null, modulePath: string) {
+function findTreeNode(root: TreeNode | null, targetPath: string) {
+  const normalizedTarget = normalizePath(targetPath)
   const nodes = collectTreeNodes(root)
-  const exact = nodes.find((node) => node.path === modulePath)
-  if (exact) return exact
-  const suffix = nodes.find((node) => node.path && (node.path.endsWith(modulePath) || modulePath.endsWith(node.path)))
-  if (suffix) return suffix
-  return nodes.find((node) => node.name === getLeafLabel(modulePath)) || null
+  return (
+    nodes.find((node) => normalizePath(node.path) === normalizedTarget) ||
+    nodes.find((node) => normalizePath(node.path).endsWith(normalizedTarget) || normalizedTarget.endsWith(normalizePath(node.path))) ||
+    nodes.find((node) => node.name === getLeafLabel(normalizedTarget)) ||
+    null
+  )
 }
 
-function buildDependencyGraph(
-  tree: TreeNode | null,
-  rawNodes: ArchNode[],
-  rawEdges: ArchEdge[],
-  cognitiveMap: Map<string, CognitiveLoadItem>,
-) {
-  const candidates = rawNodes
-    .map((node) => {
-      const treeNode = findTreeNode(tree, node.name)
-      if (!treeNode && node.name !== 'root') return null
-      const cognitive = cognitiveMap.get(node.name)
-      const debt = cognitive?.cognitive_debt_score || treeNode?.debt || treeNode?.avg_debt || 0
-      return {
-        id: node.name,
-        label: getLeafLabel(node.name),
-        path: node.name,
-        kind: 'module' as const,
-        group: getGroup(node.name),
-        degree: 0,
-        debt,
-        size: 18,
-        modulePath: node.name,
-      }
-    })
-    .filter(Boolean) as GraphNode[]
-
-  const nodeIds = new Set(candidates.map((node) => node.id))
-  const edges = rawEdges
-    .filter((edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to) && edge.from !== edge.to)
-    .map((edge) => ({
-      id: `${edge.from}__${edge.to}`,
-      source: edge.from,
-      target: edge.to,
-      type: 'import' as const,
-    }))
-
-  const degreeMap = new Map<string, number>()
-  candidates.forEach((node) => degreeMap.set(node.id, 0))
-  edges.forEach((edge) => {
-    degreeMap.set(edge.source, (degreeMap.get(edge.source) || 0) + 1)
-    degreeMap.set(edge.target, (degreeMap.get(edge.target) || 0) + 1)
-  })
-
-  const nodes = candidates.map((node) => {
-    const degree = degreeMap.get(node.id) || 0
-    return {
-      ...node,
-      degree,
-      size: clamp(10 + Math.sqrt(Math.max(degree, 1)) * 4, 10, 28),
-    }
-  })
-
-  if (nodes.length < 3 || edges.length < 2) return null
-  return { nodes, edges, source: 'dependencies' as const }
+function mapEdgeType(type: string): FlowEdgeType {
+  const upper = type.toUpperCase()
+  if (upper.includes('CALL')) return 'CALLS'
+  if (upper.includes('INHERIT')) return 'INHERITS'
+  if (upper.includes('IMPLEMENT')) return 'IMPLEMENTS'
+  if (upper.includes('INCLUDE')) return 'INCLUDES'
+  if (upper.includes('PARAM')) return 'HAS_PARAMETER'
+  return 'IMPORTS'
 }
 
-function buildTreeGraph(tree: TreeNode | null) {
-  if (!tree) {
-    return { nodes: [] as GraphNode[], edges: [] as GraphEdge[], source: 'tree' as const }
-  }
-
-  const nodes: GraphNode[] = []
-  const edges: GraphEdge[] = []
+function buildFlowData(tree: TreeNode | null, archNodes: ArchNode[], archEdges: ArchEdge[]): FlowData {
+  const nodes: FlowNode[] = []
+  const links: FlowLink[] = []
+  const pathToId = new Map<string, number>()
+  const moduleToId = new Map<string, number>()
+  const maxFiles = 220
+  let nextId = 1
   let visibleFiles = 0
 
-  const walk = (node: TreeNode, parent: TreeNode | null, depth: number) => {
-    const path = node.path || node.name || 'root'
-    const isRoot = node.name === 'root'
-    const isHidden = node.name.startsWith('.') && !isRoot
-    if (isHidden) return
+  const addNode = (path: string, name: string, type: FlowNodeType) => {
+    const normalizedPath = normalizePath(path)
+    const existing = pathToId.get(normalizedPath)
+    if (existing) return existing
+    const id = nextId
+    nextId += 1
+    pathToId.set(normalizedPath, id)
+    nodes.push({ id, name, type, path: normalizedPath })
+    return id
+  }
 
+  const addLink = (source: number, target: number, type: FlowEdgeType) => {
+    if (source === target) return
+    links.push({ source, target, type })
+  }
+
+  const rootId = addNode('root', 'root', 'Repository')
+
+  const walkTree = (node: TreeNode, parentId: number, depth: number) => {
+    const rawPath = node.path || node.name || 'root'
+    const normalizedPath = rawPath === 'root' ? 'root' : normalizePath(rawPath)
+    const isRoot = normalizedPath === 'root' || node.name === 'root'
+    const isHidden = node.name.startsWith('.') && !isRoot
+
+    if (isHidden) return
+    if (depth > 6 && node.type === 'folder') return
     if (node.type === 'file') {
-      if (visibleFiles >= 140) return
+      if (visibleFiles >= maxFiles) return
       visibleFiles += 1
     }
 
-    if (depth > 4 && node.type === 'folder') return
+    const ownId = isRoot
+      ? rootId
+      : addNode(normalizedPath, node.name || getLeafLabel(normalizedPath), node.type === 'folder' ? 'Directory' : 'File')
 
-    const sizeBase = node.type === 'folder' ? Math.log2((node.file_count || 1) + 2) * 3 : Math.log2((node.lines || 40) + 2)
-    nodes.push({
-      id: path,
-      label: isRoot ? 'root' : node.name,
-      path,
-      kind: node.type === 'folder' ? 'folder' : 'file',
-      group: getGroup(path),
-      degree: 0,
-      debt: node.debt || node.avg_debt || 0,
-      size: clamp(sizeBase, node.type === 'folder' ? 10 : 7, node.type === 'folder' ? 20 : 15),
-      modulePath: node.type === 'file'
-        ? (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) || 'root' : 'root')
-        : path || 'root',
+    if (!isRoot) addLink(parentId, ownId, 'CONTAINS')
+
+    ;(node.children || []).forEach((child) => walkTree(child, ownId, depth + 1))
+  }
+
+  if (tree) walkTree(tree, rootId, 0)
+
+  archNodes.forEach((node) => {
+    const normalizedName = normalizePath(node.name)
+    const owner = findTreeNode(tree, normalizedName)
+    const ownerPath = owner?.path ? normalizePath(owner.path) : 'root'
+    const ownerId = pathToId.get(ownerPath) || rootId
+    const id = addNode(`module:${normalizedName}`, getLeafLabel(normalizedName), 'Module')
+    moduleToId.set(node.name, id)
+    addLink(ownerId, id, 'CONTAINS')
+  })
+
+  archEdges.forEach((edge) => {
+    const sourceId = moduleToId.get(edge.from)
+    const targetId = moduleToId.get(edge.to)
+    if (!sourceId || !targetId) return
+    addLink(sourceId, targetId, mapEdgeType(edge.type))
+  })
+
+  const dedupedLinks = new Map<string, FlowLink>()
+  links.forEach((link) => {
+    const key = `${link.source}:${link.target}:${link.type}`
+    if (!dedupedLinks.has(key)) dedupedLinks.set(key, link)
+  })
+
+  return { nodes, links: [...dedupedLinks.values()] }
+}
+
+const FlowchartCanvas = forwardRef<FlowHandle, FlowchartCanvasProps>(function FlowchartCanvas(
+  { data, width, height, nodeColors, edgeColors, isDark, selectedId, onSelectNode },
+  ref,
+) {
+  const svgRef = useRef<SVGSVGElement>(null)
+  const [expanded, setExpanded] = useState<Set<number>>(() => new Set())
+  const [positions, setPositions] = useState<Map<number, { x: number; y: number }>>(new Map())
+  const [hoverEdge, setHoverEdge] = useState<string | null>(null)
+  const [selectedEdge, setSelectedEdge] = useState<string | null>(null)
+  const [hoverNode, setHoverNode] = useState<number | null>(null)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const [zoom, setZoom] = useState(0.65)
+  const [dragId, setDragId] = useState<number | null>(null)
+  const [showOrphans, setShowOrphans] = useState(false)
+  const isPanning = useRef(false)
+  const panStart = useRef({ x: 0, y: 0, px: 0, py: 0 })
+  const dragStart = useRef<{ mx: number; my: number; nx: number; ny: number } | null>(null)
+  const autoFitDone = useRef(false)
+  const pathCache = useRef<Map<string, { d: string; mx: number; my: number }>>(new Map())
+
+  const childMap = useMemo(() => {
+    const map = new Map<number, number[]>()
+    data.links.forEach((link) => {
+      if (link.type !== 'CONTAINS') return
+      if (!map.has(link.source)) map.set(link.source, [])
+      map.get(link.source)?.push(link.target)
     })
+    return map
+  }, [data.links])
 
-    if (parent) {
-      edges.push({
-        id: `${parent.path || parent.name}__${path}`,
-        source: parent.path || parent.name,
-        target: path,
-        type: 'contains',
+  const parentMap = useMemo(() => {
+    const map = new Map<number, number>()
+    data.links.forEach((link) => {
+      if (link.type === 'CONTAINS') map.set(link.target, link.source)
+    })
+    return map
+  }, [data.links])
+
+  const crossLinks = useMemo(
+    () => data.links.filter((link) => link.type !== 'CONTAINS'),
+    [data.links],
+  )
+
+  const nodeMap = useMemo(() => {
+    const map = new Map<number, FlowNode>()
+    data.nodes.forEach((node) => map.set(node.id, node))
+    return map
+  }, [data.nodes])
+
+  const roots = useMemo(
+    () => data.nodes.filter((node) => !parentMap.has(node.id)).map((node) => node.id),
+    [data.nodes, parentMap],
+  )
+
+  const initialExpanded = useMemo(() => {
+    const next = new Set<number>(roots)
+    roots.forEach((rootId) => {
+      ;(childMap.get(rootId) || []).forEach((childId) => {
+        next.add(childId)
+        const grandchildren = childMap.get(childId) || []
+        if (grandchildren.length <= 3) grandchildren.forEach((grandchildId) => next.add(grandchildId))
+      })
+    })
+    return next
+  }, [roots, childMap])
+
+  useEffect(() => {
+    setExpanded(initialExpanded)
+    setSelectedEdge(null)
+    setHoverEdge(null)
+    setHoverNode(null)
+    autoFitDone.current = false
+  }, [initialExpanded, data.nodes.length, data.links.length])
+
+  const orphanIds = useMemo(
+    () => new Set(roots.filter((id) => !(childMap.get(id) || []).some((childId) => nodeMap.has(childId)))),
+    [roots, childMap, nodeMap],
+  )
+
+  const visibleIds = useMemo(() => {
+    const visible = new Set<number>()
+    const queue = [...roots]
+    while (queue.length) {
+      const id = queue.shift()
+      if (id == null || !nodeMap.has(id)) continue
+      if (orphanIds.has(id) && !showOrphans) continue
+      visible.add(id)
+      if (expanded.has(id)) (childMap.get(id) || []).forEach((childId) => queue.push(childId))
+    }
+    return visible
+  }, [roots, nodeMap, orphanIds, showOrphans, expanded, childMap])
+
+  useEffect(() => {
+    const subtreeHeight = (id: number): number => {
+      if (!expanded.has(id) || !visibleIds.has(id)) return NODE_H
+      const kids = (childMap.get(id) || []).filter((kidId) => visibleIds.has(kidId))
+      if (!kids.length) return NODE_H
+      return kids.reduce((sum, kidId) => sum + subtreeHeight(kidId) + NODE_GAP, -NODE_GAP)
+    }
+
+    const nextPositions = new Map<number, { x: number; y: number }>()
+
+    const place = (id: number, x: number, yCenter: number) => {
+      nextPositions.set(id, { x, y: yCenter - NODE_H / 2 })
+      if (!expanded.has(id)) return
+      const kids = (childMap.get(id) || []).filter((kidId) => visibleIds.has(kidId))
+      if (!kids.length) return
+      const total = subtreeHeight(id)
+      let offsetY = yCenter - total / 2
+      kids.forEach((kidId) => {
+        const kidHeight = subtreeHeight(kidId)
+        place(kidId, x + LEVEL_GAP, offsetY + kidHeight / 2)
+        offsetY += kidHeight + NODE_GAP
       })
     }
 
-    ;(node.children || []).forEach((child) => walk(child, node, depth + 1))
-  }
+    const treeRoots = roots.filter((id) => visibleIds.has(id) && !orphanIds.has(id))
+    const totalHeight = treeRoots.reduce((sum, id) => sum + subtreeHeight(id) + NODE_GAP * 3, 0)
+    let y = -totalHeight / 2
+    treeRoots.forEach((id) => {
+      const rootHeight = subtreeHeight(id)
+      place(id, 40, y + rootHeight / 2)
+      y += rootHeight + NODE_GAP * 3
+    })
 
-  walk(tree, null, 0)
-
-  const degreeMap = new Map<string, number>()
-  nodes.forEach((node) => degreeMap.set(node.id, 0))
-  edges.forEach((edge) => {
-    degreeMap.set(edge.source, (degreeMap.get(edge.source) || 0) + 1)
-    degreeMap.set(edge.target, (degreeMap.get(edge.target) || 0) + 1)
-  })
-
-  return {
-    nodes: nodes.map((node) => ({ ...node, degree: degreeMap.get(node.id) || 0 })),
-    edges,
-    source: 'tree' as const,
-  }
-}
-
-function makeDataset(
-  tree: TreeNode | null,
-  rawNodes: ArchNode[],
-  rawEdges: ArchEdge[],
-  cognitiveMap: Map<string, CognitiveLoadItem>,
-) {
-  return buildDependencyGraph(tree, rawNodes, rawEdges, cognitiveMap) || buildTreeGraph(tree)
-}
-
-function localGraph(dataset: GraphDataset, centerId: string | null, depth: number) {
-  if (!centerId) return dataset
-  const adjacency = new Map<string, Set<string>>()
-  dataset.nodes.forEach((node) => adjacency.set(node.id, new Set()))
-  dataset.edges.forEach((edge) => {
-    adjacency.get(edge.source)?.add(edge.target)
-    adjacency.get(edge.target)?.add(edge.source)
-  })
-
-  const keep = new Set<string>([centerId])
-  let frontier = new Set<string>([centerId])
-  for (let level = 0; level < depth; level += 1) {
-    const next = new Set<string>()
-    frontier.forEach((id) => {
-      adjacency.get(id)?.forEach((neighbor) => {
-        if (!keep.has(neighbor)) {
-          keep.add(neighbor)
-          next.add(neighbor)
-        }
+    if (showOrphans) {
+      const orphans = roots.filter((id) => orphanIds.has(id) && visibleIds.has(id))
+      let maxX = 40
+      nextPositions.forEach((position) => {
+        if (position.x + NODE_W > maxX) maxX = position.x + NODE_W
       })
+      const orphanStartX = maxX + LEVEL_GAP
+      const cols = 2
+      const colWidth = NODE_W + 20
+      const rowHeight = NODE_H + NODE_GAP
+      const gridTop = -totalHeight / 2
+      orphans.forEach((id, index) => {
+        const col = index % cols
+        const row = Math.floor(index / cols)
+        nextPositions.set(id, { x: orphanStartX + col * colWidth, y: gridTop + row * rowHeight })
+      })
+    }
+
+    pathCache.current.clear()
+    setPositions(nextPositions)
+  }, [visibleIds, expanded, childMap, roots, orphanIds, showOrphans])
+
+  const visibleLinks = useMemo(() => {
+    const out: Array<{ key: string; sourceId: number; targetId: number; type: string }> = []
+    visibleIds.forEach((id) => {
+      if (!expanded.has(id)) return
+      ;(childMap.get(id) || [])
+        .filter((kidId) => visibleIds.has(kidId))
+        .forEach((kidId) =>
+          out.push({
+            key: `c-${id}-${kidId}`,
+            sourceId: id,
+            targetId: kidId,
+            type: 'CONTAINS',
+          }),
+        )
     })
-    frontier = next
-  }
-
-  return {
-    ...dataset,
-    nodes: dataset.nodes.filter((node) => keep.has(node.id)),
-    edges: dataset.edges.filter((edge) => keep.has(edge.source) && keep.has(edge.target)),
-  }
-}
-
-function filteredGraph(dataset: GraphDataset, search: string, showOrphans: boolean) {
-  const term = search.trim().toLowerCase()
-  const matchedNodes = dataset.nodes.filter((node) => {
-    if (!term) return true
-    return node.label.toLowerCase().includes(term) || node.path.toLowerCase().includes(term)
-  })
-  const keep = new Set(matchedNodes.map((node) => node.id))
-  const edges = dataset.edges.filter((edge) => keep.has(edge.source) && keep.has(edge.target))
-
-  if (showOrphans) {
-    return { ...dataset, nodes: matchedNodes, edges }
-  }
-
-  const connected = new Set<string>()
-  edges.forEach((edge) => {
-    connected.add(edge.source)
-    connected.add(edge.target)
-  })
-
-  return {
-    ...dataset,
-    nodes: matchedNodes.filter((node) => connected.has(node.id)),
-    edges,
-  }
-}
-
-function runLayout(dataset: GraphDataset, forces: { center: number; repel: number; link: number; distance: number }) {
-  const simNodes = dataset.nodes.map((node) => ({ ...node, x: 0, y: 0, z: 0 }))
-  const sim = forceSimulation(simNodes, 3)
-    .force('charge', forceManyBody().strength(-Math.max(forces.repel, 10)))
-    .force('center', forceCenter(0, 0, 0).strength(Math.max(forces.center, 0.01)))
-    .force('collide', forceCollide().radius((node: GraphNode) => node.size + 12))
-    .force(
-      'link',
-      forceLink(dataset.edges.map((edge) => ({ source: edge.source, target: edge.target })))
-        .id((node: GraphNode) => node.id)
-        .distance(Math.max(forces.distance, 20))
-        .strength(Math.max(forces.link, 0.01)),
-    )
-    .stop()
-
-  for (let i = 0; i < 240; i += 1) sim.tick()
-
-  if (simNodes.length === 1) {
-    return new Map([[simNodes[0].id, { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 }]])
-  }
-
-  let minX = Infinity
-  let maxX = -Infinity
-  let minY = Infinity
-  let maxY = -Infinity
-
-  simNodes.forEach((node) => {
-    minX = Math.min(minX, node.x)
-    maxX = Math.max(maxX, node.x)
-    minY = Math.min(minY, node.y)
-    maxY = Math.max(maxY, node.y)
-  })
-
-  const spanX = Math.max(maxX - minX, 1)
-  const spanY = Math.max(maxY - minY, 1)
-  const positions = new Map<string, { x: number; y: number }>()
-  simNodes.forEach((node) => {
-    positions.set(node.id, {
-      x: 80 + ((node.x - minX) / spanX) * (CANVAS_WIDTH - 160),
-      y: 80 + ((node.y - minY) / spanY) * (CANVAS_HEIGHT - 160),
+    crossLinks.forEach((link) => {
+      if (visibleIds.has(link.source) && visibleIds.has(link.target)) {
+        out.push({
+          key: `x-${link.source}-${link.target}-${link.type}`,
+          sourceId: link.source,
+          targetId: link.target,
+          type: link.type,
+        })
+      }
     })
-  })
-  return positions
-}
+    return out
+  }, [visibleIds, expanded, childMap, crossLinks])
+
+  const edges = useMemo((): FlowEdgeInfo[] => {
+    const out: FlowEdgeInfo[] = []
+    visibleLinks.forEach((link) => {
+      const sourcePosition = positions.get(link.sourceId)
+      const targetPosition = positions.get(link.targetId)
+      if (!sourcePosition || !targetPosition) return
+
+      const cacheKey = `${link.key}:${sourcePosition.x}:${sourcePosition.y}:${targetPosition.x}:${targetPosition.y}`
+      const cached = pathCache.current.get(cacheKey)
+      if (cached) {
+        out.push({ key: link.key, type: link.type, ...cached })
+        return
+      }
+
+      const x1 = sourcePosition.x + NODE_W
+      const y1 = sourcePosition.y + NODE_H / 2
+      const x2 = targetPosition.x
+      const y2 = targetPosition.y + NODE_H / 2
+      const dx = Math.max(40, (x2 - x1) * 0.45)
+      const d = `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`
+      const mx = (x1 + x2) / 2
+      const my = (y1 + y2) / 2
+      const next = { d, mx, my }
+      pathCache.current.set(cacheKey, next)
+      out.push({ key: link.key, type: link.type, ...next })
+    })
+    return out
+  }, [visibleLinks, positions])
+
+  const sortedEdges = useMemo(
+    () =>
+      [...edges].sort((a, b) => {
+        if (a.key === selectedEdge) return 1
+        if (b.key === selectedEdge) return -1
+        if (a.key === hoverEdge) return 1
+        if (b.key === hoverEdge) return -1
+        return a.type === 'CONTAINS' ? -1 : 1
+      }),
+    [edges, selectedEdge, hoverEdge],
+  )
+
+  const fitView = useCallback(() => {
+    if (!visibleIds.size || !positions.size) {
+      setPan({ x: 0, y: 0 })
+      setZoom(0.65)
+      return
+    }
+
+    let minX = Number.POSITIVE_INFINITY
+    let minY = Number.POSITIVE_INFINITY
+    let maxX = Number.NEGATIVE_INFINITY
+    let maxY = Number.NEGATIVE_INFINITY
+
+    visibleIds.forEach((id) => {
+      const position = positions.get(id)
+      if (!position) return
+      minX = Math.min(minX, position.x)
+      minY = Math.min(minY, position.y)
+      maxX = Math.max(maxX, position.x + NODE_W)
+      maxY = Math.max(maxY, position.y + NODE_H)
+    })
+
+    if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+      setPan({ x: 0, y: 0 })
+      setZoom(0.65)
+      return
+    }
+
+    const graphWidth = maxX - minX || NODE_W
+    const graphHeight = maxY - minY || NODE_H
+    const nextZoom = clamp(Math.min((width - 160) / graphWidth, (height - 140) / graphHeight), 0.12, 1.4)
+    const centerX = minX + graphWidth / 2
+    const centerY = minY + graphHeight / 2
+    setZoom(nextZoom)
+    setPan({ x: -centerX, y: -centerY })
+  }, [height, positions, visibleIds, width])
+
+  useEffect(() => {
+    if (positions.size === 0 || autoFitDone.current) return
+    fitView()
+    autoFitDone.current = true
+  }, [positions, fitView])
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      zoomIn: () => setZoom((value) => clamp(value * 1.12, 0.04, 4)),
+      zoomOut: () => setZoom((value) => clamp(value * 0.9, 0.04, 4)),
+      fitView,
+    }),
+    [fitView],
+  )
+
+  useEffect(() => {
+    const element = svgRef.current
+    if (!element) return
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault()
+      setZoom((value) => clamp(value * (event.deltaY > 0 ? 0.92 : 1.08), 0.04, 4))
+    }
+    element.addEventListener('wheel', onWheel, { passive: false })
+    return () => element.removeEventListener('wheel', onWheel)
+  }, [])
+
+  const onBackgroundDown = useCallback(
+    (event: React.MouseEvent) => {
+      onSelectNode(null)
+      isPanning.current = true
+      panStart.current = { x: event.clientX, y: event.clientY, px: pan.x, py: pan.y }
+    },
+    [onSelectNode, pan],
+  )
+
+  const onMouseMove = useCallback(
+    (event: React.MouseEvent) => {
+      if (isPanning.current) {
+        setPan({
+          x: panStart.current.px + (event.clientX - panStart.current.x) / zoom,
+          y: panStart.current.py + (event.clientY - panStart.current.y) / zoom,
+        })
+      }
+      if (dragId !== null && dragStart.current) {
+        const dx = (event.clientX - dragStart.current.mx) / zoom
+        const dy = (event.clientY - dragStart.current.my) / zoom
+        setPositions((current) => {
+          const next = new Map(current)
+          next.set(dragId, { x: dragStart.current!.nx + dx, y: dragStart.current!.ny + dy })
+          return next
+        })
+      }
+    },
+    [dragId, zoom],
+  )
+
+  const onMouseUp = useCallback(() => {
+    isPanning.current = false
+    setDragId(null)
+    dragStart.current = null
+  }, [])
+
+  const grabNode = useCallback(
+    (id: number, event: React.MouseEvent) => {
+      event.stopPropagation()
+      isPanning.current = false
+      const position = positions.get(id)
+      if (!position) return
+      setDragId(id)
+      dragStart.current = { mx: event.clientX, my: event.clientY, nx: position.x, ny: position.y }
+    },
+    [positions],
+  )
+
+  const toggleExpand = useCallback((id: number, event: React.MouseEvent) => {
+    event.stopPropagation()
+    setExpanded((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
+  const hasChildren = useCallback((id: number) => (childMap.get(id) || []).some((childId) => nodeMap.has(childId)), [childMap, nodeMap])
+  const childCount = useCallback((id: number) => (childMap.get(id) || []).filter((childId) => nodeMap.has(childId)).length, [childMap, nodeMap])
+
+  return (
+    <svg
+      ref={svgRef}
+      width={width}
+      height={height}
+      className="atlas-flow-svg"
+      style={{ background: isDark ? '#020202' : '#f5f5f7', cursor: isPanning.current ? 'grabbing' : 'grab' }}
+      onMouseDown={onBackgroundDown}
+      onMouseMove={onMouseMove}
+      onMouseUp={onMouseUp}
+      onMouseLeave={onMouseUp}
+    >
+      <defs>
+        <pattern
+          id="atlas-flow-grid"
+          width={40}
+          height={40}
+          patternUnits="userSpaceOnUse"
+          patternTransform={`translate(${pan.x * zoom + width / 2},${pan.y * zoom + height / 2}) scale(${zoom})`}
+        >
+          <path d="M 40 0 L 0 0 0 40" fill="none" stroke={isDark ? '#0d0d14' : '#e5e5ea'} strokeWidth={0.6} />
+        </pattern>
+        <filter id="atlas-edgeglow" x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur stdDeviation="3" result="blur" />
+          <feComposite in="SourceGraphic" in2="blur" operator="over" />
+        </filter>
+      </defs>
+
+      <rect width={width} height={height} fill="url(#atlas-flow-grid)" style={{ pointerEvents: 'none' }} />
+
+      <g transform={`translate(${width / 2 + pan.x * zoom},${height / 2 + pan.y * zoom}) scale(${zoom})`} style={{ pointerEvents: 'auto' }}>
+        {sortedEdges.map((edge) => {
+          const hovered = edge.key === hoverEdge
+          const selected = edge.key === selectedEdge
+          const contains = edge.type === 'CONTAINS'
+          const baseColor = edgeColors[edge.type] || '#555'
+          const color = selected ? '#fb923c' : hovered ? '#f59e0b' : contains ? (isDark ? '#4a4a5a' : '#9a9aaa') : baseColor
+          const strokeWidth = selected ? 3 : hovered ? 2.5 : contains ? 1.6 : 2
+          const opacity = selected ? 1 : hovered ? 0.95 : contains ? 0.7 : 0.85
+
+          return (
+            <g key={edge.key}>
+              <path
+                d={edge.d}
+                fill="none"
+                stroke="transparent"
+                strokeWidth={14}
+                onMouseEnter={() => setHoverEdge(edge.key)}
+                onMouseLeave={() => setHoverEdge(null)}
+                onClick={() => setSelectedEdge((value) => (value === edge.key ? null : edge.key))}
+                style={{ cursor: 'pointer' }}
+              >
+                <title>{edge.type}</title>
+              </path>
+              <path
+                d={edge.d}
+                fill="none"
+                stroke={color}
+                strokeWidth={strokeWidth}
+                opacity={opacity}
+                strokeLinecap="round"
+                filter={selected || hovered ? 'url(#atlas-edgeglow)' : undefined}
+                strokeDasharray={contains ? undefined : '6 3'}
+                style={{ pointerEvents: 'none', transition: 'stroke-width .15s, opacity .15s' }}
+              />
+              {(hovered || selected) && !contains && (
+                <g style={{ pointerEvents: 'none' }}>
+                  <rect
+                    x={edge.mx - 34}
+                    y={edge.my - 10}
+                    width={68}
+                    height={20}
+                    rx={4}
+                    fill={isDark ? '#0a0a12' : '#ffffff'}
+                    stroke={color}
+                    strokeWidth={0.8}
+                    opacity={0.92}
+                  />
+                  <text
+                    x={edge.mx}
+                    y={edge.my + 1}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fontSize={9}
+                    fontWeight={700}
+                    fontFamily="Inter,system-ui,sans-serif"
+                    fill={color}
+                    style={{ letterSpacing: '0.06em' }}
+                  >
+                    {edge.type}
+                  </text>
+                </g>
+              )}
+            </g>
+          )
+        })}
+
+        {Array.from(visibleIds).map((id) => {
+          const node = nodeMap.get(id)
+          const position = positions.get(id)
+          if (!node || !position) return null
+
+          const color = nodeColors[node.type] || '#78909c'
+          const hovered = id === hoverNode
+          const expandedNode = expanded.has(id)
+          const children = hasChildren(id)
+          const totalChildren = childCount(id)
+          const active = selectedId === id
+
+          return (
+            <g
+              key={id}
+              transform={`translate(${position.x},${position.y})`}
+              onMouseDown={(event) => grabNode(id, event)}
+              onMouseEnter={() => setHoverNode(id)}
+              onMouseLeave={() => setHoverNode(null)}
+              onClick={(event) => {
+                event.stopPropagation()
+                onSelectNode(id)
+              }}
+              style={{ cursor: dragId === id ? 'grabbing' : 'pointer' }}
+            >
+              {hovered && (
+                <rect
+                  x={-3}
+                  y={-3}
+                  width={NODE_W + 6}
+                  height={NODE_H + 6}
+                  rx={9}
+                  fill="none"
+                  stroke={color}
+                  strokeWidth={1.5}
+                  opacity={0.25}
+                  filter="url(#atlas-edgeglow)"
+                />
+              )}
+              <rect
+                width={NODE_W}
+                height={NODE_H}
+                rx={6}
+                fill={hovered ? (isDark ? '#181822' : '#f0f0f5') : (isDark ? '#0e0e14' : '#ffffff')}
+                stroke={active ? '#f8fafc' : color}
+                strokeWidth={active ? 1.9 : hovered ? 1.8 : 1}
+                opacity={0.96}
+              />
+              <circle cx={0} cy={NODE_H / 2} r={SLOT_R} fill={color} opacity={0.5} />
+              <circle cx={NODE_W} cy={NODE_H / 2} r={SLOT_R} fill={color} opacity={0.5} />
+              <text
+                x={12}
+                y={16}
+                fontSize={12}
+                fontFamily="Inter,system-ui,sans-serif"
+                fontWeight={600}
+                fill={isDark ? '#d4d4d8' : '#1a1a1a'}
+                style={{ pointerEvents: 'none' }}
+              >
+                {node.name.length > 22 ? `${node.name.slice(0, 20)}…` : node.name}
+              </text>
+              <text
+                x={12}
+                y={33}
+                fontSize={8}
+                fontFamily="Inter,system-ui,sans-serif"
+                fontWeight={700}
+                fill={color}
+                opacity={0.55}
+                style={{ pointerEvents: 'none', letterSpacing: '0.08em' }}
+              >
+                {node.type.toUpperCase()}
+              </text>
+              {children && (
+                <g onClick={(event) => toggleExpand(id, event)} style={{ cursor: 'pointer' }}>
+                  <rect
+                    x={NODE_W - 30}
+                    y={(NODE_H - 18) / 2}
+                    width={24}
+                    height={18}
+                    rx={4}
+                    fill={expandedNode ? `${color}22` : `${color}11`}
+                    stroke={color}
+                    strokeWidth={0.5}
+                  />
+                  <text
+                    x={NODE_W - 18}
+                    y={NODE_H / 2 + 1}
+                    fontSize={11}
+                    fontWeight={700}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fill={color}
+                    style={{ pointerEvents: 'none' }}
+                  >
+                    {expandedNode ? '−' : `+${totalChildren}`}
+                  </text>
+                </g>
+              )}
+            </g>
+          )
+        })}
+      </g>
+
+      {orphanIds.size > 0 && (
+        <g transform={`translate(${width - 204}, 18)`} onClick={() => setShowOrphans((value) => !value)} style={{ cursor: 'pointer' }}>
+          <rect
+            width={186}
+            height={28}
+            rx={14}
+            fill={showOrphans ? (isDark ? '#1e1e2e' : '#e8e8f0') : (isDark ? '#111118' : '#f0f0f5')}
+            stroke={showOrphans ? '#f59e0b55' : (isDark ? '#ffffff18' : '#00000018')}
+            strokeWidth={1}
+          />
+          <text
+            x={93}
+            y={15}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            fontSize={10}
+            fontWeight={700}
+            fontFamily="Inter,system-ui,sans-serif"
+            fill={showOrphans ? '#f59e0b' : (isDark ? '#666' : '#888')}
+            style={{ letterSpacing: '0.06em' }}
+          >
+            {showOrphans ? `HIDE ${orphanIds.size} EXTERNAL` : `SHOW ${orphanIds.size} EXTERNAL`}
+          </text>
+        </g>
+      )}
+    </svg>
+  )
+})
 
 export function Atlas3DPage() {
-  const svgRef = useRef<SVGSVGElement>(null)
-  const interactionRef = useRef<{ mode: 'pan' | 'drag'; id?: string; x: number; y: number } | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [overview, setOverview] = useState<Overview | null>(null)
-  const [tree, setTree] = useState<TreeNode | null>(null)
-  const [archNodes, setArchNodes] = useState<ArchNode[]>([])
-  const [archEdges, setArchEdges] = useState<ArchEdge[]>([])
-  const [cognitiveItems, setCognitiveItems] = useState<CognitiveLoadItem[]>([])
-  const [risks, setRisks] = useState<RiskItem[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [hoveredId, setHoveredId] = useState<string | null>(null)
-  const [search, setSearch] = useState('')
-  const [localMode, setLocalMode] = useState(false)
-  const [depth, setDepth] = useState(1)
-  const [showOrphans, setShowOrphans] = useState(false)
-  const [showLabels, setShowLabels] = useState(true)
-  const [showArrows, setShowArrows] = useState(false)
-  const [showSettings, setShowSettings] = useState(false)
-  const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, k: 1 })
-  const [forces, setForces] = useState({ center: 1, repel: 260, link: 0.18, distance: 100, nodeScale: 1, linkWidth: 1.4, textFade: 0.22 })
-  const [positions, setPositions] = useState<Map<string, { x: number; y: number }>>(new Map())
-  const [sourceFiles, setSourceFiles] = useState<ModuleSourceFile[]>([])
-  const [symbols, setSymbols] = useState<SymbolItem[]>([])
-  const [activeFileIdx, setActiveFileIdx] = useState(0)
-  const [loadingDetails, setLoadingDetails] = useState(false)
-  const codeMirrorRef = useRef<HTMLDivElement>(null)
-  const cmInstanceRef = useRef<any>(null)
+  const [baseData, setBaseData] = useState<FlowData>({ nodes: [], links: [] })
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [isDark, setIsDark] = useState(true)
+  const [legendCollapsed, setLegendCollapsed] = useState(false)
+  const [showFilters, setShowFilters] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [visibleNodeTypes, setVisibleNodeTypes] = useState<Set<string>>(() => new Set(Object.keys(DEFAULT_NODE_COLORS)))
+  const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null)
+  const [viewport, setViewport] = useState({ width: 1200, height: 760 })
+  const flowRef = useRef<FlowHandle | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    ;(async () => {
+
+    const load = async () => {
       try {
-        const [overviewRes, treeRes, graphRes, cognitiveRes, risksRes] = await Promise.all([
+        setLoading(true)
+        const [nextOverview, tree, architecture] = await Promise.all([
           api.overview(),
           api.architectureTree(),
           api.architecture(),
-          api.cognitiveLoad(),
-          api.risks(),
         ])
+
         if (cancelled) return
-        setOverview(overviewRes)
-        setTree(treeRes)
-        setArchNodes(graphRes.nodes)
-        setArchEdges(graphRes.edges)
-        setCognitiveItems(cognitiveRes.items || [])
-        setRisks(risksRes.items || [])
-        setError(null)
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Atlas failed to load')
+        setOverview(nextOverview)
+        setBaseData(buildFlowData(tree, architecture.nodes, architecture.edges))
+        setError('')
+      } catch (nextError) {
+        if (cancelled) return
+        setError(nextError instanceof Error ? nextError.message : 'Failed to load atlas graph')
       } finally {
         if (!cancelled) setLoading(false)
       }
-    })()
+    }
+
+    load()
     return () => {
       cancelled = true
     }
   }, [])
 
-  const cognitiveMap = useMemo(() => new Map(cognitiveItems.map((item) => [item.module, item])), [cognitiveItems])
-  const baseDataset = useMemo(() => makeDataset(tree, archNodes, archEdges, cognitiveMap), [tree, archNodes, archEdges, cognitiveMap])
-  const activeId = selectedId || hoveredId || baseDataset.nodes[0]?.id || null
-  const step1 = useMemo(() => filteredGraph(baseDataset, search, showOrphans), [baseDataset, search, showOrphans])
-  const visibleDataset = useMemo(
-    () => (localMode ? localGraph(step1, activeId, depth) : step1),
-    [step1, localMode, activeId, depth],
+  useEffect(() => {
+    const updateViewport = () => {
+      const innerHeight = window.innerHeight - 48
+      setViewport({ width: window.innerWidth - 280, height: Math.max(620, innerHeight) })
+    }
+    updateViewport()
+    window.addEventListener('resize', updateViewport)
+    return () => window.removeEventListener('resize', updateViewport)
+  }, [])
+
+  const filteredData = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    const keepNodes = baseData.nodes.filter((node) => {
+      if (!visibleNodeTypes.has(node.type)) return false
+      if (!query) return true
+      return node.name.toLowerCase().includes(query) || node.path.toLowerCase().includes(query)
+    })
+    const keepIds = new Set(keepNodes.map((node) => node.id))
+    const keepEdges = baseData.links.filter((link) => keepIds.has(link.source) && keepIds.has(link.target))
+    return { nodes: keepNodes, links: keepEdges }
+  }, [baseData, searchQuery, visibleNodeTypes])
+
+  useEffect(() => {
+    if (selectedNodeId == null) return
+    if (!filteredData.nodes.some((node) => node.id === selectedNodeId)) setSelectedNodeId(null)
+  }, [filteredData.nodes, selectedNodeId])
+
+  const selectedNode = useMemo(
+    () => filteredData.nodes.find((node) => node.id === selectedNodeId) || null,
+    [filteredData.nodes, selectedNodeId],
   )
 
-  useEffect(() => {
-    const nextId = visibleDataset.nodes.find((node) => node.id === selectedId)?.id || visibleDataset.nodes[0]?.id || null
-    setSelectedId(nextId)
-  }, [visibleDataset, selectedId])
-
-  useEffect(() => {
-    setPositions(runLayout(visibleDataset, forces))
-  }, [visibleDataset, forces.center, forces.repel, forces.link, forces.distance])
-
-  useEffect(() => {
-    const selectedNode = visibleDataset.nodes.find((node) => node.id === selectedId)
-    if (!selectedNode) {
-      setSourceFiles([])
-      setSymbols([])
-      return
-    }
-
-    let cancelled = false
-    setLoadingDetails(true)
-    Promise.all([api.moduleSource(selectedNode.modulePath), api.moduleSymbols(selectedNode.modulePath)])
-      .then(([sourceRes, symbolRes]) => {
-        if (cancelled) return
-        const files = sourceRes.files || []
-        setSourceFiles(files)
-        if (selectedNode.kind === 'file') {
-          setSymbols((symbolRes.symbols || []).filter((item) => item.file_path === selectedNode.path))
-          const idx = files.findIndex((file) => file.path === selectedNode.path)
-          setActiveFileIdx(idx >= 0 ? idx : 0)
-        } else {
-          setSymbols(symbolRes.symbols || [])
-          setActiveFileIdx(0)
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setSourceFiles([])
-          setSymbols([])
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingDetails(false)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [selectedId, visibleDataset.nodes])
-
-  useEffect(() => {
-    const file = sourceFiles[activeFileIdx]
-    if (!file) return
-    const timer = window.setTimeout(() => {
-      const root = codeMirrorRef.current
-      if (!root) return
-      if (cmInstanceRef.current) {
-        cmInstanceRef.current.toTextArea()
-        cmInstanceRef.current = null
-      }
-      while (root.firstChild) root.removeChild(root.firstChild)
-      const textarea = document.createElement('textarea')
-      root.appendChild(textarea)
-      const CodeMirror = (window as any).CodeMirror
-      if (!CodeMirror) return
-      cmInstanceRef.current = CodeMirror.fromTextArea(textarea, {
-        value: file.content,
-        mode: file.language || null,
-        readOnly: true,
-        lineNumbers: true,
-        theme: 'atlas-cosmic',
-      })
-      cmInstanceRef.current.setValue(file.content)
-    }, 40)
-    return () => window.clearTimeout(timer)
-  }, [sourceFiles, activeFileIdx])
-
-  const activeNode = visibleDataset.nodes.find((node) => node.id === activeId) || null
-  const focusNodes = [...visibleDataset.nodes].sort((a, b) => b.degree - a.degree).slice(0, 5)
-  const topRisks = risks.slice(0, 2)
-  const connected = useMemo(() => {
-    const set = new Set<string>()
-    if (!activeId) return set
-    set.add(activeId)
-    visibleDataset.edges.forEach((edge) => {
-      if (edge.source === activeId) set.add(edge.target)
-      if (edge.target === activeId) set.add(edge.source)
+  const toggleNodeType = (type: string) => {
+    setVisibleNodeTypes((current) => {
+      const next = new Set(current)
+      if (next.has(type)) next.delete(type)
+      else next.add(type)
+      return next
     })
-    return set
-  }, [visibleDataset, activeId])
-
-  const nodeById = useMemo(() => {
-    const map = new Map<string, GraphNode>()
-    visibleDataset.nodes.forEach((node) => map.set(node.id, node))
-    return map
-  }, [visibleDataset])
-
-  const screenToWorld = (clientX: number, clientY: number) => {
-    const rect = svgRef.current?.getBoundingClientRect()
-    if (!rect) return { x: 0, y: 0 }
-    const sx = ((clientX - rect.left) / rect.width) * CANVAS_WIDTH
-    const sy = ((clientY - rect.top) / rect.height) * CANVAS_HEIGHT
-    return {
-      x: (sx - viewport.x) / viewport.k,
-      y: (sy - viewport.y) / viewport.k,
-    }
-  }
-
-  const onWheel = (event: React.WheelEvent<SVGSVGElement>) => {
-    event.preventDefault()
-    const rect = svgRef.current?.getBoundingClientRect()
-    if (!rect) return
-    const px = ((event.clientX - rect.left) / rect.width) * CANVAS_WIDTH
-    const py = ((event.clientY - rect.top) / rect.height) * CANVAS_HEIGHT
-    const nextK = clamp(viewport.k * (event.deltaY > 0 ? 0.92 : 1.08), 0.35, 3.2)
-    setViewport((current) => ({
-      x: px - ((px - current.x) / current.k) * nextK,
-      y: py - ((py - current.y) / current.k) * nextK,
-      k: nextK,
-    }))
-  }
-
-  const onPointerDownBackground = (event: React.PointerEvent<SVGSVGElement>) => {
-    if (event.target !== event.currentTarget) return
-    interactionRef.current = { mode: 'pan', x: event.clientX, y: event.clientY }
-  }
-
-  const onPointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
-    const interaction = interactionRef.current
-    if (!interaction) return
-    if (interaction.mode === 'pan') {
-      const dx = ((event.clientX - interaction.x) / (svgRef.current?.getBoundingClientRect().width || 1)) * CANVAS_WIDTH
-      const dy = ((event.clientY - interaction.y) / (svgRef.current?.getBoundingClientRect().height || 1)) * CANVAS_HEIGHT
-      interactionRef.current = { ...interaction, x: event.clientX, y: event.clientY }
-      setViewport((current) => ({ ...current, x: current.x + dx, y: current.y + dy }))
-      return
-    }
-    if (interaction.mode === 'drag' && interaction.id) {
-      const world = screenToWorld(event.clientX, event.clientY)
-      setPositions((current) => new Map(current).set(interaction.id!, world))
-    }
-  }
-
-  const clearInteraction = () => {
-    interactionRef.current = null
-  }
-
-  const onNodePointerDown = (event: React.PointerEvent<SVGGElement>, id: string) => {
-    event.stopPropagation()
-    interactionRef.current = { mode: 'drag', id, x: event.clientX, y: event.clientY }
-  }
-
-  const resetView = () => {
-    setViewport({ x: 0, y: 0, k: 1 })
-    setPositions(runLayout(visibleDataset, forces))
-  }
-
-  const jumpToSymbol = (symbol: SymbolItem) => {
-    const fileIdx = sourceFiles.findIndex((file) => file.path === symbol.file_path)
-    if (fileIdx >= 0) setActiveFileIdx(fileIdx)
-    window.setTimeout(() => {
-      cmInstanceRef.current?.scrollIntoView({ line: Math.max(symbol.line_start - 1, 0), ch: 0 }, 120)
-      cmInstanceRef.current?.setCursor({ line: Math.max(symbol.line_start - 1, 0), ch: 0 })
-    }, 140)
   }
 
   return (
-    <div className="atlas-shell">
-      {loading ? (
-        <div className="atlas-loading">Loading graph…</div>
-      ) : error ? (
-        <div className="error">{error}</div>
-      ) : (
-        <div className="atlas-cosmic-shell">
-          <div className="atlas-cosmic-header">
-            <div className="atlas-cosmic-kicker">// cosmic_project_atlas</div>
-            <div className="atlas-cosmic-title">The Atlas</div>
-            <div className="atlas-cosmic-meta">
-              <span>{baseDataset.source === 'dependencies' ? 'dependency graph' : 'tree graph'}</span>
-              <span>{visibleDataset.nodes.length} nodes</span>
-              <span>{visibleDataset.edges.length} links</span>
-            </div>
-          </div>
-
-          <div className="atlas-cosmic-toolbar">
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search files or modules"
-              className="atlas-search atlas-search--cosmic"
-            />
-            <button className={`atlas-toggle${localMode ? ' atlas-toggle--active' : ''}`} onClick={() => setLocalMode((value) => !value)}>
-              Local
-            </button>
-            <button className="atlas-toggle" onClick={resetView}>Reset</button>
-            <button className={`atlas-toggle${showSettings ? ' atlas-toggle--active' : ''}`} onClick={() => setShowSettings((value) => !value)}>
-              Tuning
-            </button>
-          </div>
-
-          {showSettings && (
-            <div className="atlas-cosmic-settings">
-              {localMode && (
-                <label className="atlas-inline-control">
-                  <span>Depth</span>
-                  <input type="range" min="1" max="4" value={depth} onChange={(event) => setDepth(Number(event.target.value))} />
-                  <strong>{depth}</strong>
-                </label>
-              )}
-              <label className="atlas-inline-check">
-                <input type="checkbox" checked={showOrphans} onChange={(event) => setShowOrphans(event.target.checked)} />
-                <span>Orphans</span>
-              </label>
-              <label className="atlas-inline-check">
-                <input type="checkbox" checked={showLabels} onChange={(event) => setShowLabels(event.target.checked)} />
-                <span>Labels</span>
-              </label>
-              <label className="atlas-inline-check">
-                <input type="checkbox" checked={showArrows} onChange={(event) => setShowArrows(event.target.checked)} />
-                <span>Arrows</span>
-              </label>
-              <label className="atlas-range">
-                <span>Center</span>
-                <input type="range" min="0.2" max="3" step="0.1" value={forces.center} onChange={(event) => setForces((current) => ({ ...current, center: Number(event.target.value) }))} />
-              </label>
-              <label className="atlas-range">
-                <span>Repel</span>
-                <input type="range" min="40" max="600" step="10" value={forces.repel} onChange={(event) => setForces((current) => ({ ...current, repel: Number(event.target.value) }))} />
-              </label>
-              <label className="atlas-range">
-                <span>Link</span>
-                <input type="range" min="0.05" max="1" step="0.01" value={forces.link} onChange={(event) => setForces((current) => ({ ...current, link: Number(event.target.value) }))} />
-              </label>
-              <label className="atlas-range">
-                <span>Distance</span>
-                <input type="range" min="40" max="180" step="5" value={forces.distance} onChange={(event) => setForces((current) => ({ ...current, distance: Number(event.target.value) }))} />
-              </label>
-            </div>
-          )}
-
-          <section className="atlas-cosmic-graph">
-            <div className="atlas-graph-frame atlas-graph-frame--obsidian">
-              <svg
-                ref={svgRef}
-                className="atlas-graph-svg"
-                viewBox={`0 0 ${CANVAS_WIDTH} ${CANVAS_HEIGHT}`}
-                onWheel={onWheel}
-                onPointerDown={onPointerDownBackground}
-                onPointerMove={onPointerMove}
-                onPointerUp={clearInteraction}
-                onPointerLeave={clearInteraction}
-              >
-                <defs>
-                  <marker id="atlas-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
-                    <path d="M0,0 L7,3.5 L0,7 z" fill="rgba(103, 232, 249, 0.8)" />
-                  </marker>
-                </defs>
-                <g transform={`translate(${viewport.x} ${viewport.y}) scale(${viewport.k})`}>
-                  {visibleDataset.edges.map((edge) => {
-                    const source = positions.get(edge.source)
-                    const target = positions.get(edge.target)
-                    if (!source || !target) return null
-                    const active = activeId && (edge.source === activeId || edge.target === activeId)
-                    const faded = activeId && !active
-                    return (
-                      <line
-                        key={edge.id}
-                        x1={source.x}
-                        y1={source.y}
-                        x2={target.x}
-                        y2={target.y}
-                        className={`atlas-edge${active ? ' atlas-edge--active' : ''}${faded ? ' atlas-edge--faded' : ''}`}
-                        strokeWidth={forces.linkWidth}
-                        markerEnd={showArrows && edge.type === 'import' ? 'url(#atlas-arrow)' : undefined}
-                      />
-                    )
-                  })}
-
-                  {visibleDataset.nodes.map((node) => {
-                    const pos = positions.get(node.id)
-                    if (!pos) return null
-                    const active = activeId === node.id
-                    const adjacent = connected.has(node.id)
-                    const faded = activeId && !adjacent
-                    const radius = node.size * forces.nodeScale
-                    const labelOpacity = showLabels ? (active || adjacent ? 1 : 1 - forces.textFade) : 0
-                    return (
-                      <g
-                        key={node.id}
-                        transform={`translate(${pos.x}, ${pos.y})`}
-                        className={`atlas-node${active ? ' atlas-node--active' : ''}${faded ? ' atlas-node--faded' : ''}`}
-                        onPointerDown={(event) => onNodePointerDown(event, node.id)}
-                        onMouseEnter={() => setHoveredId(node.id)}
-                        onMouseLeave={() => setHoveredId((current) => (current === node.id ? null : current))}
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          setSelectedId(node.id)
-                        }}
-                      >
-                        <circle className="atlas-node-ring" r={radius + 5} fill="transparent" stroke={getDebtColor(node.debt)} strokeOpacity="0.15" />
-                        <circle r={radius} fill={GROUP_COLORS[node.group] || GROUP_COLORS.root} stroke={active ? '#ffffff' : getDebtColor(node.debt)} strokeWidth={active ? 2 : 1.1} />
-                        {showLabels && (
-                          <text y={radius + 16} textAnchor="middle" style={{ opacity: labelOpacity }}>
-                            {node.label}
-                          </text>
-                        )}
-                      </g>
-                    )
-                  })}
-                </g>
-              </svg>
-            </div>
-          </section>
-
-          <aside data-augmented-ui="" className={`atlas-info-panel atlas-info-panel--bottom${activeNode ? ' atlas-info-panel--locked' : ''}`}>
-            <div className="atlas-info-eyebrow">{activeNode ? 'Persistent link established' : 'Reading project body…'}</div>
-            <section className="atlas-card atlas-card--compact atlas-card--transparent">
-              {activeNode ? (
-                <>
-                  <h2 className="atlas-node-title">{activeNode.path}</h2>
-                  <div className="atlas-inspector-grid">
-                    <div>
-                      <span>Type</span>
-                      <strong>{activeNode.kind}</strong>
-                    </div>
-                    <div>
-                      <span>Group</span>
-                      <strong>{activeNode.group}</strong>
-                    </div>
-                    <div>
-                      <span>Degree</span>
-                      <strong>{activeNode.degree}</strong>
-                    </div>
-                    <div>
-                      <span>Debt</span>
-                      <strong style={{ color: getDebtColor(activeNode.debt) }}>{Math.round(activeNode.debt)}%</strong>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <div className="muted">No node selected.</div>
-              )}
-            </section>
-
-            <section className="atlas-card atlas-card--compact atlas-card--transparent">
-              <div className="atlas-panel-head"><div className="atlas-panel-title">Neighbors</div></div>
-              <div className="atlas-chip-list">
-                {activeNode ? (
-                  visibleDataset.edges
-                    .filter((edge) => edge.source === activeNode.id || edge.target === activeNode.id)
-                    .map((edge) => {
-                      const otherId = edge.source === activeNode.id ? edge.target : edge.source
-                      const other = nodeById.get(otherId)
-                      if (!other) return null
-                      return (
-                        <button key={edge.id} className="atlas-chip" onClick={() => setSelectedId(other.id)}>
-                          {other.label}
-                        </button>
-                      )
-                    })
-                ) : (
-                  <span className="muted">No neighbors.</span>
-                )}
-              </div>
-            </section>
-
-            <section className="atlas-card atlas-card--compact atlas-card--transparent">
-              <div className="atlas-panel-head"><div className="atlas-panel-title">Symbols</div></div>
-              <div className="atlas-symbol-list">
-                {symbols.length > 0 ? (
-                  symbols.slice(0, 16).map((symbol) => (
-                    <button key={`${symbol.file_path}-${symbol.name}`} className="atlas-symbol-row" onClick={() => jumpToSymbol(symbol)}>
-                      <span>{symbol.name}</span>
-                      <small>{symbol.kind}</small>
-                    </button>
-                  ))
-                ) : (
-                  <div className="muted">{loadingDetails ? 'Loading symbols…' : 'No symbols available.'}</div>
-                )}
-              </div>
-            </section>
-
-            <section className="atlas-card atlas-card--compact atlas-card--transparent atlas-code-card">
-              <div className="atlas-panel-head">
-                <div className="atlas-panel-title">Code</div>
-                <div className="atlas-panel-caption">{loadingDetails ? 'loading…' : ''}</div>
-              </div>
-              {sourceFiles.length > 0 ? (
-                <>
-                  <div className="atlas-file-tabs">
-                    {sourceFiles.map((file, index) => (
-                      <button
-                        key={file.path}
-                        className={`atlas-file-tab${index === activeFileIdx ? ' atlas-file-tab--active' : ''}`}
-                        onClick={() => setActiveFileIdx(index)}
-                      >
-                        {getLeafLabel(file.path)}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="atlas-code-container" ref={codeMirrorRef} />
-                </>
-              ) : (
-                <div className="atlas-code-empty">No source preview available.</div>
-              )}
-            </section>
-          </aside>
+    <section className={`atlas-flow-page${isDark ? ' atlas-flow-page--dark' : ''}`}>
+      <div className="atlas-flow-topbar">
+        <div className="atlas-flow-brand">
+          <div className="atlas-flow-brand-kicker">{overview?.meta?.project || 'copyclip'}</div>
+          <div className="atlas-flow-brand-title">Atlas Flowchart</div>
         </div>
-      )}
-    </div>
+
+        <div className="atlas-flow-toolbar">
+          <button className="atlas-flow-pill atlas-flow-icon-pill" onClick={() => setIsDark((value) => !value)} title="Toggle theme">
+            {isDark ? '☼' : '◐'}
+          </button>
+
+          <div className="atlas-flow-pill atlas-flow-mode-pill">
+            <span className="atlas-flow-mode-dot" />
+            <span>FLOWCHART</span>
+          </div>
+
+          <input
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            className="atlas-flow-search"
+            placeholder="Search nodes"
+          />
+
+          <a className="atlas-flow-pill atlas-flow-link-pill" href={GITHUB_URL} target="_blank" rel="noreferrer">
+            ★ STAR ON GITHUB
+          </a>
+        </div>
+      </div>
+
+      <div className="atlas-flow-stage">
+        <div className="atlas-flow-controls">
+          <button type="button" onClick={() => flowRef.current?.zoomIn()} title="Zoom in">＋</button>
+          <button type="button" onClick={() => flowRef.current?.fitView()} title="Fit view">□</button>
+          <button type="button" onClick={() => flowRef.current?.zoomOut()} title="Zoom out">－</button>
+        </div>
+
+        {loading ? (
+          <div className="atlas-flow-state">Loading graph…</div>
+        ) : error ? (
+          <div className="atlas-flow-state atlas-flow-state--error">{error}</div>
+        ) : (
+          <FlowchartCanvas
+            ref={flowRef}
+            data={filteredData}
+            width={viewport.width}
+            height={viewport.height}
+            nodeColors={DEFAULT_NODE_COLORS}
+            edgeColors={DEFAULT_EDGE_COLORS}
+            isDark={isDark}
+            selectedId={selectedNodeId}
+            onSelectNode={setSelectedNodeId}
+          />
+        )}
+
+        {selectedNode && (
+          <div className="atlas-flow-selection">
+            <span className="atlas-flow-selection-type">{selectedNode.type}</span>
+            <strong>{selectedNode.name}</strong>
+            <small>{selectedNode.path}</small>
+          </div>
+        )}
+
+        {!showFilters && (
+          <div className="atlas-flow-legend">
+            <div className="atlas-flow-legend-header" onClick={() => setLegendCollapsed((value) => !value)}>
+              <span>Graph Legend</span>
+              <div className="atlas-flow-legend-actions">
+                <button
+                  type="button"
+                  className="atlas-flow-filter-trigger"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    setShowFilters(true)
+                  }}
+                >
+                  Filters
+                </button>
+                <span className={`atlas-flow-chevron${legendCollapsed ? ' atlas-flow-chevron--collapsed' : ''}`}>⌃</span>
+              </div>
+            </div>
+            {!legendCollapsed && (
+              <div className="atlas-flow-legend-grid">
+                {Object.keys(DEFAULT_NODE_COLORS).map((type) => (
+                  <div key={type} className="atlas-flow-legend-item">
+                    <span
+                      className="atlas-flow-legend-dot"
+                      style={{ backgroundColor: DEFAULT_NODE_COLORS[type], boxShadow: `0 0 8px ${DEFAULT_NODE_COLORS[type]}` }}
+                    />
+                    <span className={visibleNodeTypes.has(type) ? '' : 'atlas-flow-legend-item--muted'}>{type}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {showFilters && (
+          <div className="atlas-flow-filter-panel">
+            <div className="atlas-flow-legend-header">
+              <span>Filters</span>
+              <button type="button" className="atlas-flow-filter-close" onClick={() => setShowFilters(false)}>✕</button>
+            </div>
+            <div className="atlas-flow-filter-list">
+              {Object.keys(DEFAULT_NODE_COLORS).map((type) => (
+                <button key={type} type="button" className="atlas-flow-filter-row" onClick={() => toggleNodeType(type)}>
+                  <div className="atlas-flow-filter-left">
+                    <span className="atlas-flow-legend-dot" style={{ backgroundColor: DEFAULT_NODE_COLORS[type] }} />
+                    <span>{type}</span>
+                  </div>
+                  <span className={`atlas-flow-filter-toggle${visibleNodeTypes.has(type) ? ' atlas-flow-filter-toggle--active' : ''}`}>
+                    {visibleNodeTypes.has(type) ? 'ON' : 'OFF'}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
   )
 }
