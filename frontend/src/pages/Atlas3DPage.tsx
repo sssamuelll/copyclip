@@ -1,1150 +1,329 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
-import * as THREE from 'three'
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-// @ts-ignore — d3-force-3d has no type declarations
+import { useEffect, useRef, useState } from 'react'
+// @ts-ignore - d3-force-3d has no type declarations
 import { forceSimulation, forceManyBody, forceCenter, forceCollide, forceLink } from 'd3-force-3d'
 import { api } from '../api/client'
-import type { TreeNode, ArchNode, ArchEdge, SymbolItem, ModuleSourceFile } from '../types/api'
+import type {
+  ArchEdge,
+  ArchNode,
+  CognitiveLoadItem,
+  DecisionItem,
+  ModuleSourceFile,
+  Overview,
+  RiskItem,
+  SymbolItem,
+  TreeNode,
+} from '../types/api'
 
-/* ------------------------------------------------------------------ */
-/*  Types                                                             */
-/* ------------------------------------------------------------------ */
-
-type ZoomLevel = 1 | 2 | 3 | 4
-
-/** Metadata we attach to every clickable Three.js mesh via userData */
-type NodeMeta = {
-  treeNode?: TreeNode
-  symbol?: SymbolItem
-  method?: string
-  methodLineStart?: number
-  methodLineEnd?: number
-  level: ZoomLevel
+type LayoutNode = {
+  id: string
+  name: string
+  group: string
+  degree: number
+  debt: number
+  x: number
+  y: number
+  radius: number
 }
 
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                           */
-/* ------------------------------------------------------------------ */
-
-const getDebtColor = (debt: number): number => {
-  if (debt > 70) return 0xff3333
-  if (debt > 40) return 0xffaa00
-  return 0x00eeff
+type ModuleDetails = {
+  module: string
+  treeNode: TreeNode | null
+  inbound: string[]
+  outbound: string[]
+  degree: number
+  debt: number
+  group: string
+  cognitive: CognitiveLoadItem | null
 }
 
-const getDebtCSS = (debt: number): string => {
-  if (debt > 70) return '#ff3333'
-  if (debt > 40) return '#ffaa00'
-  return '#00eeff'
+const GRAPH_WIDTH = 940
+const GRAPH_HEIGHT = 620
+const GRAPH_PADDING = 72
+
+const groupColors: Record<string, string> = {
+  intelligence: '#67e8f9',
+  llm: '#f59e0b',
+  frontend: '#86efac',
+  tests: '#fda4af',
+  docs: '#c4b5fd',
+  automation: '#fdba74',
+  config: '#94a3b8',
+  core: '#f9fafb',
 }
 
-const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
-
-/** Color palette for cosmic objects — each folder/file gets a distinct hue */
-const COSMIC_PALETTE = [
-  0x00eeff, // cyan
-  0xae63e4, // purple
-  0xff6b6b, // coral
-  0xffaa00, // amber
-  0x47cf73, // green
-  0x5e91f2, // blue
-  0xff3c96, // pink
-  0x2bc7b9, // teal
-  0xf0e130, // gold
-  0xff8d41, // orange
-]
-
-/** Get a consistent color for a node based on its name hash */
-const getNodeColor = (name: string, debt: number): number => {
-  // High debt always shows red/amber regardless of palette
-  if (debt > 70) return 0xff3333
-  if (debt > 50) return 0xffaa00
-  // Otherwise, assign from palette based on name
-  let hash = 0
-  for (let i = 0; i < name.length; i++) hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0
-  return COSMIC_PALETTE[Math.abs(hash) % COSMIC_PALETTE.length]
+const groupLabels: Record<string, string> = {
+  intelligence: 'Intelligence Engine',
+  llm: 'LLM Layer',
+  frontend: 'UI Layer',
+  tests: 'Tests',
+  docs: 'Docs',
+  automation: 'Automation',
+  config: 'Config',
+  core: 'Core',
 }
 
-/** Color for file nodes based on language */
-const getLanguageColor = (lang: string, debt: number): number => {
-  if (debt > 70) return 0xff3333
-  if (debt > 50) return 0xffaa00
-  const langColors: Record<string, number> = {
-    python: 0x3572A5,
-    javascript: 0xf0e130,
-    typescript: 0x3178c6,
-    css: 0x563d7c,
-    cpp: 0xf34b7d,
-    rust: 0xdea584,
-    json: 0x47cf73,
-    markdown: 0x888888,
-    html: 0xe34c26,
-    other: 0x666666,
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
+}
+
+function getModuleLeaf(moduleName: string) {
+  const parts = moduleName.split('/')
+  return parts[parts.length - 1] || moduleName
+}
+
+function getModuleGroup(moduleName: string) {
+  const value = moduleName.toLowerCase()
+  if (value.includes('frontend')) return 'frontend'
+  if (value.includes('/llm') || value.includes(' copyclip.llm') || value.startsWith('copyclip.llm')) return 'llm'
+  if (value.includes('intelligence')) return 'intelligence'
+  if (value.includes('test')) return 'tests'
+  if (value.includes('docs') || value.endsWith('.md')) return 'docs'
+  if (value.includes('scripts') || value.includes('install')) return 'automation'
+  if (value.startsWith('.') || value.includes('package.json') || value.includes('pyproject') || value.includes('requirements')) return 'config'
+  return 'core'
+}
+
+function getDebtColor(debt: number) {
+  if (debt >= 70) return '#f87171'
+  if (debt >= 45) return '#fbbf24'
+  return '#67e8f9'
+}
+
+function getDebtTone(debt: number) {
+  if (debt >= 70) return 'High'
+  if (debt >= 45) return 'Medium'
+  return 'Low'
+}
+
+function collectTreeNodes(root: TreeNode | null) {
+  if (!root) return []
+  const nodes: TreeNode[] = []
+  const walk = (node: TreeNode) => {
+    nodes.push(node)
+    ;(node.children || []).forEach(walk)
   }
-  return langColors[lang] || 0x888888
+  walk(root)
+  return nodes
 }
 
-/** Color by cluster/role — groups related modules visually */
-const getClusterColor = (moduleName: string): number => {
-  const m = moduleName.toLowerCase()
-  if (m.startsWith('src/copyclip/intelligence') || m === 'copyclip' || m.startsWith('copyclip')) return 0x5e91f2   // backend — blue
-  if (m.startsWith('src/copyclip/llm')) return 0xae63e4    // LLM — purple
-  if (m.startsWith('frontend') || m.includes('frontend')) return 0xf0e130  // frontend — yellow
-  if (m.startsWith('tests') || m.includes('test')) return 0x47cf73         // tests — green
-  if (m.startsWith('docs') || m.includes('docs')) return 0x888888          // docs — gray
-  if (m.startsWith('scripts')) return 0xff8d41              // scripts — orange
-  if (m.startsWith('.')) return 0x555555                    // dotfiles — dim
-  // External deps — dim teal
-  if (!m.includes('/')) return 0x2bc7b9
-  // Fallback to palette
-  return getNodeColor(moduleName, 0)
+function matchTreeNode(root: TreeNode | null, moduleName: string) {
+  const allNodes = collectTreeNodes(root)
+  const exact = allNodes.find((node) => node.path === moduleName)
+  if (exact) return exact
+
+  const bySuffix = allNodes.find((node) => node.path && (node.path.endsWith(moduleName) || moduleName.endsWith(node.path)))
+  if (bySuffix) return bySuffix
+
+  const leaf = getModuleLeaf(moduleName)
+  return allNodes.find((node) => node.name === leaf) || null
 }
 
-/** Create a HUD label Sprite that always faces the camera. */
-const createHUDLabel = (lines: string[], debtValue?: number): THREE.Sprite => {
-  const canvas = document.createElement('canvas')
-  const ctx = canvas.getContext('2d')!
-  canvas.width = 512
-  canvas.height = 40 * lines.length + 16
-  ctx.font = '300 34px IBM Plex Mono'
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'top'
-  lines.forEach((line, i) => {
-    // Color the last token of the last line by debt if provided
-    if (debtValue !== undefined && i === lines.length - 1 && line.includes('%')) {
-      const parts = line.split(' ')
-      const debtPart = parts.pop()!
-      const rest = parts.join(' ')
-      ctx.fillStyle = '#ffffff'
-      ctx.fillText(rest + ' ', 256, 8 + i * 40)
-      const restWidth = ctx.measureText(rest + ' ').width
-      ctx.fillStyle = getDebtCSS(debtValue)
-      ctx.fillText(debtPart, 256 + restWidth / 2, 8 + i * 40)
-    } else {
-      ctx.fillStyle = '#ffffff'
-      ctx.fillText(line, 256, 8 + i * 40)
+function summarizeModule(details: ModuleDetails) {
+  const groupLabel = groupLabels[details.group] || groupLabels.core
+  const fileCount = details.treeNode?.file_count || (details.treeNode?.type === 'file' ? 1 : 0)
+  if (details.group === 'intelligence') {
+    return `Este módulo pertenece al motor de inteligencia. Ayuda a interpretar el repositorio y conecta con ${details.outbound.length} dependencias para producir análisis reutilizable.`
+  }
+  if (details.group === 'frontend') {
+    return `Este módulo forma parte de la interfaz. Traduce la estructura técnica a una vista legible y recibe señal desde ${details.inbound.length} conexiones del resto del sistema.`
+  }
+  if (details.group === 'llm') {
+    return `Este módulo está en la capa de modelos. Su trabajo es convertir contexto del proyecto en prompts, decisiones y respuestas ejecutables.`
+  }
+  if (details.group === 'tests') {
+    return `Este módulo vive en la red de verificación. Actúa como guardarraíl para evitar regresiones y valida ${details.degree} relaciones dentro del proyecto.`
+  }
+  return `${groupLabel}. Tiene ${fileCount} ${fileCount === 1 ? 'archivo asociado' : 'archivos asociados'} y sirve como pieza de coordinación dentro del mapa del proyecto.`
+}
+
+function buildLayout(
+  nodes: ArchNode[],
+  edges: ArchEdge[],
+  tree: TreeNode | null,
+  cognitiveMap: Map<string, CognitiveLoadItem>,
+) {
+  if (nodes.length === 0) return { layoutNodes: [] as LayoutNode[], visibleEdges: [] as ArchEdge[] }
+
+  const degrees = new Map<string, number>()
+  nodes.forEach((node) => degrees.set(node.name, 0))
+  edges.forEach((edge) => {
+    degrees.set(edge.from, (degrees.get(edge.from) || 0) + 1)
+    degrees.set(edge.to, (degrees.get(edge.to) || 0) + 1)
+  })
+
+  const simNodes = nodes.map((node) => {
+    const treeNode = matchTreeNode(tree, node.name)
+    const cognitive = cognitiveMap.get(node.name)
+    const debt = cognitive?.cognitive_debt_score || treeNode?.debt || treeNode?.avg_debt || 0
+    const degree = degrees.get(node.name) || 0
+    return {
+      id: node.name,
+      name: node.name,
+      degree,
+      debt,
+      group: getModuleGroup(node.name),
+      radius: clamp(16 + Math.sqrt(Math.max(degree, 1)) * 5, 18, 42),
+      x: 0,
+      y: 0,
+      z: 0,
     }
   })
-  const texture = new THREE.CanvasTexture(canvas)
-  const mat = new THREE.SpriteMaterial({
-    map: texture,
-    transparent: true,
-    opacity: 0.75,
-    sizeAttenuation: true,
-    depthWrite: false,
-  })
-  const sprite = new THREE.Sprite(mat)
-  sprite.scale.set(200, 200 * (canvas.height / canvas.width), 1)
-  return sprite
-}
 
-/** Run d3-force-3d on a list of items, return FLAT disc positions (Y compressed). */
-const forceLayout = (count: number, sizeFn: (i: number) => number, spread: number): THREE.Vector3[] => {
-  if (count === 0) return []
-  const nodes = Array.from({ length: count }, (_, i) => ({ index: i, x: 0, y: 0, z: 0 }))
-  const sim = forceSimulation(nodes, 3)
-    .force('charge', forceManyBody().strength(-spread * 1.5))
+  const nodeIds = new Set(simNodes.map((node) => node.id))
+  const visibleEdges = edges.filter((edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to) && edge.from !== edge.to)
+  const links = visibleEdges.map((edge) => ({ source: edge.from, target: edge.to }))
+
+  const simulation = forceSimulation(simNodes, 3)
+    .force('charge', forceManyBody().strength(-220))
     .force('center', forceCenter(0, 0, 0))
-    .force('collide', forceCollide().radius((d: any) => sizeFn(d.index) + 8))
+    .force('collide', forceCollide().radius((node: LayoutNode) => node.radius + 18))
+    .force('link', forceLink(links).id((node: LayoutNode) => node.id).distance(110).strength(0.22))
     .stop()
-  for (let t = 0; t < 300; t++) sim.tick()
-  // Normalize positions to fit within a reasonable radius
-  let maxDist = 1
-  nodes.forEach((n: any) => {
-    const d = Math.sqrt(n.x * n.x + n.z * n.z) // ignore Y for normalization
-    if (d > maxDist) maxDist = d
+
+  for (let tick = 0; tick < 280; tick += 1) simulation.tick()
+
+  let minX = Infinity
+  let maxX = -Infinity
+  let minY = Infinity
+  let maxY = -Infinity
+
+  simNodes.forEach((node) => {
+    minX = Math.min(minX, node.x)
+    maxX = Math.max(maxX, node.x)
+    minY = Math.min(minY, node.y)
+    maxY = Math.max(maxY, node.y)
   })
-  const scale = spread * 2.5 / maxDist
-  // Compress Y to 40% — organic spread, not flat disc or sphere
-  return nodes.map((n: any) => new THREE.Vector3(n.x * scale, n.y * scale * 0.4, n.z * scale))
-}
 
-/** Spread items in an orbit around center. */
-const orbitLayout = (count: number, radius: number): THREE.Vector3[] => {
-  const positions: THREE.Vector3[] = []
-  for (let i = 0; i < count; i++) {
-    const phi = Math.acos(-1 + (2 * i) / Math.max(count, 1))
-    const theta = Math.sqrt(Math.max(count, 1) * Math.PI) * phi
-    positions.push(new THREE.Vector3(
-      radius * Math.cos(theta) * Math.sin(phi),
-      radius * Math.sin(theta) * Math.sin(phi) * 0.6,
-      radius * Math.cos(phi),
-    ))
-  }
-  return positions
-}
+  const spanX = Math.max(maxX - minX, 1)
+  const spanY = Math.max(maxY - minY, 1)
 
-/* ------------------------------------------------------------------ */
-/*  Component                                                         */
-/* ------------------------------------------------------------------ */
+  const layoutNodes = simNodes.map((node) => ({
+    ...node,
+    x: GRAPH_PADDING + ((node.x - minX) / spanX) * (GRAPH_WIDTH - GRAPH_PADDING * 2),
+    y: GRAPH_PADDING + ((node.y - minY) / spanY) * (GRAPH_HEIGHT - GRAPH_PADDING * 2),
+  }))
+
+  return { layoutNodes, visibleEdges }
+}
 
 export function Atlas3DPage() {
-  const containerRef = useRef<HTMLDivElement>(null)
-
-  // Core state
   const [loading, setLoading] = useState(true)
-  const [zoomLevel, setZoomLevel] = useState<ZoomLevel>(1)
-  const [currentPath, setCurrentPath] = useState<string[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const [overview, setOverview] = useState<Overview | null>(null)
   const [tree, setTree] = useState<TreeNode | null>(null)
-  const [currentNode, setCurrentNode] = useState<TreeNode | null>(null)
-  const [selectedMeta, setSelectedMeta] = useState<NodeMeta | null>(null)
-  const [hoveredMeta, setHoveredMeta] = useState<NodeMeta | null>(null)
-
-  // Level 3/4 data
-  const [symbols, setSymbols] = useState<SymbolItem[]>([])
+  const [graphNodes, setGraphNodes] = useState<ArchNode[]>([])
+  const [graphEdges, setGraphEdges] = useState<ArchEdge[]>([])
+  const [layoutNodes, setLayoutNodes] = useState<LayoutNode[]>([])
+  const [cognitiveItems, setCognitiveItems] = useState<CognitiveLoadItem[]>([])
+  const [decisions, setDecisions] = useState<DecisionItem[]>([])
+  const [risks, setRisks] = useState<RiskItem[]>([])
+  const [selectedModule, setSelectedModule] = useState<string | null>(null)
+  const [hoveredModule, setHoveredModule] = useState<string | null>(null)
   const [sourceFiles, setSourceFiles] = useState<ModuleSourceFile[]>([])
+  const [symbols, setSymbols] = useState<SymbolItem[]>([])
   const [activeFileIdx, setActiveFileIdx] = useState(0)
-  const [loadingSource, setLoadingSource] = useState(false)
-
-  // CodeMirror
+  const [loadingDetails, setLoadingDetails] = useState(false)
   const codeMirrorRef = useRef<HTMLDivElement>(null)
   const cmInstanceRef = useRef<any>(null)
 
-  // Three.js refs stored outside React state for the animation loop
-  const threeRef = useRef<{
-    scene: THREE.Scene
-    camera: THREE.PerspectiveCamera
-    renderer: THREE.WebGLRenderer
-    controls: OrbitControls
-    raycaster: THREE.Raycaster
-    nodesGroup: THREE.Group
-    starsGroup: THREE.Group
-    animationId: number
-    hoveredMesh: THREE.Mesh | null
-    selectedMesh: THREE.Mesh | null
-    transitioning: boolean
-    zoomLevel: ZoomLevel
-    currentNode: TreeNode | null
-    tree: TreeNode | null
-    symbols: SymbolItem[]
-    currentPath: string[]
-  } | null>(null)
-
-  /* ---- Zoom navigation callbacks (memoized, used by wheel/click) ---- */
-
-  const renderLevelRef = useRef<(level: ZoomLevel, node: TreeNode | null, syms?: SymbolItem[]) => void>(() => {})
-  const zoomIntoRef = useRef<(meta: NodeMeta) => void>(() => {})
-  const zoomOutRef = useRef<() => void>(() => {})
-
-  /* ================================================================== */
-  /*  Main Three.js useEffect                                           */
-  /* ================================================================== */
-
   useEffect(() => {
-    if (!containerRef.current) return
-    const container = containerRef.current
+    let cancelled = false
 
-    // ---- Scene setup ----
-    const scene = new THREE.Scene()
-    scene.background = new THREE.Color(0x000000)
-    scene.fog = new THREE.FogExp2(0x000000, 0.00015)
+    ;(async () => {
+      try {
+        setLoading(true)
+        const [overviewRes, treeRes, architectureRes, cognitiveRes, decisionsRes, risksRes] = await Promise.all([
+          api.overview(),
+          api.architectureTree(),
+          api.architecture(),
+          api.cognitiveLoad(),
+          api.decisions(),
+          api.risks(),
+        ])
 
-    const camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 1, 12000)
-    camera.position.set(0, 300, 900)
+        if (cancelled) return
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
-    renderer.setPixelRatio(window.devicePixelRatio)
-    renderer.setSize(container.clientWidth, container.clientHeight)
-    container.appendChild(renderer.domElement)
+        const trimmedNodes = architectureRes.nodes.slice(0, 70)
+        const nodeNames = new Set(trimmedNodes.map((node) => node.name))
+        const filteredEdges = architectureRes.edges.filter((edge) => nodeNames.has(edge.from) && nodeNames.has(edge.to))
+        const cognitiveMap = new Map(cognitiveRes.items.map((item) => [item.module, item]))
+        const { layoutNodes: nextLayoutNodes } = buildLayout(trimmedNodes, filteredEdges, treeRes, cognitiveMap)
 
-    const controls = new OrbitControls(camera, renderer.domElement)
-    controls.enableDamping = true
-    controls.dampingFactor = 0.05
-    controls.enableZoom = true    // default zoom works, wheel handler intercepts when hovering a node
-
-    const raycaster = new THREE.Raycaster()
-    const nodesGroup = new THREE.Group()
-    const starsGroup = new THREE.Group()
-    scene.add(nodesGroup)
-
-    // ---- Lighting ----
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.5))
-    const sun = new THREE.DirectionalLight(0xffffff, 2.0)
-    sun.position.set(1000, 1000, 1000)
-    scene.add(sun)
-    const center = new THREE.PointLight(0x00f0ff, 1, 3000)
-    scene.add(center)
-
-    // ---- Starfield (background — far away and dim so nodes stand out) ----
-    const starGeo = new THREE.BufferGeometry()
-    const sp: number[] = [], sc: number[] = []
-    for (let i = 0; i < 8000; i++) {
-      // Stars much further out (5000-10000 units away)
-      const r = 5000 + Math.random() * 5000
-      const theta = Math.random() * Math.PI * 2
-      const phi = Math.acos(2 * Math.random() - 1)
-      sp.push(r * Math.sin(phi) * Math.cos(theta), r * Math.sin(phi) * Math.sin(theta), r * Math.cos(phi))
-      const b = 0.3 + Math.random() * 0.4 // dimmer
-      sc.push(b, b, b)
-    }
-    starGeo.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3))
-    starGeo.setAttribute('color', new THREE.Float32BufferAttribute(sc, 3))
-    starsGroup.add(new THREE.Points(starGeo, new THREE.PointsMaterial({
-      size: 1.2, vertexColors: true, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending,
-    })))
-    scene.add(starsGroup)
-
-    // ---- Store refs ----
-    const T = {
-      scene, camera, renderer, controls, raycaster, nodesGroup, starsGroup,
-      animationId: 0,
-      hoveredMesh: null as THREE.Mesh | null,
-      selectedMesh: null as THREE.Mesh | null,
-      transitioning: false,
-      zoomLevel: 1 as ZoomLevel,
-      currentNode: null as TreeNode | null,
-      tree: null as TreeNode | null,
-      symbols: [] as SymbolItem[],
-      currentPath: [] as string[],
-    }
-    threeRef.current = T
-
-    /* ================================================================ */
-    /*  Render-level functions                                          */
-    /* ================================================================ */
-
-    const clearNodes = () => {
-      while (nodesGroup.children.length) {
-        const c = nodesGroup.children[0]
-        nodesGroup.remove(c)
-        c.traverse((o: any) => {
-          if (o.geometry) o.geometry.dispose()
-          if (o.material) {
-            if (o.material.map) o.material.map.dispose()
-            o.material.dispose()
-          }
-        })
+        setOverview(overviewRes)
+        setTree(treeRes)
+        setGraphNodes(trimmedNodes)
+        setGraphEdges(filteredEdges)
+        setLayoutNodes(nextLayoutNodes)
+        setCognitiveItems(cognitiveRes.items)
+        setDecisions(decisionsRes.items)
+        setRisks(risksRes.items)
+        setSelectedModule(trimmedNodes[0]?.name || null)
+        setError(null)
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Atlas failed to load')
+      } finally {
+        if (!cancelled) setLoading(false)
       }
-    }
+    })()
 
-    /** Build a mesh for a node and add to nodesGroup */
-    const addNodeMesh = (
-      geometry: THREE.BufferGeometry,
-      color: number,
-      pos: THREE.Vector3,
-      label: THREE.Sprite,
-      meta: NodeMeta,
-      labelOffset: number,
-    ) => {
-      const g = new THREE.Group()
-      const mat = new THREE.MeshStandardMaterial({
-        color, roughness: 0.2, metalness: 0.5,
-        emissive: color, emissiveIntensity: 0.7,
-        transparent: true, opacity: 1.0,
-      })
-      const mesh = new THREE.Mesh(geometry, mat)
-      mesh.userData = meta
-      g.add(mesh)
-
-      // Glow halo — outer transparent sphere
-      geometry.computeBoundingSphere()
-      const glowGeo = new THREE.SphereGeometry((geometry.boundingSphere?.radius || 10) * 2.0, 16, 12)
-      const glowMat = new THREE.MeshBasicMaterial({
-        color, transparent: true, opacity: 0.12,
-        side: THREE.BackSide, blending: THREE.AdditiveBlending,
-      })
-      const glow = new THREE.Mesh(glowGeo, glowMat)
-      glow.userData = { _glow: true } // mark as glow, skip raycasting
-      g.add(glow)
-
-      label.position.set(0, labelOffset, 0)
-      g.add(label)
-      g.position.copy(pos)
-      nodesGroup.add(g)
-    }
-
-    /** Render dependency edges between positioned nodes */
-    const renderEdges = (nodeNames: string[], positions: THREE.Vector3[], edges: { from: string; to: string }[]) => {
-      const nameToPos = new Map<string, THREE.Vector3>()
-      nodeNames.forEach((name, i) => nameToPos.set(name, positions[i]))
-
-      const linePositions: number[] = []
-      for (const edge of edges) {
-        // Match edge modules to node names (edge.from might be a sub-path of a node name)
-        let fromPos: THREE.Vector3 | undefined
-        let toPos: THREE.Vector3 | undefined
-        for (const [name, pos] of nameToPos) {
-          if (edge.from === name || edge.from.startsWith(name + '/') || name.endsWith('/' + edge.from)) fromPos = pos
-          if (edge.to === name || edge.to.startsWith(name + '/') || name.endsWith('/' + edge.to)) toPos = pos
-        }
-        if (fromPos && toPos && fromPos !== toPos) {
-          linePositions.push(fromPos.x, fromPos.y, fromPos.z)
-          linePositions.push(toPos.x, toPos.y, toPos.z)
-        }
-      }
-
-      if (linePositions.length > 0) {
-        const geo = new THREE.BufferGeometry()
-        geo.setAttribute('position', new THREE.Float32BufferAttribute(linePositions, 3))
-        const mat = new THREE.LineBasicMaterial({
-          color: 0x00eeff, transparent: true, opacity: 0.12,
-          blending: THREE.AdditiveBlending,
-        })
-        const lines = new THREE.LineSegments(geo, mat)
-        lines.userData = { _edges: true }
-        nodesGroup.add(lines)
-      }
-    }
-
-    /* ---------- Level 1: Obsidian-style force graph with clusters ---- */
-    const renderLevel1 = (root: TreeNode) => {
-      clearNodes()
-
-      // Use architecture graph for Obsidian-style layout
-      api.architecture().then(({ nodes: archNodes, edges: archEdges }) => {
-        // If graph is too sparse (< 4 nodes), fall back to tree-based folder view
-        if (archNodes.length < 4) {
-          renderLevel1FromTree(root)
-          return
-        }
-
-        // Filter out very small/noisy nodes (keep project modules, not stdlib)
-        const nodeSet = new Set(archNodes.map(n => n.name))
-        const internalNodes = archNodes.filter(n => {
-          // Keep nodes that have at least one edge connecting to another internal node
-          return archEdges.some(e =>
-            (e.from === n.name && nodeSet.has(e.to)) ||
-            (e.to === n.name && nodeSet.has(e.from))
-          )
-        })
-        if (internalNodes.length < 4) {
-          // Not enough connected nodes — use all nodes from the graph
-          internalNodes.length = 0
-          internalNodes.push(...archNodes)
-        }
-
-        // Build index maps
-        const nameToIdx = new Map<string, number>()
-        internalNodes.forEach((n, i) => nameToIdx.set(n.name, i))
-
-        // Build force links from edges (only between nodes we're showing)
-        const links: { source: number; target: number }[] = []
-        const edgeSet = new Set<string>()
-        for (const e of archEdges) {
-          const si = nameToIdx.get(e.from)
-          const ti = nameToIdx.get(e.to)
-          if (si !== undefined && ti !== undefined && si !== ti) {
-            const key = `${Math.min(si, ti)}-${Math.max(si, ti)}`
-            if (!edgeSet.has(key)) {
-              edgeSet.add(key)
-              links.push({ source: si, target: ti })
-            }
-          }
-        }
-
-        // Count connections per node for sizing
-        const connCount = new Array(internalNodes.length).fill(0)
-        for (const l of links) {
-          connCount[l.source]++
-          connCount[l.target]++
-        }
-
-        // Sizes: based on connection count (hub nodes are bigger)
-        const sizes = internalNodes.map((_, i) => clamp(6 + Math.sqrt(connCount[i]) * 3, 6, 35))
-
-        // Force simulation WITH links — connected nodes attract (Obsidian behavior)
-        const simNodes = internalNodes.map((_, i) => ({ index: i, x: 0, y: 0, z: 0 }))
-        const sim = forceSimulation(simNodes, 3)
-          .force('charge', forceManyBody().strength(-100))
-          .force('center', forceCenter(0, 0, 0))
-          .force('collide', forceCollide().radius((d: any) => sizes[d.index] + 5))
-          .force('link', forceLink(links.map(l => ({ ...l }))).distance(80).strength(0.3))
-          .stop()
-        for (let t = 0; t < 300; t++) sim.tick()
-
-        // Normalize
-        let maxDist = 1
-        simNodes.forEach((n: any) => {
-          const d = Math.sqrt(n.x * n.x + n.z * n.z)
-          if (d > maxDist) maxDist = d
-        })
-        const scale = 350 / maxDist
-        const positions = simNodes.map((n: any) => new THREE.Vector3(n.x * scale, n.y * scale * 0.4, n.z * scale))
-
-        // Render nodes
-        internalNodes.forEach((archNode, i) => {
-          const color = getClusterColor(archNode.name)
-          const isHub = connCount[i] > 5
-          const geo = isHub
-            ? new THREE.OctahedronGeometry(sizes[i], 0) // hubs are diamonds
-            : new THREE.SphereGeometry(sizes[i], 16, 12) // regular nodes are spheres
-          const shortName = archNode.name.split('/').pop() || archNode.name
-          const lbl = createHUDLabel([shortName])
-          // Labels hidden by default in Obsidian mode — shown on hover
-          ;(lbl.material as THREE.SpriteMaterial).opacity = isHub ? 0.5 : 0
-
-          // Find matching tree node for drill-down
-          const treeNode = findTreeNodeByModulePath(root, archNode.name)
-          addNodeMesh(geo, color, positions[i], lbl, {
-            treeNode: treeNode || { name: archNode.name, type: 'folder', path: archNode.name } as TreeNode,
-            level: 1,
-          }, -(sizes[i] + 16))
-        })
-
-        // Render edges as visible lines
-        const linePositions: number[] = []
-        for (const link of links) {
-          const from = positions[link.source]
-          const to = positions[link.target]
-          linePositions.push(from.x, from.y, from.z, to.x, to.y, to.z)
-        }
-        if (linePositions.length > 0) {
-          const geo = new THREE.BufferGeometry()
-          geo.setAttribute('position', new THREE.Float32BufferAttribute(linePositions, 3))
-          const mat = new THREE.LineBasicMaterial({
-            color: 0x00eeff, transparent: true, opacity: 0.2,
-            blending: THREE.AdditiveBlending,
-          })
-          const lines = new THREE.LineSegments(geo, mat)
-          lines.userData = { _edges: true }
-          nodesGroup.add(lines)
-        }
-
-        camera.position.set(0, 250, 700)
-        controls.target.set(0, 0, 0)
-      }).catch(() => {
-        // Architecture graph failed — fall back to tree view
-        renderLevel1FromTree(root)
-      })
-    }
-
-    /** Fallback: render Level 1 from the tree — ONLY folders, never individual files */
-    const renderLevel1FromTree = (root: TreeNode) => {
-      let folders = (root.children || []).filter(c => c.type === 'folder')
-
-      // If no folders at all, group root files by extension into virtual folders
-      if (folders.length === 0 && root.children && root.children.length > 0) {
-        const groups = new Map<string, TreeNode[]>()
-        for (const f of root.children) {
-          const ext = f.name.split('.').pop() || 'other'
-          if (!groups.has(ext)) groups.set(ext, [])
-          groups.get(ext)!.push(f)
-        }
-        folders = Array.from(groups.entries()).map(([ext, files]) => ({
-          name: `*.${ext}`, type: 'folder' as const, path: '', children: files,
-          file_count: files.length, avg_debt: 0,
-        }))
-      }
-
-      // Cap at 20 visible folders — merge smallest into "other"
-      if (folders.length > 20) {
-        folders.sort((a, b) => (b.file_count || 0) - (a.file_count || 0))
-        const top = folders.slice(0, 19)
-        const rest = folders.slice(19)
-        const otherCount = rest.reduce((s, f) => s + (f.file_count || 1), 0)
-        top.push({ name: 'other', type: 'folder', path: '', children: rest.flatMap(f => f.children || []), file_count: otherCount, avg_debt: 0 })
-        folders = top
-      }
-
-      const sizes = folders.map(c => clamp(Math.log2((c.file_count || 1) + 1) * 8, 8, 50))
-      const positions = forceLayout(folders.length, i => sizes[i], 150)
-      folders.forEach((child, i) => {
-        const debt = child.avg_debt || 0
-        const geo = new THREE.OctahedronGeometry(sizes[i], 0)
-        const lbl = createHUDLabel([child.name, `${child.file_count || 0} files`], debt)
-        addNodeMesh(geo, getNodeColor(child.name, debt), positions[i], lbl, { treeNode: child, level: 1 }, -(sizes[i] + 18))
-      })
-      camera.position.set(0, 300, 800)
-      controls.target.set(0, 0, 0)
-    }
-
-    /** Walk tree to find a node matching a module path */
-    const findTreeNodeByModulePath = (root: TreeNode, modulePath: string): TreeNode | null => {
-      if (root.path === modulePath) return root
-      for (const child of root.children || []) {
-        if (modulePath.startsWith(child.path || child.name)) {
-          const found = findTreeNodeByModulePath(child, modulePath)
-          if (found) return found
-        }
-      }
-      return null
-    }
-
-    /* ---------- Level 2: Galaxy (files as spheres, sub-folders as diamonds) */
-    const renderLevel2 = (folder: TreeNode) => {
-      clearNodes()
-      const children = folder.children || []
-      // Adaptive sizing: shrink nodes when there are many
-      const scaleFactor = children.length > 50 ? 0.5 : children.length > 20 ? 0.7 : 1.0
-      const sizes = children.map(c =>
-        c.type === 'file'
-          ? clamp(Math.log2((c.lines || 100) + 1) * 2.5 * scaleFactor, 3, 25)
-          : clamp(Math.log2((c.file_count || 1) + 1) * 5 * scaleFactor, 4, 20),
-      )
-      // More spread when there are many nodes
-      const dynamicSpread = Math.max(120, children.length * 4)
-      const positions = forceLayout(children.length, i => sizes[i], dynamicSpread)
-
-      children.forEach((child, i) => {
-        const debt = child.type === 'file' ? (child.debt || 0) : (child.avg_debt || 0)
-        const color = child.type === 'file'
-          ? getLanguageColor(child.language || 'other', debt)
-          : getNodeColor(child.name, debt)
-        const geo = child.type === 'file'
-          ? new THREE.SphereGeometry(sizes[i], 24, 24)
-          : new THREE.OctahedronGeometry(sizes[i], 0)
-        const info = child.type === 'file'
-          ? [`${child.name}`, `${child.lines || '?'} ln  ${Math.round(debt)}%`]
-          : [`${child.name}`, `${child.file_count || 0} files  ${Math.round(debt)}%`]
-        const lbl = createHUDLabel(info, debt)
-        addNodeMesh(geo, color, positions[i], lbl, { treeNode: child, level: 2 }, -(sizes[i] + 16))
-      })
-
-      // Render edges between files
-      api.architecture().then(({ edges }) => {
-        const nodeNames = children.map(c => c.path || c.name)
-        renderEdges(nodeNames, positions, edges)
-      }).catch(() => {})
-
-      // Camera distance adapts to node count
-      const camDist = Math.max(600, dynamicSpread * 2.5)
-      camera.position.set(0, camDist * 0.35, camDist)
-      controls.target.set(0, 0, 0)
-    }
-
-    /* ---------- Level 3: Star System (classes as cones, functions as cubes) */
-    const renderLevel3 = (file: TreeNode, syms: SymbolItem[]) => {
-      clearNodes()
-      const classes = syms.filter(s => s.kind === 'class' || s.kind === 'struct' || s.kind === 'interface')
-      const functions = syms.filter(s => s.kind === 'function')
-      const allItems = [...classes, ...functions]
-      if (allItems.length === 0) {
-        // Nothing to show — put a single sphere representing the file
-        const geo = new THREE.SphereGeometry(15, 24, 24)
-        const lbl = createHUDLabel([file.name, 'no symbols found'])
-        addNodeMesh(geo, getDebtColor(file.debt || 0), new THREE.Vector3(0, 0, 0), lbl, { treeNode: file, level: 3 }, -25)
-        camera.position.set(0, 100, 300)
-        controls.target.set(0, 0, 0)
-        return
-      }
-
-      const sizes = allItems.map(s => {
-        if (s.kind === 'class' || s.kind === 'struct' || s.kind === 'interface') {
-          return clamp((s.methods?.length || 1) * 3, 8, 30)
-        }
-        return clamp(Math.sqrt((s.line_end || 0) - (s.line_start || 0) + 1) * 2, 6, 20)
-      })
-      const positions = forceLayout(allItems.length, i => sizes[i], 50)
-
-      allItems.forEach((sym, i) => {
-        const isClass = sym.kind === 'class' || sym.kind === 'struct' || sym.kind === 'interface'
-        const geo = isClass
-          ? new THREE.ConeGeometry(sizes[i], sizes[i] * 1.5, 4)
-          : new THREE.BoxGeometry(sizes[i], sizes[i], sizes[i])
-        const debt = file.debt || 0
-        const info = isClass
-          ? [sym.name, `${sym.kind}  ${sym.methods?.length || 0} methods`]
-          : [sym.name, `function  ln ${sym.line_start}-${sym.line_end}`]
-        const lbl = createHUDLabel(info)
-        addNodeMesh(geo, getDebtColor(debt), positions[i], lbl, { symbol: sym, treeNode: file, level: 3 }, -(sizes[i] + 16))
-      })
-
-      camera.position.set(0, 150, 450)
-      controls.target.set(0, 0, 0)
-    }
-
-    /* ---------- Level 4: Planet Detail (methods as small cubes) -------- */
-    const renderLevel4 = (classSym: SymbolItem, file: TreeNode, syms: SymbolItem[]) => {
-      clearNodes()
-      const methods = classSym.methods || []
-      if (methods.length === 0) {
-        const geo = new THREE.ConeGeometry(12, 18, 4)
-        const lbl = createHUDLabel([classSym.name, 'no methods'])
-        addNodeMesh(geo, getDebtColor(file.debt || 0), new THREE.Vector3(0, 0, 0), lbl, { symbol: classSym, treeNode: file, level: 4 }, -22)
-        camera.position.set(0, 80, 200)
-        controls.target.set(0, 0, 0)
-        return
-      }
-
-      // Find matching method symbols for line ranges
-      const methodSyms = methods.map(m => syms.find(s => s.name === m && s.kind === 'method'))
-
-      const radius = clamp(methods.length * 12, 40, 200)
-      const positions = orbitLayout(methods.length, radius)
-
-      methods.forEach((mName, i) => {
-        const mSym = methodSyms[i]
-        const size = mSym ? clamp(Math.sqrt((mSym.line_end - mSym.line_start) + 1) * 2, 5, 16) : 7
-        const geo = new THREE.BoxGeometry(size, size, size)
-        const info = mSym
-          ? [mName, `ln ${mSym.line_start}-${mSym.line_end}`]
-          : [mName, 'method']
-        const lbl = createHUDLabel(info)
-        addNodeMesh(geo, getDebtColor(file.debt || 0), positions[i], lbl,
-          { method: mName, methodLineStart: mSym?.line_start, methodLineEnd: mSym?.line_end, symbol: classSym, treeNode: file, level: 4 },
-          -(size + 14))
-      })
-
-      // Add central class cone
-      const centerGeo = new THREE.ConeGeometry(10, 15, 4)
-      const centerLbl = createHUDLabel([classSym.name, `${methods.length} methods`])
-      addNodeMesh(centerGeo, getDebtColor(file.debt || 0), new THREE.Vector3(0, 0, 0), centerLbl,
-        { symbol: classSym, treeNode: file, level: 4 }, -20)
-
-      camera.position.set(0, 100, 300)
-      controls.target.set(0, 0, 0)
-    }
-
-    /* ---------- Dispatch render ---------------------------------------- */
-    const renderLevel = (level: ZoomLevel, node: TreeNode | null, syms?: SymbolItem[]) => {
-      if (!node && level === 1) node = T.tree
-      if (!node) return
-      T.zoomLevel = level
-      T.currentNode = node
-      if (syms) T.symbols = syms
-
-      switch (level) {
-        case 1: renderLevel1(node); break
-        case 2: renderLevel2(node); break
-        case 3: renderLevel3(node, T.symbols); break
-        case 4: {
-          // node = file, find class from syms
-          const classSym = syms?.[0]
-          if (classSym) renderLevel4(classSym, node, T.symbols)
-          break
-        }
-      }
-    }
-    renderLevelRef.current = renderLevel
-
-    /* ================================================================ */
-    /*  Transition animations                                           */
-    /* ================================================================ */
-
-    const expandInPlace = (callback: () => void) => {
-      T.transitioning = true
-      // Fade out all current nodes
-      const meshes: THREE.Mesh[] = []
-      nodesGroup.traverse(o => { if ((o as any).isMesh) meshes.push(o as THREE.Mesh) })
-
-      let elapsed = 0
-      const duration = 800
-      const fadeOut = () => {
-        elapsed += 16
-        const t = Math.min(elapsed / duration, 1)
-        const ease = 1 - Math.pow(1 - t, 3) // ease-out
-        meshes.forEach(m => {
-          const mat = m.material as THREE.MeshStandardMaterial
-          mat.opacity = 1 - ease * 0.9
-        })
-        nodesGroup.children.forEach(g => {
-          g.children.forEach(c => {
-            if (c instanceof THREE.Sprite) {
-              (c.material as THREE.SpriteMaterial).opacity = 0.75 * (1 - ease)
-            }
-          })
-        })
-        if (t < 1) {
-          requestAnimationFrame(fadeOut)
-        } else {
-          callback()
-          // Fade in new nodes
-          const newMeshes: THREE.Mesh[] = []
-          nodesGroup.traverse(o => { if ((o as any).isMesh) newMeshes.push(o as THREE.Mesh) })
-          let el2 = 0
-          const fadeIn = () => {
-            el2 += 16
-            const t2 = Math.min(el2 / 500, 1)
-            newMeshes.forEach(m => {
-              const mat = m.material as THREE.MeshStandardMaterial
-              mat.opacity = t2
-            })
-            if (t2 < 1) requestAnimationFrame(fadeIn)
-            else T.transitioning = false
-          }
-          fadeIn()
-        }
-      }
-      fadeOut()
-    }
-
-    const flyThrough = (target: THREE.Vector3, callback: () => void) => {
-      T.transitioning = true
-      const startPos = camera.position.clone()
-      const endPos = target.clone().add(new THREE.Vector3(0, 150, 450))
-      let elapsed = 0
-      const duration = 1500
-
-      const step = () => {
-        elapsed += 16
-        const t = Math.min(elapsed / duration, 1)
-        // ease-in-out
-        const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2
-        camera.position.lerpVectors(startPos, endPos, ease)
-
-        // At 60%, fade out scene
-        if (t > 0.6 && t < 0.8) {
-          const fadeT = (t - 0.6) / 0.2
-          nodesGroup.traverse(o => {
-            if ((o as any).isMesh) {
-              const mat = (o as THREE.Mesh).material as THREE.MeshStandardMaterial
-              mat.opacity = 1 - fadeT
-            }
-          })
-        }
-
-        if (t >= 0.8 && t < 0.81) {
-          // Switch scene content
-          callback()
-        }
-
-        // At 80-100%, fade in new scene
-        if (t >= 0.8) {
-          const fadeT = (t - 0.8) / 0.2
-          nodesGroup.traverse(o => {
-            if ((o as any).isMesh) {
-              const mat = (o as THREE.Mesh).material as THREE.MeshStandardMaterial
-              mat.opacity = fadeT
-            }
-          })
-        }
-
-        if (t < 1) {
-          requestAnimationFrame(step)
-        } else {
-          T.transitioning = false
-        }
-      }
-      step()
-    }
-
-    /* ================================================================ */
-    /*  Zoom into / out                                                 */
-    /* ================================================================ */
-
-    const zoomInto = async (meta: NodeMeta) => {
-      if (T.transitioning) return
-      const tn = meta.treeNode
-
-      if (meta.level === 1 && tn && tn.type === 'folder') {
-        // Level 1 -> 2: expand in place
-        const newPath = [...T.currentPath, tn.name]
-        expandInPlace(() => renderLevel(2, tn))
-        T.currentPath = newPath
-        setZoomLevel(2)
-        setCurrentPath(newPath)
-        setCurrentNode(tn)
-        setSelectedMeta(null)
-        setHoveredMeta(null)
-      } else if (meta.level === 2 && tn) {
-        if (tn.type === 'folder') {
-          // Sub-folder click at Level 2: stay Level 2, open the sub-folder
-          const newPath = [...T.currentPath, tn.name]
-          expandInPlace(() => renderLevel(2, tn))
-          T.currentPath = newPath
-          setCurrentPath(newPath)
-          setCurrentNode(tn)
-          setSelectedMeta(null)
-          setHoveredMeta(null)
-        } else if (tn.type === 'file') {
-          // Level 2 -> 3: cinematic fly-through
-          const newPath = [...T.currentPath, tn.name]
-          setLoadingSource(true)
-          try {
-            // Derive the module path for the API call: parent folder path
-            const filePath = tn.path
-            const modulePath = filePath.includes('/') ? filePath.substring(0, filePath.lastIndexOf('/')) : 'root'
-            const [symsRes, srcRes] = await Promise.all([
-              api.moduleSymbols(modulePath),
-              api.moduleSource(modulePath),
-            ])
-            const syms = (symsRes.symbols || []).filter(s => s.file_path === tn.path)
-            const srcs = srcRes.files || []
-            T.symbols = syms
-            setSymbols(syms)
-            setSourceFiles(srcs)
-            setActiveFileIdx(srcs.findIndex(f => f.path === tn.path) >= 0 ? srcs.findIndex(f => f.path === tn.path) : 0)
-            setLoadingSource(false)
-
-            // Find mesh position for fly-through target
-            let targetPos = new THREE.Vector3(0, 0, 0)
-            nodesGroup.children.forEach(g => {
-              const mesh = g.children.find(c => (c as any).isMesh) as THREE.Mesh | undefined
-              if (mesh && mesh.userData?.treeNode?.path === tn.path) {
-                targetPos = g.position.clone()
-              }
-            })
-
-            flyThrough(targetPos, () => renderLevel(3, tn, syms))
-            T.currentPath = newPath
-            setZoomLevel(3)
-            setCurrentPath(newPath)
-            setCurrentNode(tn)
-            setSelectedMeta(null)
-            setHoveredMeta(null)
-          } catch (e) {
-            console.error('Failed to load symbols for Level 3', e)
-            setLoadingSource(false)
-          }
-        }
-      } else if (meta.level === 3 && meta.symbol) {
-        // Level 3 -> 4: expand in place for class with methods
-        const sym = meta.symbol
-        if ((sym.kind === 'class' || sym.kind === 'struct' || sym.kind === 'interface') && sym.methods && sym.methods.length > 0) {
-          const newPath = [...T.currentPath, sym.name]
-          expandInPlace(() => renderLevel(4, meta.treeNode!, [sym]))
-          T.currentPath = newPath
-          setZoomLevel(4)
-          setCurrentPath(newPath)
-          setSelectedMeta(null)
-          setHoveredMeta(null)
-        } else {
-          // Function click at Level 3 — select it to show code
-          setSelectedMeta(meta)
-          if (meta.symbol && cmInstanceRef.current && meta.symbol.line_start) {
-            setTimeout(() => cmInstanceRef.current?.scrollIntoView({ line: meta.symbol!.line_start - 1, ch: 0 }), 100)
-          }
-        }
-      } else if (meta.level === 4 && meta.method) {
-        // Method click — select to show in CodeMirror
-        setSelectedMeta(meta)
-        if (meta.methodLineStart && cmInstanceRef.current) {
-          setTimeout(() => cmInstanceRef.current?.scrollIntoView({ line: meta.methodLineStart! - 1, ch: 0 }), 100)
-        }
-      }
-    }
-    zoomIntoRef.current = zoomInto
-
-    const zoomOut = () => {
-      if (T.transitioning) return
-      if (T.zoomLevel <= 1) return
-
-      const newLevel = (T.zoomLevel === 4 ? 3 : T.zoomLevel === 3 ? 2 : 1) as ZoomLevel
-      const newPath = [...T.currentPath]
-      newPath.pop()
-      T.currentPath = newPath
-
-      if (newLevel === 1) {
-        expandInPlace(() => renderLevel(1, T.tree))
-        setZoomLevel(1)
-        setCurrentPath([])
-        setCurrentNode(T.tree)
-        setSelectedMeta(null)
-        setHoveredMeta(null)
-        setSymbols([])
-        setSourceFiles([])
-      } else if (newLevel === 2) {
-        // Go back to the parent folder
-        const parentNode = findNodeByPath(T.tree!, newPath)
-        expandInPlace(() => renderLevel(2, parentNode || T.tree))
-        setZoomLevel(2)
-        setCurrentPath(newPath)
-        setCurrentNode(parentNode || T.tree)
-        setSelectedMeta(null)
-        setHoveredMeta(null)
-        setSymbols([])
-        setSourceFiles([])
-      } else if (newLevel === 3) {
-        // Back from Level 4 to Level 3
-        expandInPlace(() => renderLevel(3, T.currentNode, T.symbols))
-        setZoomLevel(3)
-        setCurrentPath(newPath)
-        setSelectedMeta(null)
-        setHoveredMeta(null)
-      }
-    }
-    zoomOutRef.current = zoomOut
-
-    /** Walk the tree following a path of names. */
-    const findNodeByPath = (root: TreeNode, path: string[]): TreeNode | null => {
-      let node: TreeNode | null = root
-      for (const seg of path) {
-        if (!node || !node.children) return null
-        const found: TreeNode | undefined = node.children.find(c => c.name === seg)
-        if (!found) return null
-        node = found
-      }
-      return node
-    }
-
-    /* ================================================================ */
-    /*  Event handlers                                                  */
-    /* ================================================================ */
-
-    const mouse = new THREE.Vector2()
-
-    const getMeshUnderMouse = (event: MouseEvent): THREE.Mesh | null => {
-      const rect = renderer.domElement.getBoundingClientRect()
-      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
-      mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
-      raycaster.setFromCamera(mouse, camera)
-      const hits = raycaster.intersectObjects(nodesGroup.children, true)
-      const hit = hits.find(h => (h.object as any).isMesh && (h.object as THREE.Mesh).userData?.level && !(h.object as THREE.Mesh).userData?._glow)
-      return hit ? hit.object as THREE.Mesh : null
-    }
-
-    const onMouseMove = (event: MouseEvent) => {
-      const mesh = getMeshUnderMouse(event)
-      if (mesh) {
-        if (T.hoveredMesh !== mesh) {
-          // Reset previous
-          if (T.hoveredMesh && T.hoveredMesh !== T.selectedMesh) {
-            const mat = T.hoveredMesh.material as THREE.MeshStandardMaterial
-            mat.emissiveIntensity = 0.4
-          }
-          T.hoveredMesh = mesh
-          const mat = mesh.material as THREE.MeshStandardMaterial
-          mat.emissiveIntensity = 1.0
-          // Dim other nodes
-          nodesGroup.children.forEach(g => {
-            const m = g.children.find(c => (c as any).isMesh && (c as THREE.Mesh).userData?.level && !(c as THREE.Mesh).userData?._glow) as THREE.Mesh | undefined
-            if (m && m !== mesh) {
-              const mmat = m.material as THREE.MeshStandardMaterial
-              mmat.opacity = 0.2
-              mmat.emissiveIntensity = 0.1
-            }
-          })
-          setHoveredMeta(mesh.userData as NodeMeta)
-        }
-        renderer.domElement.style.cursor = 'pointer'
-      } else {
-        if (T.hoveredMesh && T.hoveredMesh !== T.selectedMesh) {
-          const mat = T.hoveredMesh.material as THREE.MeshStandardMaterial
-          mat.emissiveIntensity = 0.4
-        }
-        T.hoveredMesh = null
-        // Restore all nodes
-        nodesGroup.children.forEach(g => {
-          const m = g.children.find(c => (c as any).isMesh && (c as THREE.Mesh).userData?.level && !(c as THREE.Mesh).userData?._glow) as THREE.Mesh | undefined
-          if (m && m !== T.selectedMesh) {
-            const mmat = m.material as THREE.MeshStandardMaterial
-            mmat.opacity = 1.0
-            mmat.emissiveIntensity = 0.4
-          }
-        })
-        setHoveredMeta(null)
-        renderer.domElement.style.cursor = 'default'
-      }
-    }
-
-    const onClick = (event: MouseEvent) => {
-      if (T.transitioning) return
-      const mesh = getMeshUnderMouse(event)
-      if (mesh) {
-        const meta = mesh.userData as NodeMeta
-        // Click = drill into the node (zoom to next level)
-        zoomInto(meta)
-      } else {
-        // Click on deep space — zoom out one level
-        if (T.selectedMesh) {
-          const pm = T.selectedMesh.material as THREE.MeshStandardMaterial
-          pm.emissiveIntensity = 0.7
-          T.selectedMesh = null
-          setSelectedMeta(null)
-        }
-        if (T.zoomLevel > 1) {
-          zoomOut()
-        } else {
-          setSelectedMeta(null)
-        }
-      }
-    }
-
-    // Scroll is 100% OrbitControls camera zoom — no level navigation on scroll
-    const onWheel = (_event: WheelEvent) => { /* OrbitControls handles zoom */ }
-
-    const onResize = () => {
-      if (!container) return
-      camera.aspect = container.clientWidth / container.clientHeight
-      camera.updateProjectionMatrix()
-      renderer.setSize(container.clientWidth, container.clientHeight)
-    }
-
-    // ---- Attach events ----
-    renderer.domElement.addEventListener('wheel', onWheel)
-    renderer.domElement.addEventListener('mousemove', onMouseMove)
-    renderer.domElement.addEventListener('click', onClick)
-    window.addEventListener('resize', onResize)
-
-    /* ================================================================ */
-    /*  Animation loop                                                  */
-    /* ================================================================ */
-
-    const animate = () => {
-      T.animationId = requestAnimationFrame(animate)
-      controls.update()
-      starsGroup.rotation.y += 0.0001
-
-      // Lerp node scale on hover/select
-      nodesGroup.children.forEach(g => {
-        const mesh = g.children.find(c => (c as any).isMesh) as THREE.Mesh | undefined
-        if (!mesh) return
-        const isHovered = T.hoveredMesh === mesh
-        const isSelected = T.selectedMesh === mesh
-        const ts = isSelected ? 1.8 : isHovered ? 1.3 : 1.0
-        mesh.scale.lerp(new THREE.Vector3(ts, ts, ts), 0.1)
-      })
-
-      // Distance-based label opacity
-      if (!T.hoveredMesh && !T.selectedMesh) {
-        nodesGroup.children.forEach(g => {
-          const label = g.children.find(c => c instanceof THREE.Sprite) as THREE.Sprite | undefined
-          if (!label) return
-          const dist = camera.position.distanceTo(g.position)
-          const op = clamp(1 - dist / 2500, 0.1, 0.9)
-          ;(label.material as THREE.SpriteMaterial).opacity = op
-        })
-      }
-
-      renderer.render(scene, camera)
-    }
-
-    /* ================================================================ */
-    /*  Load tree data and kick off                                     */
-    /* ================================================================ */
-
-    api.architectureTree()
-      .then(treeData => {
-        T.tree = treeData
-        setTree(treeData)
-        setCurrentNode(treeData)
-        renderLevel(1, treeData)
-        setLoading(false)
-      })
-      .catch(err => {
-        console.error('Failed to load architecture tree', err)
-        setLoading(false)
-      })
-
-    animate()
-
-    /* ---- Cleanup ---- */
     return () => {
-      cancelAnimationFrame(T.animationId)
-      renderer.domElement.removeEventListener('wheel', onWheel)
-      renderer.domElement.removeEventListener('mousemove', onMouseMove)
-      renderer.domElement.removeEventListener('click', onClick)
-      window.removeEventListener('resize', onResize)
-      renderer.dispose()
-      while (container.firstChild) container.removeChild(container.firstChild)
-      threeRef.current = null
+      cancelled = true
     }
   }, [])
 
-  /* ================================================================== */
-  /*  CodeMirror integration (Levels 3 & 4)                             */
-  /* ================================================================== */
+  useEffect(() => {
+    if (!selectedModule) {
+      setSourceFiles([])
+      setSymbols([])
+      return
+    }
+
+    let cancelled = false
+    setLoadingDetails(true)
+
+    Promise.all([api.moduleSource(selectedModule), api.moduleSymbols(selectedModule)])
+      .then(([sourceRes, symbolsRes]) => {
+        if (cancelled) return
+        setSourceFiles(sourceRes.files || [])
+        setSymbols(symbolsRes.symbols || [])
+        setActiveFileIdx(0)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSourceFiles([])
+          setSymbols([])
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingDetails(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [selectedModule])
 
   useEffect(() => {
-    if (zoomLevel < 3 || sourceFiles.length === 0) return
     const file = sourceFiles[activeFileIdx]
     if (!file) return
 
-    const timer = setTimeout(() => {
-      const el = codeMirrorRef.current
-      if (!el) return
+    const timer = window.setTimeout(() => {
+      const root = codeMirrorRef.current
+      if (!root) return
 
       if (cmInstanceRef.current) {
         cmInstanceRef.current.toTextArea()
         cmInstanceRef.current = null
       }
-      while (el.firstChild) el.removeChild(el.firstChild)
-      const ta = document.createElement('textarea')
-      el.appendChild(ta)
 
-      const CM = (window as any).CodeMirror
-      if (!CM) return
-      cmInstanceRef.current = CM.fromTextArea(ta, {
+      while (root.firstChild) root.removeChild(root.firstChild)
+      const textarea = document.createElement('textarea')
+      root.appendChild(textarea)
+
+      const CodeMirror = (window as any).CodeMirror
+      if (!CodeMirror) return
+
+      cmInstanceRef.current = CodeMirror.fromTextArea(textarea, {
         value: file.content,
         mode: file.language || null,
         readOnly: true,
@@ -1152,283 +331,394 @@ export function Atlas3DPage() {
         theme: 'atlas-cosmic',
       })
       cmInstanceRef.current.setValue(file.content)
-    }, 50)
+    }, 40)
 
-    return () => clearTimeout(timer)
-  }, [zoomLevel, sourceFiles, activeFileIdx])
+    return () => window.clearTimeout(timer)
+  }, [sourceFiles, activeFileIdx])
 
-  /* ================================================================== */
-  /*  Breadcrumb navigation                                             */
-  /* ================================================================== */
+  const activeModule = selectedModule || hoveredModule || graphNodes[0]?.name || null
+  const cognitiveMap = new Map(cognitiveItems.map((item) => [item.module, item]))
+  const nodeMap = new Map(layoutNodes.map((node) => [node.id, node]))
+  const connectedToActive = new Set<string>()
 
-  const jumpToBreadcrumb = useCallback((index: number) => {
-    const T = threeRef.current
-    if (!T || !T.tree || T.transitioning) return
+  if (activeModule) {
+    connectedToActive.add(activeModule)
+    graphEdges.forEach((edge) => {
+      if (edge.from === activeModule) connectedToActive.add(edge.to)
+      if (edge.to === activeModule) connectedToActive.add(edge.from)
+    })
+  }
 
-    if (index === -1) {
-      // Jump to project root / Level 1
-      T.currentPath = []
-      T.zoomLevel = 1
-      renderLevelRef.current(1, T.tree)
-      setZoomLevel(1)
-      setCurrentPath([])
-      setCurrentNode(T.tree)
-      setSelectedMeta(null)
-      setSymbols([])
-      setSourceFiles([])
-      return
-    }
+  const details: ModuleDetails | null = activeModule
+    ? (() => {
+        const treeNode = matchTreeNode(tree, activeModule)
+        const inbound = graphEdges.filter((edge) => edge.to === activeModule).map((edge) => edge.from)
+        const outbound = graphEdges.filter((edge) => edge.from === activeModule).map((edge) => edge.to)
+        const cognitive = cognitiveMap.get(activeModule) || null
+        const debt = cognitive?.cognitive_debt_score || treeNode?.debt || treeNode?.avg_debt || 0
+        return {
+          module: activeModule,
+          treeNode,
+          inbound,
+          outbound,
+          degree: inbound.length + outbound.length,
+          debt,
+          group: getModuleGroup(activeModule),
+          cognitive,
+        }
+      })()
+    : null
 
-    const newPath = currentPath.slice(0, index + 1)
-    // Walk the tree to find the node
-    let node: TreeNode | null = T.tree
-    for (const seg of newPath) {
-      if (!node || !node.children) break
-      node = node.children.find(c => c.name === seg) || null
-    }
-    if (!node) return
+  const focusModules = [...layoutNodes]
+    .sort((a, b) => b.degree - a.degree)
+    .slice(0, 4)
 
-    const level = (node.type === 'file' ? 3 : Math.min(index + 2, 2)) as ZoomLevel
-    T.currentPath = newPath
-    T.zoomLevel = level
-    if (level <= 2) {
-      renderLevelRef.current(level, node)
-      setSymbols([])
-      setSourceFiles([])
-    }
-    setZoomLevel(level)
-    setCurrentPath(newPath)
-    setCurrentNode(node)
-    setSelectedMeta(null)
-  }, [currentPath])
+  const decisionHighlights = decisions.filter((item) => item.status === 'accepted' || item.status === 'resolved').slice(0, 3)
+  const topRisks = risks.slice(0, 3)
+  const symbolGroups = {
+    classes: symbols.filter((item) => item.kind === 'class' || item.kind === 'struct' || item.kind === 'interface'),
+    functions: symbols.filter((item) => item.kind === 'function'),
+  }
 
-  /* ================================================================== */
-  /*  Detail panel content                                              */
-  /* ================================================================== */
+  const handleSymbolClick = (symbol: SymbolItem) => {
+    const fileIndex = sourceFiles.findIndex((file) => file.path === symbol.file_path)
+    if (fileIndex >= 0) setActiveFileIdx(fileIndex)
+    window.setTimeout(() => {
+      cmInstanceRef.current?.scrollIntoView({ line: Math.max(symbol.line_start - 1, 0), ch: 0 }, 120)
+      cmInstanceRef.current?.setCursor({ line: Math.max(symbol.line_start - 1, 0), ch: 0 })
+    }, 140)
+  }
 
-  const activeMeta = selectedMeta || hoveredMeta
-
-  const renderPanelContent = () => {
-    if (!activeMeta) return null
-
-    if (activeMeta.level === 1 && activeMeta.treeNode) {
-      const n = activeMeta.treeNode
-      return (
-        <>
-          <div style={{ fontSize: 18, color: '#fff', marginBottom: 16, fontWeight: 500 }}>{n.name}</div>
-          <div className="panel" style={{ padding: 12, background: 'rgba(255,255,255,0.02)', border: '1px solid #222', marginBottom: 8 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 12 }}>
-              <div><span style={{ color: '#666' }}>FILES</span></div><div style={{ color: '#fff' }}>{n.file_count || 0}</div>
-              <div><span style={{ color: '#666' }}>AVG DEBT</span></div><div style={{ color: getDebtCSS(n.avg_debt || 0) }}>{Math.round(n.avg_debt || 0)}%</div>
-            </div>
+  return (
+    <div className="atlas-page">
+      <section className="atlas-hero">
+        <div>
+          <div className="muted atlas-kicker">// project_atlas</div>
+          <h1 className="atlas-title">Atlas</h1>
+          <p className="atlas-subtitle">
+            Un mapa didáctico del proyecto. La idea no es solo ver módulos, sino entender cómo se hablan, dónde vive la complejidad y por dónde conviene empezar a leer.
+          </p>
+        </div>
+        <div className="atlas-vitals">
+          <div className="atlas-vital">
+            <span>modules</span>
+            <strong>{graphNodes.length}</strong>
           </div>
-          {n.children && n.children.length > 0 && (
-            <div style={{ fontSize: 10, color: '#666', marginTop: 8 }}>
-              {n.children.filter(c => c.type === 'folder').length} sub-folders, {n.children.filter(c => c.type === 'file').length} files
-            </div>
-          )}
-          <div style={{ fontSize: 11, color: '#00eeff', opacity: 0.6, marginTop: 12 }}>Click or scroll to enter</div>
-        </>
-      )
-    }
+          <div className="atlas-vital">
+            <span>edges</span>
+            <strong>{graphEdges.length}</strong>
+          </div>
+          <div className="atlas-vital">
+            <span>decisions</span>
+            <strong>{overview?.decisions || 0}</strong>
+          </div>
+          <div className="atlas-vital">
+            <span>risks</span>
+            <strong>{overview?.risks || 0}</strong>
+          </div>
+        </div>
+      </section>
 
-    if (activeMeta.level === 2 && activeMeta.treeNode) {
-      const n = activeMeta.treeNode
-      if (n.type === 'file') {
-        return (
-          <>
-            <div style={{ fontSize: 18, color: '#fff', marginBottom: 16, fontWeight: 500 }}>{n.name}</div>
-            <div className="panel" style={{ padding: 12, background: 'rgba(255,255,255,0.02)', border: '1px solid #222', marginBottom: 8 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 12 }}>
-                <div><span style={{ color: '#666' }}>LINES</span></div><div style={{ color: '#fff' }}>{n.lines?.toLocaleString() || '?'}</div>
-                <div><span style={{ color: '#666' }}>DEBT</span></div><div style={{ color: getDebtCSS(n.debt || 0) }}>{Math.round(n.debt || 0)}%</div>
-                <div><span style={{ color: '#666' }}>SYMBOLS</span></div><div style={{ color: '#fff' }}>{n.symbol_count || 0}</div>
-                {n.language && <><div><span style={{ color: '#666' }}>LANGUAGE</span></div><div style={{ color: '#fff' }}>{n.language}</div></>}
+      {error && <div className="error">{error}</div>}
+
+      {loading ? (
+        <div className="atlas-loading">Materializing the map...</div>
+      ) : (
+        <div className="atlas-layout">
+          <aside className="atlas-sidebar">
+            <section className="atlas-card atlas-story-card">
+              <div className="atlas-card-label">Project Story</div>
+              <p>{overview?.story || 'Run analyze to generate the project narrative.'}</p>
+            </section>
+
+            <section className="atlas-card">
+              <div className="atlas-card-head">
+                <span className="atlas-card-label">How To Read This</span>
+              </div>
+              <div className="atlas-learning-path">
+                <div>
+                  <strong>1. Mira el grafo.</strong>
+                  <span>Los hubs grandes son puntos de coordinación. Los colores separan capas del sistema.</span>
+                </div>
+                <div>
+                  <strong>2. Selecciona un nodo.</strong>
+                  <span>El panel derecho traduce ese módulo a lenguaje humano: rol, dependencias, símbolos y código.</span>
+                </div>
+                <div>
+                  <strong>3. Sigue las conexiones.</strong>
+                  <span>Imports y dependents te dejan reconstruir el flujo real del proyecto sin perderte en archivos sueltos.</span>
+                </div>
+              </div>
+            </section>
+
+            <section className="atlas-card">
+              <div className="atlas-card-head">
+                <span className="atlas-card-label">Suggested Entry Points</span>
+              </div>
+              <div className="atlas-entry-list">
+                {focusModules.map((module) => (
+                  <button
+                    key={module.id}
+                    className={`atlas-entry-item${selectedModule === module.id ? ' atlas-entry-item--active' : ''}`}
+                    onClick={() => setSelectedModule(module.id)}
+                  >
+                    <span>{getModuleLeaf(module.name)}</span>
+                    <small>{groupLabels[module.group] || groupLabels.core}</small>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="atlas-card">
+              <div className="atlas-card-head">
+                <span className="atlas-card-label">Architectural Intent</span>
+              </div>
+              <div className="atlas-signal-list">
+                {decisionHighlights.length > 0 ? (
+                  decisionHighlights.map((decision) => (
+                    <div key={decision.id} className="atlas-signal-item">
+                      <strong>{decision.title}</strong>
+                      <span>{decision.summary || 'No summary yet.'}</span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="muted">No accepted decisions yet.</div>
+                )}
+              </div>
+            </section>
+          </aside>
+
+          <main className="atlas-graph-card">
+            <div className="atlas-graph-head">
+              <div>
+                <div className="atlas-card-label">Knowledge Graph</div>
+                <div className="atlas-graph-caption">Obsidian-style view of module relationships</div>
+              </div>
+              <div className="atlas-legend">
+                {Object.entries(groupLabels).map(([group, label]) => (
+                  <span key={group}>
+                    <i style={{ background: groupColors[group] || groupColors.core }} />
+                    {label}
+                  </span>
+                ))}
               </div>
             </div>
-            <div style={{ fontSize: 11, color: '#00eeff', opacity: 0.6, marginTop: 12 }}>Click or scroll to enter</div>
-          </>
-        )
-      }
-      // Sub-folder at Level 2
-      return (
-        <>
-          <div style={{ fontSize: 18, color: '#fff', marginBottom: 16, fontWeight: 500 }}>{n.name}</div>
-          <div className="panel" style={{ padding: 12, background: 'rgba(255,255,255,0.02)', border: '1px solid #222', marginBottom: 8 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 12 }}>
-              <div><span style={{ color: '#666' }}>FILES</span></div><div style={{ color: '#fff' }}>{n.file_count || 0}</div>
-              <div><span style={{ color: '#666' }}>AVG DEBT</span></div><div style={{ color: getDebtCSS(n.avg_debt || 0) }}>{Math.round(n.avg_debt || 0)}%</div>
-            </div>
-          </div>
-          <div style={{ fontSize: 11, color: '#00eeff', opacity: 0.6, marginTop: 12 }}>Click to expand</div>
-        </>
-      )
-    }
 
-    if (activeMeta.level === 3 && activeMeta.symbol) {
-      const sym = activeMeta.symbol
-      const isClass = sym.kind === 'class' || sym.kind === 'struct' || sym.kind === 'interface'
-      return (
-        <>
-          <div style={{ fontSize: 18, color: '#fff', marginBottom: 16, fontWeight: 500 }}>{sym.name}</div>
-          <div className="panel" style={{ padding: 12, background: 'rgba(255,255,255,0.02)', border: '1px solid #222', marginBottom: 8 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 12 }}>
-              <div><span style={{ color: '#666' }}>KIND</span></div><div style={{ color: '#fff' }}>{sym.kind}</div>
-              <div><span style={{ color: '#666' }}>LINES</span></div><div style={{ color: '#fff' }}>{sym.line_start}-{sym.line_end}</div>
-              {isClass && sym.methods && <><div><span style={{ color: '#666' }}>METHODS</span></div><div style={{ color: '#fff' }}>{sym.methods.length}</div></>}
-              {sym.inherits && sym.inherits.length > 0 && <><div><span style={{ color: '#666' }}>INHERITS</span></div><div style={{ color: '#00eeff' }}>{sym.inherits.join(', ')}</div></>}
-            </div>
-          </div>
-          {sym.calls && sym.calls.length > 0 && (
-            <div style={{ fontSize: 10, color: '#666', marginTop: 8 }}>
-              CALLS: <span style={{ color: '#888' }}>{sym.calls.slice(0, 5).join(', ')}{sym.calls.length > 5 ? '...' : ''}</span>
-            </div>
-          )}
-          {sym.called_by && sym.called_by.length > 0 && (
-            <div style={{ fontSize: 10, color: '#666', marginTop: 4 }}>
-              CALLED BY: <span style={{ color: '#888' }}>{sym.called_by.slice(0, 5).join(', ')}</span>
-            </div>
-          )}
-          {isClass && sym.methods && sym.methods.length > 0 && (
-            <div style={{ fontSize: 11, color: '#00eeff', opacity: 0.6, marginTop: 12 }}>Click or scroll to see methods</div>
-          )}
-        </>
-      )
-    }
+            <div className="atlas-graph-frame">
+              <svg viewBox={`0 0 ${GRAPH_WIDTH} ${GRAPH_HEIGHT}`} className="atlas-graph">
+                <defs>
+                  <radialGradient id="atlasGlow" cx="50%" cy="50%" r="65%">
+                    <stop offset="0%" stopColor="rgba(103, 232, 249, 0.28)" />
+                    <stop offset="100%" stopColor="rgba(103, 232, 249, 0)" />
+                  </radialGradient>
+                </defs>
 
-    if (activeMeta.level === 4) {
-      if (activeMeta.method) {
-        return (
-          <>
-            <div style={{ fontSize: 18, color: '#fff', marginBottom: 16, fontWeight: 500 }}>{activeMeta.method}</div>
-            <div className="panel" style={{ padding: 12, background: 'rgba(255,255,255,0.02)', border: '1px solid #222', marginBottom: 8 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 12 }}>
-                <div><span style={{ color: '#666' }}>KIND</span></div><div style={{ color: '#fff' }}>method</div>
-                {activeMeta.methodLineStart && (
-                  <><div><span style={{ color: '#666' }}>LINES</span></div><div style={{ color: '#fff' }}>{activeMeta.methodLineStart}-{activeMeta.methodLineEnd}</div></>
+                {graphEdges.map((edge) => {
+                  const from = nodeMap.get(edge.from)
+                  const to = nodeMap.get(edge.to)
+                  if (!from || !to) return null
+                  const active = activeModule && (edge.from === activeModule || edge.to === activeModule)
+                  const faded = activeModule && !active
+                  return (
+                    <line
+                      key={`${edge.from}-${edge.to}`}
+                      x1={from.x}
+                      y1={from.y}
+                      x2={to.x}
+                      y2={to.y}
+                      className={`atlas-edge${active ? ' atlas-edge--active' : ''}${faded ? ' atlas-edge--faded' : ''}`}
+                    />
+                  )
+                })}
+
+                {layoutNodes.map((node) => {
+                  const active = activeModule === node.id
+                  const adjacent = connectedToActive.has(node.id)
+                  const faded = activeModule && !adjacent
+                  return (
+                    <g
+                      key={node.id}
+                      className={`atlas-node${active ? ' atlas-node--active' : ''}${faded ? ' atlas-node--faded' : ''}`}
+                      transform={`translate(${node.x}, ${node.y})`}
+                      onMouseEnter={() => setHoveredModule(node.id)}
+                      onMouseLeave={() => setHoveredModule((current) => (current === node.id ? null : current))}
+                      onClick={() => setSelectedModule(node.id)}
+                    >
+                      <circle className="atlas-node-glow" r={node.radius * 1.9} fill="url(#atlasGlow)" />
+                      <circle
+                        r={node.radius}
+                        fill={groupColors[node.group] || groupColors.core}
+                        stroke={active ? '#ffffff' : getDebtColor(node.debt)}
+                        strokeWidth={active ? 2.5 : 1.25}
+                      />
+                      <text y={node.radius + 18} textAnchor="middle">
+                        {getModuleLeaf(node.name)}
+                      </text>
+                    </g>
+                  )
+                })}
+              </svg>
+            </div>
+
+            <div className="atlas-graph-footer">
+              <div className="atlas-focus-strip">
+                {focusModules.map((module) => (
+                  <button
+                    key={module.id}
+                    className={`atlas-mini-pill${selectedModule === module.id ? ' atlas-mini-pill--active' : ''}`}
+                    onClick={() => setSelectedModule(module.id)}
+                  >
+                    {getModuleLeaf(module.name)}
+                  </button>
+                ))}
+              </div>
+
+              <div className="atlas-risk-strip">
+                {topRisks.length > 0 ? (
+                  topRisks.map((risk, index) => (
+                    <div key={`${risk.area}-${index}`} className="atlas-risk-chip">
+                      <strong>{risk.area}</strong>
+                      <span>{risk.rationale}</span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="muted">No risk signals available.</div>
                 )}
               </div>
             </div>
-          </>
-        )
-      }
-      if (activeMeta.symbol) {
-        return (
-          <>
-            <div style={{ fontSize: 18, color: '#fff', marginBottom: 16, fontWeight: 500 }}>{activeMeta.symbol.name}</div>
-            <div style={{ fontSize: 12, color: '#666' }}>{activeMeta.symbol.kind} with {activeMeta.symbol.methods?.length || 0} methods</div>
-          </>
-        )
-      }
-    }
+          </main>
 
-    return null
-  }
-
-  /* ================================================================== */
-  /*  Double-click to zoom into selected                                */
-  /* ================================================================== */
-
-  const handlePanelDoubleClick = useCallback(() => {
-    if (!selectedMeta) return
-    zoomIntoRef.current(selectedMeta)
-  }, [selectedMeta])
-
-  /* ================================================================== */
-  /*  JSX                                                               */
-  /* ================================================================== */
-
-  return (
-    <div style={{ position: 'relative', width: '100%', height: 'calc(100vh - 100px)', background: '#000', borderRadius: 12, overflow: 'hidden' }}>
-      <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
-
-      {/* Header */}
-      <div style={{ position: 'absolute', top: 30, left: 30, pointerEvents: 'none' }}>
-        <div style={{ fontSize: 10, color: '#666', letterSpacing: 3, textTransform: 'uppercase', marginBottom: 4 }}>// cosmic_project_atlas</div>
-        <div style={{ fontSize: 24, color: '#fff', fontWeight: 300 }}>The Atlas</div>
-      </div>
-
-      {/* Breadcrumb */}
-      {currentPath.length > 0 && (
-        <div className="atlas-breadcrumb">
-          <span
-            className={`atlas-breadcrumb-segment${zoomLevel === 1 ? ' atlas-breadcrumb-segment--active' : ''}`}
-            onClick={() => jumpToBreadcrumb(-1)}
-          >
-            project
-          </span>
-          {currentPath.map((seg, i) => (
-            <span key={i}>
-              <span className="atlas-breadcrumb-separator">&gt;</span>
-              <span
-                className={`atlas-breadcrumb-segment${i === currentPath.length - 1 ? ' atlas-breadcrumb-segment--active' : ''}`}
-                onClick={() => jumpToBreadcrumb(i)}
-              >
-                {seg}
-              </span>
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* Zoom level indicator */}
-      <div className="atlas-nav-hint">
-        <div>
-          <strong>LEVEL {zoomLevel}/4 · {
-            zoomLevel === 1 ? 'UNIVERSE' :
-            zoomLevel === 2 ? 'GALAXY' :
-            zoomLevel === 3 ? 'STAR SYSTEM' : 'PLANET'
-          }</strong>
-        </div>
-        <div>Scroll to zoom · Click to explore · Right-drag to orbit</div>
-      </div>
-
-      {/* Detail panel */}
-      {activeMeta && (
-        <div
-          data-augmented-ui=""
-          className={`atlas-info-panel${selectedMeta ? ' atlas-info-panel--locked' : ''}`}
-          onDoubleClick={handlePanelDoubleClick}
-        >
-          <div style={{ fontSize: 9, color: selectedMeta ? '#00eeff' : '#666', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
-            {selectedMeta ? 'Persistent link established' : 'Reading project body\u2026'}
-          </div>
-          <div style={{ display: 'grid', gap: 12 }}>
-            {renderPanelContent()}
-
-            {/* CodeMirror for Level 3/4 when selected */}
-            {selectedMeta && zoomLevel >= 3 && sourceFiles.length > 0 && (
+          <aside className="atlas-detail">
+            {details ? (
               <>
-                <div className="atlas-file-tabs">
-                  {sourceFiles.map((f, i) => (
-                    <div
-                      key={f.path}
-                      className={`atlas-file-tab${i === activeFileIdx ? ' atlas-file-tab--active' : ''}`}
-                      onClick={() => setActiveFileIdx(i)}
-                    >
-                      {f.path.split('/').pop()}
+                <section className="atlas-card atlas-detail-card">
+                  <div className="atlas-detail-top">
+                    <div>
+                      <div className="atlas-card-label">Selected Module</div>
+                      <h2>{details.module}</h2>
                     </div>
-                  ))}
-                </div>
-                <div className="atlas-code-container" ref={codeMirrorRef} />
-              </>
-            )}
-            {selectedMeta && loadingSource && sourceFiles.length === 0 && (
-              <div style={{ fontSize: 10, color: '#666', padding: 12 }}>Loading source...</div>
-            )}
-          </div>
-          {selectedMeta && (
-            <div style={{ fontSize: 11, color: '#00eeff', opacity: 0.6, marginTop: 8 }}>
-              {zoomLevel < 4 ? 'Double-click panel or scroll in to go deeper. Click deep space to go back.' : 'Click deep space to go back.'}
-            </div>
-          )}
-        </div>
-      )}
+                    <span className="atlas-detail-badge" style={{ borderColor: getDebtColor(details.debt), color: getDebtColor(details.debt) }}>
+                      {getDebtTone(details.debt)} debt
+                    </span>
+                  </div>
+                  <p className="atlas-detail-story">{summarizeModule(details)}</p>
+                  <div className="atlas-metrics">
+                    <div>
+                      <span>Group</span>
+                      <strong>{groupLabels[details.group] || groupLabels.core}</strong>
+                    </div>
+                    <div>
+                      <span>Connections</span>
+                      <strong>{details.degree}</strong>
+                    </div>
+                    <div>
+                      <span>Debt</span>
+                      <strong style={{ color: getDebtColor(details.debt) }}>{Math.round(details.debt)}%</strong>
+                    </div>
+                    <div>
+                      <span>Files</span>
+                      <strong>{details.treeNode?.file_count || (details.treeNode?.type === 'file' ? 1 : 0)}</strong>
+                    </div>
+                  </div>
+                </section>
 
-      {/* Loading overlay */}
-      {loading && (
-        <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', color: '#fff', letterSpacing: 4, fontWeight: 200 }}>
-          MATERIALIZING THE ATLAS{'\u2026'}
+                <section className="atlas-card">
+                  <div className="atlas-card-head">
+                    <span className="atlas-card-label">Why It Matters</span>
+                  </div>
+                  <div className="atlas-relations">
+                    <div>
+                      <strong>Imports</strong>
+                      <div className="atlas-chip-list">
+                        {details.outbound.length > 0 ? (
+                          details.outbound.slice(0, 8).map((module) => (
+                            <button key={module} className="atlas-chip" onClick={() => setSelectedModule(module)}>
+                              {getModuleLeaf(module)}
+                            </button>
+                          ))
+                        ) : (
+                          <span className="muted">No outbound dependencies.</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <strong>Dependents</strong>
+                      <div className="atlas-chip-list">
+                        {details.inbound.length > 0 ? (
+                          details.inbound.slice(0, 8).map((module) => (
+                            <button key={module} className="atlas-chip" onClick={() => setSelectedModule(module)}>
+                              {getModuleLeaf(module)}
+                            </button>
+                          ))
+                        ) : (
+                          <span className="muted">No inbound dependents.</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="atlas-card">
+                  <div className="atlas-card-head">
+                    <span className="atlas-card-label">Definitions Inside</span>
+                  </div>
+                  <div className="atlas-symbol-panel">
+                    {symbolGroups.classes.length === 0 && symbolGroups.functions.length === 0 ? (
+                      <div className="muted">{loadingDetails ? 'Loading definitions...' : 'No symbol data for this module.'}</div>
+                    ) : (
+                      <>
+                        {symbolGroups.classes.slice(0, 6).map((symbol) => (
+                          <button key={`${symbol.file_path}-${symbol.name}`} className="atlas-symbol-row" onClick={() => handleSymbolClick(symbol)}>
+                            <span>{symbol.name}</span>
+                            <small>{symbol.kind}</small>
+                          </button>
+                        ))}
+                        {symbolGroups.functions.slice(0, 6).map((symbol) => (
+                          <button key={`${symbol.file_path}-${symbol.name}`} className="atlas-symbol-row" onClick={() => handleSymbolClick(symbol)}>
+                            <span>{symbol.name}</span>
+                            <small>{symbol.kind}</small>
+                          </button>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                </section>
+
+                <section className="atlas-card atlas-code-card">
+                  <div className="atlas-card-head">
+                    <span className="atlas-card-label">Code Preview</span>
+                    {loadingDetails && <span className="muted">loading…</span>}
+                  </div>
+
+                  {sourceFiles.length > 0 ? (
+                    <>
+                      <div className="atlas-file-tabs">
+                        {sourceFiles.map((file, index) => (
+                          <button
+                            key={file.path}
+                            className={`atlas-file-tab${index === activeFileIdx ? ' atlas-file-tab--active' : ''}`}
+                            onClick={() => setActiveFileIdx(index)}
+                          >
+                            {getModuleLeaf(file.path)}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="atlas-code-container" ref={codeMirrorRef} />
+                    </>
+                  ) : (
+                    <div className="atlas-code-empty">
+                      {loadingDetails ? 'Loading module source…' : 'No source preview available for this module.'}
+                    </div>
+                  )}
+                </section>
+              </>
+            ) : (
+              <section className="atlas-card">
+                <div className="muted">Select a module to inspect it.</div>
+              </section>
+            )}
+          </aside>
         </div>
       )}
     </div>
