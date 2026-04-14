@@ -1,6 +1,8 @@
 # 🚀 CopyClip → Strategic Roadmap
 
-## ✅ Completed (v0.3.0)
+> Note: runtime/package version is currently `v0.4.0`. The milestones below describe product capability progress, not a strict semver changelog.
+
+## ✅ Completed (current shipped baseline)
 - [x] **Project Consciousness (GenUI):** Dynamic chat-first interface with component injection.
 - [x] **Intent Oracle (MCP):** Robust server for external agent alignment and semantic auditing.
 - [x] **Cosmic Atlas:** 3D Three.js engine with Sitting Tree and Constellation algorithms.

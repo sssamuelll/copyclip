@@ -1,5 +1,7 @@
 # CopyClip Project Intelligence v1 (Human Control Plane)
 
+> Historical design document: parts of this spec describe the original v1 vision and no longer match the current CLI exactly. For the current shipped flow, use `copyclip start`, `copyclip analyze --path ...`, `copyclip decision ...`, `copyclip mcp`, and the setup documented in `README.md` / `docs/LOCAL_DEVELOPMENT.md`.
+
 ## Vision
 
 CopyClip evolves from a context packer into a **human-facing project intelligence system** for AI-heavy software development.
@@ -13,11 +15,11 @@ Core promise:
 
 ## Product Outcome (v1)
 
-Run in any repo:
+Run in any repo (current shipped flow):
 
 ```bash
-copyclip analyze
-copyclip serve
+copyclip analyze --path .
+copyclip start --path .
 ```
 
 Open browser and get a pro dashboard with:
@@ -81,13 +83,13 @@ Outputs:
 - graph artifacts (dependencies/modules)
 - summary cache for dashboard
 
-## 2) Serve Command
+## 2) Start Command
 
 ```bash
-copyclip serve [--port 4310]
+copyclip start [--path .] [--port 4310] [--no-open]
 ```
 
-Starts local API + dashboard.
+Starts the local dashboard and API.
 
 ## 3) Decision Commands
 
@@ -99,14 +101,15 @@ copyclip decision resolve <id>
 
 Manual control for explicit human decisions.
 
-## 4) Reports
+## 4) Reports (planned / not yet a stable shipped CLI surface)
 
 ```bash
+# historical v1 idea
 copyclip report --type daily
 copyclip report --type weekly
 ```
 
-Human-readable narrative report generated from indexed data.
+Human-readable narrative reports remain part of the product direction, but the current shipped CLI is centered on `start`, `analyze`, `decision`, and `mcp`.
 
 ---
 
@@ -278,7 +281,7 @@ Weighted sum:
 ## Implementation Plan (2 weeks)
 
 ## Week 1
-1. CLI scaffolding for `analyze`, `serve`, `decision`, `report`
+1. CLI scaffolding for `analyze`, `start`, `decision`, `mcp` (with `report` retained as a future/planned surface)
 2. SQLite schema + migration setup
 3. Analyzer pipeline (files + git + docs)
 4. Basic API endpoints (`overview`, `changes`, `decisions`, `risks`)
@@ -313,7 +316,7 @@ New intelligence layer is additive.
 
 ## Immediate Next Tasks
 
-1. Create command skeletons in CLI (`analyze`, `serve`, `decision`, `report`)
+1. Create command skeletons in CLI (`analyze`, `start`, `decision`, `mcp`; `report` remains a planned surface)
 2. Add `copyclip/intelligence/` package structure
 3. Implement SQLite bootstrap + first migration
 4. Add analyzer pass: git + files + markdown extraction

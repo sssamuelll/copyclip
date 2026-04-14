@@ -1,6 +1,6 @@
 # CopyClip Intelligence API Contract v1
 
-Status: **frozen for v0.3.x**
+Status: **frozen for v0.4.x**
 
 This document defines stable endpoint behavior for the local CopyClip intelligence service started via:
 
@@ -331,4 +331,4 @@ Config body shape:
 
 ## Deprecated / internal notes
 - None formally deprecated in v1.
-- Future schema changes should preserve backward compatibility within `v0.3.x`.
+- Future schema changes should preserve backward compatibility within `v0.4.x`.

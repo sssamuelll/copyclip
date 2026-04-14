@@ -6,12 +6,14 @@ export function ChangesPage({
   items,
   risks,
   focusCommitId,
+  focusFilePath,
   onOpenDecision,
   onOpenRisk,
 }: {
   items: ChangeItem[]
   risks: RiskItem[]
   focusCommitId?: string | null
+  focusFilePath?: string | null
   onOpenDecision?: (id: number) => void
   onOpenRisk?: (area: string) => void
 }) {
@@ -28,6 +30,34 @@ export function ChangesPage({
   useEffect(() => {
     api.files().then((res) => setFiles(res.items)).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    if (focusFilePath && focusFilePath !== fileQuery) {
+      setFileQuery(focusFilePath)
+    }
+  }, [focusFilePath])
+
+  useEffect(() => {
+    if (!focusFilePath) return
+    let cancelled = false
+    const run = async () => {
+      setArchError('')
+      setArchLoading(true)
+      try {
+        const res = await api.archaeology(focusFilePath)
+        if (!cancelled) setArch(res)
+      } catch (e) {
+        if (!cancelled) {
+          setArch(null)
+          setArchError(e instanceof Error ? e.message : 'Archaeology request failed')
+        }
+      } finally {
+        if (!cancelled) setArchLoading(false)
+      }
+    }
+    run()
+    return () => { cancelled = true }
+  }, [focusFilePath])
 
   const suggestions = useMemo(() => files.filter((f) => f.path.toLowerCase().includes(fileQuery.toLowerCase())).slice(0, 20), [files, fileQuery])
   const relatedRisks = useMemo(() => {

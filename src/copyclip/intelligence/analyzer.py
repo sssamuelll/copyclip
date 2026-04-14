@@ -150,9 +150,17 @@ def _safe_git(project_root: str, args: List[str]) -> str:
 # Brief: _module_from_relpath
 
 def _module_from_relpath(rel: str) -> str:
-    parts = rel.split("/")
+    parts = [p for p in rel.split("/") if p]
     if len(parts) <= 1:
         return "root"
+
+    # Treat common source roots as container folders rather than meaningful modules.
+    if parts[0] in {"src", "lib"} and len(parts) > 2:
+        parts = parts[1:]
+
+    if len(parts) == 2:
+        return parts[0] if parts[0] in {"api", "utils"} else parts[1]
+
     return "/".join(parts[:-1])
 
 

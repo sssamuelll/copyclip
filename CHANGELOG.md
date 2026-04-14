@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.4.0 - 2026-04-14
+
+### Added
+- Reacquaintance Mode across backend, API, CLI, and dashboard UI.
+- Baseline persistence via `project_visits` and `reentry_checkpoints`.
+- `copyclip report --type reacquaint` plus optional checkpoint save support.
+- Realistic fixtures and end-to-end tests for context-switch scenarios.
+
+### Changed
+- Packaging and dependency declarations aligned with the current runtime and test setup.
+- Local development now uses `python3 -m pip install -e '\''.[dev]'\''` as the canonical editable-install path.
+- `pytest.ini` now declares asyncio test support for the MCP-related test suite.
+- Local smoke verification now runs the full backend pytest suite plus the frontend build.
+- Reacquaintance ranking now maps commit evidence to files actually touched by each commit.
+
+### Fixed
+- Test collection and execution drift caused by missing dev dependencies and async pytest configuration.
+- MCP/runtime dependency declaration drift in packaging files.
+- Documentation drift between the shipped CLI and the local development path.
+- Accidental inclusion of local generated artifacts is now prevented by `.gitignore` rules.
+
+### Test status
+- 99 passed, 1 skipped.
+
 ## v0.3.0 - 2026-03-04
 
 ### Added
