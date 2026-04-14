@@ -641,13 +641,6 @@ export function Atlas3DPage() {
             </div>
           )}
 
-          <div className="atlas-cosmic-hint">
-            <strong>{localMode ? `LOCAL · depth ${depth}` : 'GLOBAL'}</strong>
-            <div>Wheel zoom · drag canvas · drag nodes · hover highlights</div>
-            {focusNodes.length > 0 && <div>Focus: {focusNodes.map((node) => node.label).join(' · ')}</div>}
-            {topRisks.length > 0 && <div>Risk: {topRisks.map((risk) => risk.area).join(' · ')}</div>}
-          </div>
-
           <section className="atlas-cosmic-graph">
             <div className="atlas-graph-frame atlas-graph-frame--obsidian">
               <svg
@@ -721,6 +714,15 @@ export function Atlas3DPage() {
               </svg>
             </div>
           </section>
+
+          <div className="atlas-cosmic-footer">
+            <div className="atlas-cosmic-hint">
+              <strong>{localMode ? `LOCAL · depth ${depth}` : 'Atlas graph'}</strong>
+              <div>Wheel zoom · drag canvas · drag nodes · hover highlights</div>
+              {focusNodes.length > 0 && <div>Focus: {focusNodes.map((node) => node.label).join(' · ')}</div>}
+              {topRisks.length > 0 && <div>Risk: {topRisks.map((risk) => risk.area).join(' · ')}</div>}
+            </div>
+          </div>
 
           <aside data-augmented-ui="" className={`atlas-info-panel${activeNode ? ' atlas-info-panel--locked' : ''}`}>
             <div className="atlas-info-eyebrow">{activeNode ? 'Persistent link established' : 'Reading project body…'}</div>

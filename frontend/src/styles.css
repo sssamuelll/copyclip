@@ -302,20 +302,26 @@ body {
 }
 
 .atlas-cosmic-hint {
-  position: absolute;
-  bottom: 28px;
-  left: 30px;
-  z-index: 5;
   display: grid;
   gap: 4px;
   font-size: 11px;
   color: rgba(0, 238, 255, 0.45);
   line-height: 1.5;
-  pointer-events: none;
 }
 
 .atlas-cosmic-hint strong {
   color: rgba(0, 238, 255, 0.75);
+}
+
+.atlas-cosmic-footer {
+  position: absolute;
+  left: 30px;
+  right: 30px;
+  bottom: 24px;
+  z-index: 5;
+  display: flex;
+  justify-content: flex-start;
+  pointer-events: none;
 }
 
 .atlas-cosmic-graph {
@@ -848,5 +854,10 @@ body {
     right: 24px;
     width: auto;
     max-height: 40vh;
+  }
+  .atlas-cosmic-footer {
+    left: 24px;
+    right: 24px;
+    bottom: 12px;
   }
 }
