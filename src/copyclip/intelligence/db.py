@@ -412,9 +412,20 @@ def get_reentry_baseline(
     requested_mode = mode
 
     if mode == "last_seen":
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
         row = conn.execute(
-            "SELECT visited_at FROM project_visits WHERE project_id=? ORDER BY visited_at DESC LIMIT 1",
-            (project_id,),
+            """
+            SELECT visited_at
+            FROM project_visits
+            WHERE project_id=?
+              AND NOT (
+                visit_kind IN ('reacquaintance_api', 'reacquaintance_cli', 'reacquaintance_open')
+                AND visited_at >= ?
+              )
+            ORDER BY visited_at DESC
+            LIMIT 1
+            """,
+            (project_id, cutoff),
         ).fetchone()
         if row:
             return {

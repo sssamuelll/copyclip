@@ -93,6 +93,20 @@ def record_reacquaintance_visit(project_root: str, visit_kind: str = "reacquaint
     try:
         init_schema(conn)
         project_id = get_or_create_project(conn, root)
+        latest = conn.execute(
+            """
+            SELECT visited_at
+            FROM project_visits
+            WHERE project_id=? AND visit_kind IN ('reacquaintance_api', 'reacquaintance_cli', 'reacquaintance_open')
+            ORDER BY visited_at DESC
+            LIMIT 1
+            """,
+            (project_id,),
+        ).fetchone()
+        latest_dt = _parse_dt(latest[0]) if latest else None
+        now_dt = datetime.now(timezone.utc)
+        if latest_dt and (now_dt - latest_dt).total_seconds() < 30 * 60:
+            return
         record_project_visit(conn, project_id, visit_kind=visit_kind, source=source)
     finally:
         conn.close()

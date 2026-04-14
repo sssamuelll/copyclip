@@ -182,6 +182,27 @@ def test_reacquaintance_api_returns_structured_briefing():
         assert _count_visits(root_path) == 2
 
 
+def test_reacquaintance_api_does_not_consume_last_seen_baseline_on_refresh():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        root_path = str(root.absolute())
+        conn = connect(root_path)
+        init_schema(conn)
+        _seed_project(conn, root_path)
+        conn.close()
+
+        port = _free_port()
+        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
+        th.start()
+        _wait_port(port)
+
+        first = _get_json(f"http://127.0.0.1:{port}/api/reacquaintance?mode=last_seen")
+        second = _get_json(f"http://127.0.0.1:{port}/api/reacquaintance?mode=last_seen")
+
+        assert [item["title"] for item in first["top_changes"]] == [item["title"] for item in second["top_changes"]]
+        assert _count_visits(root_path) == 2
+
+
 def test_report_reacquaint_outputs_human_readable_summary(capsys, tmp_path):
     root_path = str(tmp_path)
     conn = connect(root_path)
@@ -205,6 +226,36 @@ def test_report_reacquaint_outputs_human_readable_summary(capsys, tmp_path):
     assert "Catch me up" in captured.out
     assert "Top changes" in captured.out
     assert "Read first" in captured.out
+    assert _count_visits(root_path) == 2
+
+
+def test_cli_report_does_not_create_second_reacquaintance_marker_after_api_visit(capsys, tmp_path):
+    root_path = str(tmp_path)
+    conn = connect(root_path)
+    init_schema(conn)
+    _seed_project(conn, root_path)
+    conn.close()
+
+    port = _free_port()
+    th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
+    th.start()
+    _wait_port(port)
+
+    _ = _get_json(f"http://127.0.0.1:{port}/api/reacquaintance?mode=last_seen")
+    handled = _maybe_handle_internal([
+        "copyclip",
+        "report",
+        "--type",
+        "reacquaint",
+        "--path",
+        root_path,
+        "--mode",
+        "last_seen",
+    ])
+    captured = capsys.readouterr()
+
+    assert handled is True
+    assert "Catch me up" in captured.out
     assert _count_visits(root_path) == 2
 
 def test_realistic_context_switch_api_end_to_end():

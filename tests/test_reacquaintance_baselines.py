@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from copyclip.intelligence.db import (
     connect,
     init_schema,
@@ -35,6 +37,44 @@ def test_record_project_visit_and_last_seen_baseline(tmp_path):
     assert baseline["mode"] == "last_seen"
     assert baseline["available"] is True
     assert baseline["started_at"] == "2026-04-14T18:30:00Z"
+
+
+def test_last_seen_ignores_recent_reacquaintance_session_marker(tmp_path):
+    root = str(tmp_path)
+    conn = connect(root)
+    init_schema(conn)
+    pid = get_or_create_project(conn, root)
+
+    record_project_visit(conn, pid, visit_kind="dashboard_open", visited_at="2026-04-10T09:00:00Z")
+    recent = datetime.now(timezone.utc).isoformat()
+    record_project_visit(conn, pid, visit_kind="reacquaintance_api", visited_at=recent)
+
+    baseline = get_reentry_baseline(conn, pid, mode="last_seen")
+    conn.close()
+
+    assert baseline["mode"] == "last_seen"
+    assert baseline["available"] is True
+    assert baseline["started_at"] == "2026-04-10T09:00:00Z"
+
+
+def test_last_seen_ignores_multiple_recent_reacquaintance_markers(tmp_path):
+    root = str(tmp_path)
+    conn = connect(root)
+    init_schema(conn)
+    pid = get_or_create_project(conn, root)
+
+    record_project_visit(conn, pid, visit_kind="dashboard_open", visited_at="2026-04-10T09:00:00Z")
+    recent = datetime.now(timezone.utc).isoformat()
+    record_project_visit(conn, pid, visit_kind="reacquaintance_api", visited_at=recent)
+    record_project_visit(conn, pid, visit_kind="reacquaintance_cli", visited_at=recent)
+    record_project_visit(conn, pid, visit_kind="reacquaintance_open", visited_at=recent)
+
+    baseline = get_reentry_baseline(conn, pid, mode="last_seen")
+    conn.close()
+
+    assert baseline["mode"] == "last_seen"
+    assert baseline["available"] is True
+    assert baseline["started_at"] == "2026-04-10T09:00:00Z"
 
 
 def test_checkpoint_baseline_returns_named_checkpoint(tmp_path):
