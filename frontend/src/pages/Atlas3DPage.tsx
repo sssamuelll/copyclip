@@ -480,7 +480,7 @@ export function Atlas3DPage() {
 
   const activeNode = visibleDataset.nodes.find((node) => node.id === activeId) || null
   const focusNodes = [...visibleDataset.nodes].sort((a, b) => b.degree - a.degree).slice(0, 5)
-  const topRisks = risks.slice(0, 3)
+  const topRisks = risks.slice(0, 2)
   const connected = useMemo(() => {
     const set = new Set<string>()
     if (!activeId) return set
@@ -568,134 +568,41 @@ export function Atlas3DPage() {
   }
 
   return (
-    <div className="atlas-page atlas-shell">
-      <section className="atlas-hero">
-        <div>
-          <div className="muted atlas-kicker">// atlas_graph</div>
-          <h1 className="atlas-title">Atlas</h1>
-          <p className="atlas-subtitle">
-            Mapa del proyecto con layout de workspace y grafo tipo Obsidian en el centro. Selecciona nodos, filtra, cambia a local graph y recorre el código sin salir de la vista.
-          </p>
-        </div>
-        <div className="atlas-vitals">
-          <div className="atlas-vital">
-            <span>source</span>
-            <strong>{baseDataset.source}</strong>
-          </div>
-          <div className="atlas-vital">
-            <span>nodes</span>
-            <strong>{visibleDataset.nodes.length}</strong>
-          </div>
-          <div className="atlas-vital">
-            <span>links</span>
-            <strong>{visibleDataset.edges.length}</strong>
-          </div>
-          <div className="atlas-vital">
-            <span>indexed</span>
-            <strong>{overview?.modules || 0}</strong>
-          </div>
-        </div>
-      </section>
-
+    <div className="atlas-shell">
       {loading ? (
         <div className="atlas-loading">Loading graph…</div>
       ) : error ? (
         <div className="error">{error}</div>
       ) : (
-        <div className="atlas-layout atlas-grid">
-          <aside className="atlas-sidebar">
-            <section className="atlas-card atlas-story-card">
-              <div className="atlas-card-label">Project Story</div>
-              <p>{overview?.story || 'No project story generated yet.'}</p>
-            </section>
-
-            <section className="atlas-card">
-              <div className="atlas-card-head">
-                <span className="atlas-card-label">How To Read This</span>
-              </div>
-              <div className="atlas-learning-path">
-                <div>
-                  <strong>1. Mira el centro.</strong>
-                  <span>El grafo mantiene `hover`, `pan`, `zoom`, `drag` y `local graph` tipo Obsidian.</span>
-                </div>
-                <div>
-                  <strong>2. Usa filtros rápidos.</strong>
-                  <span>Búsqueda, orphans, labels, arrows y depth cambian el mismo dataset, no una vista paralela.</span>
-                </div>
-                <div>
-                  <strong>3. Baja al código.</strong>
-                  <span>La columna derecha sigue conectada con símbolos y preview del archivo activo.</span>
-                </div>
-              </div>
-            </section>
-
-            <section className="atlas-card">
-              <div className="atlas-card-head">
-                <span className="atlas-card-label">Suggested Entry Points</span>
-              </div>
-              <div className="atlas-entry-list">
-                {focusNodes.map((node) => (
-                  <button
-                    key={node.id}
-                    className={`atlas-entry-item${selectedId === node.id ? ' atlas-entry-item--active' : ''}`}
-                    onClick={() => setSelectedId(node.id)}
-                  >
-                    <span>{node.label}</span>
-                    <small>{node.group} · {node.degree} links</small>
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <section className="atlas-card">
-              <div className="atlas-card-head">
-                <span className="atlas-card-label">Risk Signals</span>
-              </div>
-              <div className="atlas-signal-list">
-                {topRisks.length > 0 ? topRisks.map((risk, index) => (
-                  <div key={`${risk.area}-${index}`} className="atlas-signal-item">
-                    <strong>{risk.area}</strong>
-                    <span>{risk.rationale}</span>
-                  </div>
-                )) : <div className="muted">No risk signals.</div>}
-              </div>
-            </section>
-          </aside>
-
-          <section className="atlas-graph-panel atlas-graph-card">
-            <div className="atlas-toolbar">
-              <div className="atlas-toolbar-left">
-                <div className="atlas-toolbar-meta">
-                  <span>{baseDataset.source === 'dependencies' ? 'dependency graph' : 'tree graph'}</span>
-                  <span>{visibleDataset.nodes.length} nodes</span>
-                  <span>{visibleDataset.edges.length} links</span>
-                  <span>{overview?.modules || 0} indexed modules</span>
-                </div>
-              </div>
-
-              <div className="atlas-toolbar-actions">
-                <input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Search files or modules"
-                  className="atlas-search"
-                />
-                <button className={`atlas-toggle${localMode ? ' atlas-toggle--active' : ''}`} onClick={() => setLocalMode((value) => !value)}>
-                  Local graph
-                </button>
-                <button className="atlas-toggle" onClick={resetView}>Reset view</button>
-                <button className={`atlas-toggle${showSettings ? ' atlas-toggle--active' : ''}`} onClick={() => setShowSettings((value) => !value)}>
-                  Settings
-                </button>
-              </div>
+        <div className="atlas-cosmic-shell">
+          <div className="atlas-cosmic-header">
+            <div className="atlas-cosmic-kicker">// cosmic_project_atlas</div>
+            <div className="atlas-cosmic-title">The Atlas</div>
+            <div className="atlas-cosmic-meta">
+              <span>{baseDataset.source === 'dependencies' ? 'dependency graph' : 'tree graph'}</span>
+              <span>{visibleDataset.nodes.length} nodes</span>
+              <span>{visibleDataset.edges.length} links</span>
             </div>
+          </div>
 
-            <div className="atlas-panel-head">
-              <div className="atlas-panel-title">Graph</div>
-              <div className="atlas-panel-caption">Hover to highlight, drag nodes, wheel to zoom, drag canvas to pan</div>
-            </div>
+          <div className="atlas-cosmic-toolbar">
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search files or modules"
+              className="atlas-search atlas-search--cosmic"
+            />
+            <button className={`atlas-toggle${localMode ? ' atlas-toggle--active' : ''}`} onClick={() => setLocalMode((value) => !value)}>
+              Local
+            </button>
+            <button className="atlas-toggle" onClick={resetView}>Reset</button>
+            <button className={`atlas-toggle${showSettings ? ' atlas-toggle--active' : ''}`} onClick={() => setShowSettings((value) => !value)}>
+              Tuning
+            </button>
+          </div>
 
-            <div className="atlas-graph-controls">
+          {showSettings && (
+            <div className="atlas-cosmic-settings">
               {localMode && (
                 <label className="atlas-inline-control">
                   <span>Depth</span>
@@ -705,7 +612,7 @@ export function Atlas3DPage() {
               )}
               <label className="atlas-inline-check">
                 <input type="checkbox" checked={showOrphans} onChange={(event) => setShowOrphans(event.target.checked)} />
-                <span>Show orphans</span>
+                <span>Orphans</span>
               </label>
               <label className="atlas-inline-check">
                 <input type="checkbox" checked={showLabels} onChange={(event) => setShowLabels(event.target.checked)} />
@@ -715,41 +622,33 @@ export function Atlas3DPage() {
                 <input type="checkbox" checked={showArrows} onChange={(event) => setShowArrows(event.target.checked)} />
                 <span>Arrows</span>
               </label>
+              <label className="atlas-range">
+                <span>Center</span>
+                <input type="range" min="0.2" max="3" step="0.1" value={forces.center} onChange={(event) => setForces((current) => ({ ...current, center: Number(event.target.value) }))} />
+              </label>
+              <label className="atlas-range">
+                <span>Repel</span>
+                <input type="range" min="40" max="600" step="10" value={forces.repel} onChange={(event) => setForces((current) => ({ ...current, repel: Number(event.target.value) }))} />
+              </label>
+              <label className="atlas-range">
+                <span>Link</span>
+                <input type="range" min="0.05" max="1" step="0.01" value={forces.link} onChange={(event) => setForces((current) => ({ ...current, link: Number(event.target.value) }))} />
+              </label>
+              <label className="atlas-range">
+                <span>Distance</span>
+                <input type="range" min="40" max="180" step="5" value={forces.distance} onChange={(event) => setForces((current) => ({ ...current, distance: Number(event.target.value) }))} />
+              </label>
             </div>
+          )}
 
-            {showSettings && (
-              <div className="atlas-settings-panel">
-                <label className="atlas-range">
-                  <span>Center force</span>
-                  <input type="range" min="0.2" max="3" step="0.1" value={forces.center} onChange={(event) => setForces((current) => ({ ...current, center: Number(event.target.value) }))} />
-                </label>
-                <label className="atlas-range">
-                  <span>Repel force</span>
-                  <input type="range" min="40" max="600" step="10" value={forces.repel} onChange={(event) => setForces((current) => ({ ...current, repel: Number(event.target.value) }))} />
-                </label>
-                <label className="atlas-range">
-                  <span>Link force</span>
-                  <input type="range" min="0.05" max="1" step="0.01" value={forces.link} onChange={(event) => setForces((current) => ({ ...current, link: Number(event.target.value) }))} />
-                </label>
-                <label className="atlas-range">
-                  <span>Link distance</span>
-                  <input type="range" min="40" max="180" step="5" value={forces.distance} onChange={(event) => setForces((current) => ({ ...current, distance: Number(event.target.value) }))} />
-                </label>
-                <label className="atlas-range">
-                  <span>Node size</span>
-                  <input type="range" min="0.6" max="2" step="0.05" value={forces.nodeScale} onChange={(event) => setForces((current) => ({ ...current, nodeScale: Number(event.target.value) }))} />
-                </label>
-                <label className="atlas-range">
-                  <span>Link thickness</span>
-                  <input type="range" min="0.6" max="3" step="0.1" value={forces.linkWidth} onChange={(event) => setForces((current) => ({ ...current, linkWidth: Number(event.target.value) }))} />
-                </label>
-                <label className="atlas-range">
-                  <span>Text fade</span>
-                  <input type="range" min="0" max="0.9" step="0.05" value={forces.textFade} onChange={(event) => setForces((current) => ({ ...current, textFade: Number(event.target.value) }))} />
-                </label>
-              </div>
-            )}
+          <div className="atlas-cosmic-hint">
+            <strong>{localMode ? `LOCAL · depth ${depth}` : 'GLOBAL'}</strong>
+            <div>Wheel zoom · drag canvas · drag nodes · hover highlights</div>
+            {focusNodes.length > 0 && <div>Focus: {focusNodes.map((node) => node.label).join(' · ')}</div>}
+            {topRisks.length > 0 && <div>Risk: {topRisks.map((risk) => risk.area).join(' · ')}</div>}
+          </div>
 
+          <section className="atlas-cosmic-graph">
             <div className="atlas-graph-frame atlas-graph-frame--obsidian">
               <svg
                 ref={svgRef}
@@ -823,11 +722,9 @@ export function Atlas3DPage() {
             </div>
           </section>
 
-          <aside className="atlas-inspector atlas-detail">
-            <section className="atlas-card atlas-card--compact">
-              <div className="atlas-panel-head">
-                <div className="atlas-panel-title">Selection</div>
-              </div>
+          <aside data-augmented-ui="" className={`atlas-info-panel${activeNode ? ' atlas-info-panel--locked' : ''}`}>
+            <div className="atlas-info-eyebrow">{activeNode ? 'Persistent link established' : 'Reading project body…'}</div>
+            <section className="atlas-card atlas-card--compact atlas-card--transparent">
               {activeNode ? (
                 <>
                   <h2 className="atlas-node-title">{activeNode.path}</h2>
@@ -855,10 +752,8 @@ export function Atlas3DPage() {
               )}
             </section>
 
-            <section className="atlas-card atlas-card--compact">
-              <div className="atlas-panel-head">
-                <div className="atlas-panel-title">Neighbors</div>
-              </div>
+            <section className="atlas-card atlas-card--compact atlas-card--transparent">
+              <div className="atlas-panel-head"><div className="atlas-panel-title">Neighbors</div></div>
               <div className="atlas-chip-list">
                 {activeNode ? (
                   visibleDataset.edges
@@ -879,10 +774,8 @@ export function Atlas3DPage() {
               </div>
             </section>
 
-            <section className="atlas-card atlas-card--compact">
-              <div className="atlas-panel-head">
-                <div className="atlas-panel-title">Symbols</div>
-              </div>
+            <section className="atlas-card atlas-card--compact atlas-card--transparent">
+              <div className="atlas-panel-head"><div className="atlas-panel-title">Symbols</div></div>
               <div className="atlas-symbol-list">
                 {symbols.length > 0 ? (
                   symbols.slice(0, 16).map((symbol) => (
@@ -897,7 +790,7 @@ export function Atlas3DPage() {
               </div>
             </section>
 
-            <section className="atlas-card atlas-card--compact atlas-code-card">
+            <section className="atlas-card atlas-card--compact atlas-card--transparent atlas-code-card">
               <div className="atlas-panel-head">
                 <div className="atlas-panel-title">Code</div>
                 <div className="atlas-panel-caption">{loadingDetails ? 'loading…' : ''}</div>
