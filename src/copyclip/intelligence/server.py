@@ -2015,8 +2015,25 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 if not top:
                     self._json(with_meta({
                         "answer": "I don’t have enough indexed evidence to answer that yet. Re-run analyze or ask with more specific entities (module/file/decision).",
+                        "answer_summary": "I don’t have enough indexed evidence to answer that yet.",
+                        "answer_kind": "insufficient_evidence",
+                        "confidence": "low",
                         "citations": [],
                         "grounded": False,
+                        "evidence": {
+                            "files": [],
+                            "commits": [],
+                            "decisions": [],
+                            "risks": [],
+                            "symbols": [],
+                        },
+                        "evidence_selection_rationale": ["No indexed artifacts matched the current question strongly enough."],
+                        "gaps_or_unknowns": ["The current index does not contain enough matching evidence for a grounded answer."],
+                        "next_questions": [
+                            "Ask about a specific file, decision, commit, or module.",
+                            "Re-run analyze if the relevant area changed recently.",
+                        ],
+                        "next_drill_down": {"type": "none", "target": None},
                         "bundle_manifest": bundle.get("manifest", []),
                     }))
                     return
@@ -2038,6 +2055,50 @@ def run_server(project_root: str, port: int = 4310) -> None:
                         lines.append(f"Relevant file: {e['title']}")
 
                 answer = "Based on indexed project evidence, here are the strongest signals:\n- " + "\n- ".join(lines)
+                answer_summary = lines[0] if lines else "Grounded answer generated from indexed project evidence."
+                evidence_groups = {
+                    "files": [],
+                    "commits": [],
+                    "decisions": [],
+                    "risks": [],
+                    "symbols": [],
+                }
+                for e in top:
+                    item = {
+                        "id": e["id"],
+                        "label": e["title"],
+                        "snippet": e.get("snippet", ""),
+                    }
+                    if e["type"] == "file":
+                        evidence_groups["files"].append(item)
+                    elif e["type"] == "commit":
+                        evidence_groups["commits"].append(item)
+                    elif e["type"] == "decision":
+                        evidence_groups["decisions"].append(item)
+                    elif e["type"] == "risk":
+                        evidence_groups["risks"].append(item)
+
+                rationale = []
+                if evidence_groups["decisions"]:
+                    rationale.append("Selected decisions because they directly matched the question terms.")
+                if evidence_groups["risks"]:
+                    rationale.append("Included risk signals because they overlap with the same project area.")
+                if evidence_groups["commits"]:
+                    rationale.append("Included recent commits to show the latest activity around the topic.")
+                if evidence_groups["files"]:
+                    rationale.append("Included files from the compact context bundle for direct drill-down.")
+
+                next_drill_down = {"type": "none", "target": None}
+                if evidence_groups["decisions"]:
+                    next_drill_down = {"type": "decision", "target": evidence_groups["decisions"][0]["id"]}
+                elif evidence_groups["risks"]:
+                    next_drill_down = {"type": "risk", "target": evidence_groups["risks"][0]["id"]}
+                elif evidence_groups["files"]:
+                    next_drill_down = {"type": "file", "target": evidence_groups["files"][0]["id"]}
+                elif evidence_groups["commits"]:
+                    next_drill_down = {"type": "commit", "target": evidence_groups["commits"][0]["id"]}
+
+                confidence = "high" if len({c["type"] for c in citations}) >= 2 else "medium"
 
                 # Strict grounding contract: no claim without citations.
                 if not citations:
@@ -2046,8 +2107,19 @@ def run_server(project_root: str, port: int = 4310) -> None:
 
                 self._json(with_meta({
                     "answer": answer,
+                    "answer_summary": answer_summary,
+                    "answer_kind": "grounded_answer",
+                    "confidence": confidence,
                     "citations": citations,
                     "grounded": True,
+                    "evidence": evidence_groups,
+                    "evidence_selection_rationale": rationale or ["Selected the strongest indexed artifacts for this question."],
+                    "gaps_or_unknowns": [],
+                    "next_questions": [
+                        "Which file or decision should I inspect first?",
+                        "What changed most recently in this area?",
+                    ],
+                    "next_drill_down": next_drill_down,
                     "bundle_manifest": bundle.get("manifest", []),
                 }))
                 return

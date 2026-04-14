@@ -119,7 +119,7 @@ def test_decision_history_endpoint():
         assert any(item["action"] == "status_change" for item in hist["items"])
 
 
-def test_ask_endpoint_returns_grounded_answer_with_citations():
+def test_ask_endpoint_returns_evidence_first_contract():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         root_path = str(root.absolute())
@@ -151,6 +151,17 @@ def test_ask_endpoint_returns_grounded_answer_with_citations():
         assert len(res["citations"]) >= 1
         assert any(c["type"] == "decision" for c in res["citations"])
         assert "bundle_manifest" in res
+        assert res["answer_kind"] == "grounded_answer"
+        assert res["confidence"] in {"medium", "high"}
+        assert isinstance(res["answer_summary"], str) and res["answer_summary"]
+        assert isinstance(res["evidence"], dict)
+        assert set(res["evidence"].keys()) == {"files", "commits", "decisions", "risks", "symbols"}
+        assert len(res["evidence"]["decisions"]) >= 1
+        assert isinstance(res["evidence_selection_rationale"], list) and res["evidence_selection_rationale"]
+        assert isinstance(res["gaps_or_unknowns"], list)
+        assert isinstance(res["next_questions"], list)
+        assert isinstance(res["next_drill_down"], dict)
+        assert set(res["next_drill_down"].keys()) == {"type", "target"}
 
 
 def test_context_bundle_endpoint_returns_manifest():

@@ -214,15 +214,30 @@ Response:
 ```json
 {
   "answer": "...",
+  "answer_summary": "...",
+  "answer_kind": "grounded_answer",
+  "confidence": "low|medium|high",
   "citations": [
-    {"type": "decision|risk|commit", "id": "...", "label": "..."}
+    {"type": "decision|risk|commit|file", "id": "...", "label": "..."}
   ],
   "grounded": true,
+  "evidence": {
+    "files": [],
+    "commits": [],
+    "decisions": [],
+    "risks": [],
+    "symbols": []
+  },
+  "evidence_selection_rationale": ["..."],
+  "gaps_or_unknowns": [],
+  "next_questions": ["..."],
+  "next_drill_down": {"type": "file|commit|decision|risk|module|none", "target": "..."},
+  "bundle_manifest": [],
   "meta": {}
 }
 ```
 
-If evidence is insufficient, returns grounded=false with empty citations.
+If evidence is insufficient, returns `answer_kind=insufficient_evidence`, `grounded=false`, empty citations, explicit gaps, and suggested next questions.
 
 ---
 
