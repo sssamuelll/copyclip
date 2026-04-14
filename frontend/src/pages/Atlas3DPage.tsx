@@ -1022,20 +1022,13 @@ export function Atlas3DPage() {
       const mesh = getMeshUnderMouse(event)
       if (mesh) {
         const meta = mesh.userData as NodeMeta
-        // Reset previous selection visual
-        if (T.selectedMesh) {
-          const pm = T.selectedMesh.material as THREE.MeshStandardMaterial
-          pm.emissiveIntensity = 0.3
-        }
-        T.selectedMesh = mesh
-        const mat = mesh.material as THREE.MeshStandardMaterial
-        mat.emissiveIntensity = 1.5
-        setSelectedMeta(meta)
+        // Click = drill into the node (zoom to next level)
+        zoomInto(meta)
       } else {
         // Click on deep space — zoom out one level
         if (T.selectedMesh) {
           const pm = T.selectedMesh.material as THREE.MeshStandardMaterial
-          pm.emissiveIntensity = 0.3
+          pm.emissiveIntensity = 0.7
           T.selectedMesh = null
           setSelectedMeta(null)
         }
@@ -1047,19 +1040,8 @@ export function Atlas3DPage() {
       }
     }
 
-    const onWheel = (event: WheelEvent) => {
-      if (T.transitioning) return
-
-      // Only intercept scroll when directly hovering a node — otherwise let OrbitControls zoom
-      if (T.hoveredMesh && event.deltaY < 0) {
-        event.preventDefault()
-        event.stopPropagation()
-        const meta = T.hoveredMesh.userData as NodeMeta
-        zoomInto(meta)
-      }
-      // Scroll out only at deeper levels, not at Level 1
-      // At Level 1, scroll out = normal camera zoom (OrbitControls handles it)
-    }
+    // Scroll is 100% OrbitControls camera zoom — no level navigation on scroll
+    const onWheel = (_event: WheelEvent) => { /* OrbitControls handles zoom */ }
 
     const onResize = () => {
       if (!container) return
