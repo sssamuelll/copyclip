@@ -1,4 +1,4 @@
-import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, AgentResponse, AskResponse, RiskTrends, AlertRule, AlertsResponse, WeeklyExport, SchedulerState, AnalyzeJob, ArchaeologyResponse, StoryTimelineResponse, AdvisorCheckResponse, IdentityDriftResponse, DecisionLinkItem, CognitiveLoadResponse, ModuleSourceResponse, ModuleSymbolsResponse, TreeNode } from '../types/api'
+import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, AgentResponse, AskResponse, RiskTrends, AlertRule, AlertsResponse, WeeklyExport, SchedulerState, AnalyzeJob, ArchaeologyResponse, StoryTimelineResponse, AdvisorCheckResponse, IdentityDriftResponse, DecisionLinkItem, CognitiveLoadResponse, ModuleSourceResponse, ModuleSymbolsResponse, TreeNode, ReacquaintanceResponse } from '../types/api'
 
 // --- Debugging Suite Helpers ---
 const logAPI = (method: string, url: string, start: number, payload?: any, response?: any, error?: any) => {
@@ -121,6 +121,14 @@ export const api = {
   impact: (path: string) => getJSON<ImpactResult>(`/api/impact?path=${encodeURIComponent(path)}`),
   archaeology: (file: string) => getJSON<ArchaeologyResponse>(`/api/archaeology?file=${encodeURIComponent(file)}`),
   storyTimeline: (range = '30d') => getJSON<StoryTimelineResponse>(`/api/story/timeline?range=${encodeURIComponent(range)}`),
+  reacquaintance: (params?: { mode?: string; window?: string; checkpoint?: string }) => {
+    const q = new URLSearchParams()
+    if (params?.mode) q.set('mode', params.mode)
+    if (params?.window) q.set('window', params.window)
+    if (params?.checkpoint) q.set('checkpoint', params.checkpoint)
+    const suffix = q.toString() ? `?${q.toString()}` : ''
+    return getJSON<ReacquaintanceResponse>(`/api/reacquaintance${suffix}`)
+  },
   identityDrift: (range = '30d') => getJSON<IdentityDriftResponse>(`/api/identity/drift?range=${encodeURIComponent(range)}`),
   cognitiveLoad: () => getJSON<CognitiveLoadResponse>('/api/cognitive-load'),
   agentChat: (agent: string, message: string) => postJSON<AgentResponse>('/api/agents/chat', { agent, message }),

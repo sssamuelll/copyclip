@@ -1,0 +1,101 @@
+<h2>The Cosmic Scale Metaphor</h2>
+<p class="subtitle">How should the universe map to your codebase? Each scale level needs a visual identity.</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Universe → Galaxy → Star System → Planet</h3>
+      <p>4 zoom levels. Each click zooms into the next scale with a cinematic fly-through animation.</p>
+      <div style="margin-top:12px; display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; font-size:10px;">
+        <div style="padding:10px; background:rgba(0,238,255,0.05); border:1px solid rgba(0,238,255,0.15); border-radius:4px; text-align:center;">
+          <div style="font-size:20px; margin-bottom:4px;">🌌</div>
+          <div style="color:#00eeff; font-weight:bold;">Universe</div>
+          <div style="color:#888; margin-top:4px;">= Project</div>
+          <div style="color:#666; font-size:9px; margin-top:2px;">All top-level folders as galaxies floating in space</div>
+        </div>
+        <div style="padding:10px; background:rgba(102,51,153,0.08); border:1px solid rgba(102,51,153,0.2); border-radius:4px; text-align:center;">
+          <div style="font-size:20px; margin-bottom:4px;">🌀</div>
+          <div style="color:#ae63e4; font-weight:bold;">Galaxy</div>
+          <div style="color:#888; margin-top:4px;">= Folder/Module</div>
+          <div style="color:#666; font-size:9px; margin-top:2px;">Spiral of files, sub-folders as arms. Click to enter.</div>
+        </div>
+        <div style="padding:10px; background:rgba(255,170,0,0.08); border:1px solid rgba(255,170,0,0.2); border-radius:4px; text-align:center;">
+          <div style="font-size:20px; margin-bottom:4px;">☀️</div>
+          <div style="color:#ffaa00; font-weight:bold;">Star System</div>
+          <div style="color:#888; margin-top:4px;">= File</div>
+          <div style="color:#666; font-size:9px; margin-top:2px;">Central star (file) with orbiting planets (classes/functions)</div>
+        </div>
+        <div style="padding:10px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.2); border-radius:4px; text-align:center;">
+          <div style="font-size:20px; margin-bottom:4px;">🪐</div>
+          <div style="color:#10b981; font-weight:bold;">Planet</div>
+          <div style="color:#888; margin-top:4px;">= Class/Function</div>
+          <div style="color:#666; font-size:9px; margin-top:2px;">Methods as moons. Code viewer on click.</div>
+        </div>
+      </div>
+      <div style="margin-top:10px; font-size:11px; color:#666;">Deep metaphor. Most immersive. Animation-heavy. Complex to build but unforgettable UX.</div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Galaxy → Clusters → Stars</h3>
+      <p>3 zoom levels. Simpler, flatter. Project is one galaxy, folders are clusters, files are stars.</p>
+      <div style="margin-top:12px; display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; font-size:10px;">
+        <div style="padding:10px; background:rgba(0,238,255,0.05); border:1px solid rgba(0,238,255,0.15); border-radius:4px; text-align:center;">
+          <div style="font-size:20px; margin-bottom:4px;">🌀</div>
+          <div style="color:#00eeff; font-weight:bold;">Galaxy</div>
+          <div style="color:#888; margin-top:4px;">= Project</div>
+          <div style="color:#666; font-size:9px; margin-top:2px;">Overview with all clusters visible</div>
+        </div>
+        <div style="padding:10px; background:rgba(255,170,0,0.08); border:1px solid rgba(255,170,0,0.2); border-radius:4px; text-align:center;">
+          <div style="font-size:20px; margin-bottom:4px;">✨</div>
+          <div style="color:#ffaa00; font-weight:bold;">Cluster</div>
+          <div style="color:#888; margin-top:4px;">= Folder</div>
+          <div style="color:#666; font-size:9px; margin-top:2px;">Group of stars, force-directed within cluster</div>
+        </div>
+        <div style="padding:10px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.2); border-radius:4px; text-align:center;">
+          <div style="font-size:20px; margin-bottom:4px;">⭐</div>
+          <div style="color:#10b981; font-weight:bold;">Star</div>
+          <div style="color:#888; margin-top:4px;">= File</div>
+          <div style="color:#666; font-size:9px; margin-top:2px;">Click to see symbols in panel</div>
+        </div>
+      </div>
+      <div style="margin-top:10px; font-size:11px; color:#666;">Simpler to build. Fewer animation transitions. Obsidian-like but with clustering.</div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Hybrid: Universe view + Explode on click</h3>
+      <p>Start with the current view (modules as nodes). Click a node → it EXPLODES into its internal structure with a cinematic animation. Like zooming from Google Maps satellite to street view.</p>
+      <div style="margin-top:12px; display:flex; gap:12px; align-items:center;">
+        <div style="flex:1; padding:10px; background:rgba(0,0,0,0.3); border:1px solid #333; border-radius:4px; text-align:center;">
+          <div style="font-size:16px; color:#00eeff;">●</div>
+          <div style="font-size:9px; color:#888; margin-top:4px;">root (collapsed)</div>
+        </div>
+        <div style="font-size:18px; color:#00eeff;">→ click →</div>
+        <div style="flex:2; padding:10px; background:rgba(0,0,0,0.3); border:1px solid #00eeff; border-radius:4px;">
+          <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
+            <div style="text-align:center;"><div style="font-size:10px; color:#ae63e4;">●</div><div style="font-size:7px; color:#888;">cli.py</div></div>
+            <div style="text-align:center;"><div style="font-size:14px; color:#ff3333;">●</div><div style="font-size:7px; color:#888;">server.py</div></div>
+            <div style="text-align:center;"><div style="font-size:8px; color:#00eeff;">●</div><div style="font-size:7px; color:#888;">db.py</div></div>
+            <div style="text-align:center;"><div style="font-size:12px; color:#ffaa00;">●</div><div style="font-size:7px; color:#888;">analyzer.py</div></div>
+            <div style="text-align:center;"><div style="font-size:6px; color:#00eeff;">●</div><div style="font-size:7px; color:#888;">config.py</div></div>
+          </div>
+          <div style="font-size:8px; color:#555; margin-top:6px; text-align:center;">files inside root, sized by complexity, connected by imports</div>
+        </div>
+      </div>
+      <div style="margin-top:10px; font-size:11px; color:#666;">Progressive disclosure. Starts simple. Explodes on demand. Each level can explode further (file → functions). Most practical, still cinematic.</div>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:24px; padding:16px; border:1px solid rgba(255,255,255,0.06); border-radius:6px;">
+  <div style="font-size:11px; color:#00eeff; margin-bottom:8px;">MY RECOMMENDATION</div>
+  <div style="font-size:13px; color:#ccc; line-height:1.6;">
+    <strong style="color:#fff;">A — Full 4-level cosmic hierarchy.</strong> This is the signature experience that makes CopyClip unforgettable. The fly-through animation from universe → galaxy → star system → planet gives developers a visceral sense of scale and structure. It's the hardest to build but it's the experience that solves the cognitive debt problem — you can FEEL how big your project is and navigate it intuitively. Options B and C are compromises. CopyClip's vision deserves option A.
+  </div>
+</div>

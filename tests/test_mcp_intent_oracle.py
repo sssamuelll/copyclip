@@ -110,6 +110,8 @@ async def test_audit_proposal_semantic(temp_project):
     mock_client.minimize_code_contextually.return_value = "Status: REJECTED\nScore: 90\nReason: This diff introduces a Singleton pattern."
     
     with patch("copyclip.intelligence.db.db_path", return_value=str(db_file)), \
+         patch("copyclip.llm.config.load_config", return_value={}), \
+         patch("copyclip.llm.provider_config.resolve_provider", return_value={"name": "openai", "model": "test-model"}), \
          patch("copyclip.llm_client.LLMClientFactory.create", return_value=mock_client):
         
         # Link 'src/auth.py' to Decision #1 (No Singletons)

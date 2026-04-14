@@ -1,0 +1,80 @@
+<h2>Node Labels</h2>
+<p class="subtitle">How should module names display in the 3D graph?</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Always Visible (Obsidian-style)</h3>
+      <p>Every node shows its label at all times. Labels face the camera (billboarding). Opacity fades with distance so far-away labels don't clutter.</p>
+      <div style="margin-top:12px; padding:10px; background:rgba(0,0,0,0.4); border-radius:4px; display:flex; gap:20px; align-items:center; justify-content:center;">
+        <div style="text-align:center;">
+          <div style="width:16px; height:16px; border-radius:50%; background:#00eeff; margin:0 auto 6px;"></div>
+          <div style="font-size:11px; color:#fff; opacity:1;">server</div>
+        </div>
+        <div style="text-align:center;">
+          <div style="width:10px; height:10px; border-radius:50%; background:#ffaa00; margin:0 auto 6px;"></div>
+          <div style="font-size:10px; color:#fff; opacity:0.6;">utils</div>
+        </div>
+        <div style="text-align:center;">
+          <div style="width:7px; height:7px; border-radius:50%; background:#00eeff; margin:0 auto 6px;"></div>
+          <div style="font-size:9px; color:#fff; opacity:0.3;">config</div>
+        </div>
+      </div>
+      <div style="font-size:11px; color:#666; margin-top:8px;">Risk: can get noisy with 50+ modules</div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Proximity Reveal</h3>
+      <p>Labels only appear when the camera is close enough or the node is hovered. Clean at a distance, detailed up close. Like fog-of-war for text.</p>
+      <div style="margin-top:12px; padding:10px; background:rgba(0,0,0,0.4); border-radius:4px; display:flex; gap:20px; align-items:center; justify-content:center;">
+        <div style="text-align:center;">
+          <div style="width:16px; height:16px; border-radius:50%; background:#00eeff; margin:0 auto 6px; box-shadow:0 0 8px rgba(0,238,255,0.4);"></div>
+          <div style="font-size:11px; color:#fff; opacity:1;">server</div>
+        </div>
+        <div style="text-align:center;">
+          <div style="width:10px; height:10px; border-radius:50%; background:#ffaa00; margin:0 auto 6px;"></div>
+          <div style="font-size:10px; color:#fff; opacity:0;">&#160;</div>
+        </div>
+        <div style="text-align:center;">
+          <div style="width:7px; height:7px; border-radius:50%; background:#00eeff; margin:0 auto 6px;"></div>
+          <div style="font-size:9px; color:#fff; opacity:0;">&#160;</div>
+        </div>
+      </div>
+      <div style="font-size:11px; color:#666; margin-top:8px;">Only nearby/hovered nodes show names</div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Hybrid: Top Nodes + Hover</h3>
+      <p>The top N most-connected nodes always show labels (they're the landmarks). Everything else shows labels only on hover. Best orientation without clutter.</p>
+      <div style="margin-top:12px; padding:10px; background:rgba(0,0,0,0.4); border-radius:4px; display:flex; gap:20px; align-items:center; justify-content:center;">
+        <div style="text-align:center;">
+          <div style="width:18px; height:18px; border-radius:50%; background:#00eeff; margin:0 auto 6px; box-shadow:0 0 8px rgba(0,238,255,0.3);"></div>
+          <div style="font-size:11px; color:#00eeff; opacity:1;">server</div>
+        </div>
+        <div style="text-align:center;">
+          <div style="width:14px; height:14px; border-radius:50%; background:#ff3333; margin:0 auto 6px;"></div>
+          <div style="font-size:10px; color:#ff6666; opacity:0.9;">analyzer</div>
+        </div>
+        <div style="text-align:center;">
+          <div style="width:7px; height:7px; border-radius:50%; background:#00eeff; margin:0 auto 6px;"></div>
+          <div style="font-size:9px; color:#fff; opacity:0;">&#160;</div>
+        </div>
+      </div>
+      <div style="font-size:11px; color:#666; margin-top:8px;">Landmarks always named, rest on hover</div>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:24px; padding:16px; border:1px solid rgba(255,255,255,0.06); border-radius:6px;">
+  <div style="font-size:11px; color:#00eeff; margin-bottom:8px;">MY RECOMMENDATION</div>
+  <div style="font-size:13px; color:#ccc; line-height:1.6;">
+    <strong style="color:#fff;">C — Hybrid.</strong> The top 8-10 most-connected modules act as landmarks you can always orient by. Smaller nodes reveal their names on hover. This gives you Obsidian's readability for the important nodes without the clutter of labeling every single module. The landmark labels also serve as natural anchor points when navigating the 3D space.
+  </div>
+</div>

@@ -1,4 +1,4 @@
-# 🚀 CopyClip v0.3.0
+# 🚀 CopyClip v0.4.0
 
 **Project Intelligence Dashboard + Intent Authority MCP Server**
 
@@ -61,7 +61,7 @@ pip install "copyclip @ git+https://github.com/sssamuelll/copyclip.git"
 ```bash
 git clone https://github.com/sssamuelll/copyclip.git
 cd copyclip
-pip install -e .
+python3 -m pip install -e '.[dev]'
 ```
 
 ### Updating
@@ -79,13 +79,30 @@ copyclip start
 ```
 *Note: If it's your first time, CopyClip will guide you through an interactive LLM setup (DeepSeek, OpenAI, Anthropic, etc.) and perform an initial project analysis.*
 
+### Local development (green path)
+From source, the canonical local development path is:
+
+```bash
+python3 -m pip install -e '.[dev]'
+npm --prefix frontend install
+./scripts/dev-smoke.sh
+copyclip start --no-open --path .
+```
+
+See `docs/LOCAL_DEVELOPMENT.md` for the full verified local setup flow and the current smoke-check entrypoint.
+
 ### 3. Connect External Agents (MCP)
 Add CopyClip to your `mcp_servers` configuration:
 ```json
 "copyclip": {
   "command": "copyclip",
-  "args": ["mcp", "start"]
+  "args": ["mcp"]
 }
+```
+
+You can verify the command locally with:
+```bash
+copyclip mcp --help
 ```
 
 ---

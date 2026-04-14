@@ -1,0 +1,69 @@
+<h2>Zoom/Explode Transition Style</h2>
+<p class="subtitle">When you click a node to enter it, how does the camera move and how does the content appear?</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Cinematic Fly-Through</h3>
+      <p>Camera accelerates toward the node, passes through the "surface", and decelerates into the interior space. Like entering a wormhole. The surrounding universe fades and the inner contents materialize.</p>
+      <div style="margin-top:12px; display:flex; gap:4px; align-items:center; justify-content:center;">
+        <div style="width:40px; height:40px; border-radius:50%; background:radial-gradient(circle, #00eeff 30%, transparent 70%); display:flex; align-items:center; justify-content:center; font-size:8px; color:#000;">zoom</div>
+        <div style="color:#00eeff;">→</div>
+        <div style="width:60px; height:60px; border-radius:50%; background:radial-gradient(circle, rgba(0,238,255,0.3) 0%, transparent 80%); display:flex; align-items:center; justify-content:center; font-size:7px; color:#00eeff; border:1px solid rgba(0,238,255,0.2);">warp</div>
+        <div style="color:#00eeff;">→</div>
+        <div style="width:100px; height:60px; background:rgba(0,0,0,0.4); border:1px solid rgba(0,238,255,0.15); border-radius:8px; display:flex; align-items:center; justify-content:center; gap:6px; padding:4px;">
+          <div style="width:6px; height:6px; border-radius:50%; background:#ae63e4;"></div>
+          <div style="width:10px; height:10px; border-radius:50%; background:#ff3333;"></div>
+          <div style="width:4px; height:4px; border-radius:50%; background:#00eeff;"></div>
+          <div style="width:8px; height:8px; border-radius:50%; background:#ffaa00;"></div>
+        </div>
+      </div>
+      <div style="font-size:11px; color:#666; margin-top:8px;">Most immersive. ~1.5s animation. Camera path + easing + particle trail. Heaviest to implement.</div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Smooth Expand-in-Place</h3>
+      <p>The node grows and splits open, revealing its children. Other nodes fade out and drift away. Like a cell dividing under a microscope. The camera stays mostly still.</p>
+      <div style="margin-top:12px; display:flex; gap:4px; align-items:center; justify-content:center;">
+        <div style="width:30px; height:30px; border-radius:50%; background:#00eeff; display:flex; align-items:center; justify-content:center; font-size:7px; color:#000;">root</div>
+        <div style="color:#555;">→</div>
+        <div style="width:50px; height:50px; border-radius:50%; background:rgba(0,238,255,0.15); border:1px dashed rgba(0,238,255,0.3); display:flex; align-items:center; justify-content:center;">
+          <div style="width:20px; height:20px; border-radius:50%; background:rgba(0,238,255,0.5);"></div>
+        </div>
+        <div style="color:#555;">→</div>
+        <div style="width:100px; height:60px; display:flex; align-items:center; justify-content:center; gap:8px;">
+          <div style="width:8px; height:8px; border-radius:50%; background:#ae63e4;"></div>
+          <div style="width:12px; height:12px; border-radius:50%; background:#ff3333;"></div>
+          <div style="width:6px; height:6px; border-radius:50%; background:#00eeff;"></div>
+          <div style="width:10px; height:10px; border-radius:50%; background:#ffaa00;"></div>
+        </div>
+      </div>
+      <div style="font-size:11px; color:#666; margin-top:8px;">Elegant. Camera doesn't move much. ~0.8s animation. Easier to implement. Still satisfying.</div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Both: Quick expand + fly-through for deep zoom</h3>
+      <p>Level 1→2 (project → folders): smooth expand. Level 2→3 (folder → files): fly-through. Level 3→4 (file → functions): expand again. Alternating styles give each level a distinct feel.</p>
+      <div style="margin-top:12px; font-size:10px; color:#888; line-height:1.8;">
+        <span style="color:#00eeff;">Universe → Galaxy:</span> expand-in-place (quick)<br/>
+        <span style="color:#ae63e4;">Galaxy → Star System:</span> cinematic fly-through (dramatic)<br/>
+        <span style="color:#ffaa00;">Star System → Planet:</span> expand-in-place (quick)<br/>
+      </div>
+      <div style="font-size:11px; color:#666; margin-top:8px;">Best of both. Variety prevents animation fatigue. Each level feels different.</div>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:24px; padding:16px; border:1px solid rgba(255,255,255,0.06); border-radius:6px;">
+  <div style="font-size:11px; color:#00eeff; margin-bottom:8px;">MY RECOMMENDATION</div>
+  <div style="font-size:13px; color:#ccc; line-height:1.6;">
+    <strong style="color:#fff;">C — Alternating styles.</strong> A full fly-through on every click gets repetitive. Alternating between expand and fly-through gives each zoom level its own personality and prevents animation fatigue. The dramatic fly-through is reserved for the most important transition (entering a folder/module), while the quick expand handles the lighter transitions.
+  </div>
+</div>

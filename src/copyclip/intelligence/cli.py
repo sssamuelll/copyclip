@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import socket
+from pathlib import Path
 
 from .analyzer import analyze
 from .db import connect, init_schema
@@ -310,6 +311,73 @@ def _maybe_handle_internal(argv) -> bool:
         p.parse_args(argv[2:])
         print(_info("Starting MCP Oracle..."))
         asyncio.run(run_mcp_server())
+        return True
+
+    if cmd == "report":
+        from .reacquaintance import build_reacquaintance_briefing
+
+        p = argparse.ArgumentParser(
+            prog="copyclip report",
+            description="Generate human-readable local reports from CopyClip intelligence data.",
+        )
+        p.add_argument("--path", default=".", help="Project root path (default: current directory)")
+        p.add_argument("--type", choices=["reacquaint"], default="reacquaint", help="Report type")
+        p.add_argument("--mode", choices=["last_seen", "last_analysis", "window", "checkpoint"], default="last_seen", help="Baseline mode")
+        p.add_argument("--window", default="7d", help="Rolling window when mode=window (default: 7d)")
+        p.add_argument("--checkpoint", default=None, help="Checkpoint name when mode=checkpoint")
+        p.add_argument("--json", action="store_true", help="Print raw JSON instead of human-readable text")
+        args = p.parse_args(argv[2:])
+
+        root = os.path.abspath(args.path)
+        briefing = build_reacquaintance_briefing(root, baseline_mode=args.mode, window=args.window, checkpoint_name=args.checkpoint)
+        if args.json:
+            print(json.dumps(briefing, indent=2))
+            return True
+
+        print(_c("Catch me up", "36;1"))
+        print(f"Project: {briefing['meta'].get('project', Path(root).name)}")
+        print(f"Baseline: {briefing['meta'].get('baseline_label', args.mode)}")
+        print(f"Confidence: {briefing['meta'].get('confidence', 'low')}")
+        print("")
+
+        refresher = briefing.get("project_refresher", {})
+        if refresher.get("summary"):
+            print(refresher["summary"])
+            print("")
+
+        changes = briefing.get("top_changes", [])
+        print("Top changes")
+        if changes:
+            for item in changes[:3]:
+                print(f"- {item.get('title', 'Recent change')} [{item.get('primary_area', 'repository')}]")
+        else:
+            print("- No major changes surfaced for this baseline.")
+        print("")
+
+        reads = briefing.get("read_first", [])
+        print("Read first")
+        if reads:
+            for item in reads[:3]:
+                print(f"- {item.get('target')} ({item.get('estimated_minutes', '?')} min)")
+        else:
+            print("- No recommended reading sequence available yet.")
+        print("")
+
+        top_risk = briefing.get("top_risk")
+        print("Top risk")
+        if top_risk:
+            print(f"- {top_risk.get('area')} [{top_risk.get('severity')}/{top_risk.get('kind')}]")
+        else:
+            print("- No top risk surfaced.")
+        print("")
+
+        questions = briefing.get("open_questions", [])
+        if questions:
+            print("Open questions")
+            for q in questions[:3]:
+                print(f"- {q.get('question')}")
+            print("")
+
         return True
 
     if cmd == "update":

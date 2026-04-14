@@ -1,0 +1,73 @@
+<h2>Edge Visual Style</h2>
+<p class="subtitle">How should the connections between modules render in 3D space?</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Straight Lines (Obsidian-faithful)</h3>
+      <p>Simple straight lines between connected nodes. Clean, minimal, exactly like Obsidian's graph. Opacity/thickness based on connection strength.</p>
+      <div style="margin-top:12px; display:flex; align-items:center; gap:16px;">
+        <svg width="200" height="60" viewBox="0 0 200 60">
+          <circle cx="20" cy="30" r="8" fill="#00eeff" opacity="0.8"/>
+          <circle cx="180" cy="30" r="6" fill="#00eeff" opacity="0.6"/>
+          <line x1="28" y1="30" x2="172" y2="30" stroke="#00eeff" stroke-width="1.5" opacity="0.3"/>
+        </svg>
+        <span style="font-size:11px; color:#888;">Thin, semi-transparent cyan lines</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Glowing Filaments (cosmic)</h3>
+      <p>Lines with additive blending glow, like energy streams between stars. Brighter where connections are stronger. Subtle animated pulse along the line.</p>
+      <div style="margin-top:12px; display:flex; align-items:center; gap:16px;">
+        <svg width="200" height="60" viewBox="0 0 200 60">
+          <defs>
+            <filter id="glow"><feGaussianBlur stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          </defs>
+          <circle cx="20" cy="30" r="8" fill="#00eeff" filter="url(#glow)"/>
+          <circle cx="180" cy="30" r="6" fill="#00eeff" filter="url(#glow)"/>
+          <line x1="28" y1="30" x2="172" y2="30" stroke="#00eeff" stroke-width="2" opacity="0.5" filter="url(#glow)"/>
+        </svg>
+        <span style="font-size:11px; color:#888;">Glowing lines with energy feel</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Minimal by Default, Glow on Focus</h3>
+      <p>Very faint lines at rest (almost invisible). When you hover/select a node, its edges light up with a glow. Keeps the view clean when exploring, reveals structure on demand.</p>
+      <div style="margin-top:12px; display:flex; flex-direction:column; gap:8px;">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <svg width="200" height="40" viewBox="0 0 200 40">
+            <circle cx="20" cy="20" r="8" fill="#00eeff" opacity="0.6"/>
+            <circle cx="180" cy="20" r="6" fill="#00eeff" opacity="0.4"/>
+            <line x1="28" y1="20" x2="172" y2="20" stroke="#00eeff" stroke-width="0.5" opacity="0.1"/>
+          </svg>
+          <span style="font-size:11px; color:#666;">at rest</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <svg width="200" height="40" viewBox="0 0 200 40">
+            <defs><filter id="glow2"><feGaussianBlur stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+            <circle cx="20" cy="20" r="10" fill="#00eeff" filter="url(#glow2)"/>
+            <circle cx="180" cy="20" r="6" fill="#00eeff" filter="url(#glow2)" opacity="0.8"/>
+            <line x1="30" y1="20" x2="172" y2="20" stroke="#00eeff" stroke-width="2" opacity="0.6" filter="url(#glow2)"/>
+          </svg>
+          <span style="font-size:11px; color:#00eeff;">on hover/select</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:24px; padding:16px; border:1px solid rgba(255,255,255,0.06); border-radius:6px;">
+  <div style="font-size:11px; color:#00eeff; margin-bottom:8px;">MY RECOMMENDATION</div>
+  <div style="font-size:13px; color:#ccc; line-height:1.6;">
+    <strong style="color:#fff;">C — Minimal by default, glow on focus.</strong> With up to 800 edges, always-visible lines would turn the view into a hairball. Obsidian has the same problem at scale and solves it with opacity fade. Option C goes further: edges are nearly invisible until you interact, then they reveal the structure around the focused node. Best of both worlds.
+  </div>
+</div>

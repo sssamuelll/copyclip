@@ -1,0 +1,92 @@
+<h2>Code Viewer Panel Position</h2>
+<p class="subtitle">Where does the code panel sit relative to the 3D Atlas and the augmented-ui info panel?</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Right Sidebar (below info panel)</h3>
+      <p>Code viewer stacks below the augmented-ui info panel on the right side. Info panel stays compact at the top, code fills the rest of the height. Both share the right edge.</p>
+      <div style="margin-top:12px; border:1px solid #333; border-radius:4px; overflow:hidden;">
+        <div style="display:flex; height:200px; background:#0a0a0a;">
+          <div style="flex:1; display:flex; align-items:center; justify-content:center; color:#333; font-size:11px; border-right:1px solid #222;">
+            3D ATLAS
+          </div>
+          <div style="width:140px; display:flex; flex-direction:column;">
+            <div style="padding:8px; border-bottom:1px solid #00eeff; border-left:1px solid #00eeff; font-size:8px; color:#00eeff;">
+              INFO PANEL<br/><span style="color:#666;">module name<br/>debt · connections</span>
+            </div>
+            <div style="flex:1; padding:8px; border-left:1px solid #333; font-size:7px; color:#888; font-family:monospace; overflow:hidden; background:rgba(255,255,255,0.02);">
+              <span style="color:#00eeff;">def</span> handler():<br/>
+              &nbsp;&nbsp;<span style="color:#666;"># source code</span><br/>
+              &nbsp;&nbsp;<span style="color:#ffaa00;">return</span> resp
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="font-size:11px; color:#666; margin-top:6px;">Atlas keeps full height. Code panel is narrow but always visible.</div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Bottom Drawer (slides up)</h3>
+      <p>Code viewer slides up from the bottom as a resizable drawer, like a terminal pane in VS Code. Atlas shrinks vertically. Info panel stays top-right.</p>
+      <div style="margin-top:12px; border:1px solid #333; border-radius:4px; overflow:hidden;">
+        <div style="display:flex; flex-direction:column; height:200px; background:#0a0a0a;">
+          <div style="flex:1; position:relative;">
+            <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#333; font-size:11px;">
+              3D ATLAS
+            </div>
+            <div style="position:absolute; top:8px; right:8px; width:100px; padding:6px; border:1px solid #00eeff; font-size:7px; color:#00eeff; background:rgba(0,0,0,0.85);">
+              INFO PANEL
+            </div>
+          </div>
+          <div style="height:70px; border-top:1px solid #333; padding:8px; font-size:7px; color:#888; font-family:monospace; background:rgba(255,255,255,0.02);">
+            <div style="font-size:7px; color:#00eeff; margin-bottom:4px;">server.py</div>
+            <span style="color:#00eeff;">def</span> handler():<br/>
+            &nbsp;&nbsp;<span style="color:#ffaa00;">return</span> response
+          </div>
+        </div>
+      </div>
+      <div style="font-size:11px; color:#666; margin-top:6px;">Full width for code. Atlas loses some vertical space.</div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Toggleable Split (replaces info panel)</h3>
+      <p>When a node is selected, the augmented-ui panel expands to show code below the info section. Single panel, two modes: compact (hover) vs expanded with code (selected). No new panel — just grows.</p>
+      <div style="margin-top:12px; border:1px solid #333; border-radius:4px; overflow:hidden;">
+        <div style="display:flex; height:200px; background:#0a0a0a;">
+          <div style="flex:1; display:flex; align-items:center; justify-content:center; color:#333; font-size:11px;">
+            3D ATLAS
+          </div>
+          <div style="width:160px; border-left:2px solid #00eeff; display:flex; flex-direction:column;">
+            <div style="padding:8px; font-size:8px; color:#00eeff; border-bottom:1px solid #222;">
+              PERSISTENT LINK<br/><span style="color:#fff; font-size:9px;">server</span><br/><span style="color:#666;">debt · 12 in · 8 out</span>
+            </div>
+            <div style="padding:6px; font-size:7px; color:#666; border-bottom:1px solid #222;">
+              <span style="color:#00eeff;">db</span> | <span style="color:#ffaa00;">agents</span> | <span style="color:#00eeff;">cli</span>
+            </div>
+            <div style="flex:1; padding:8px; font-size:7px; color:#888; font-family:monospace; overflow:hidden; background:rgba(255,255,255,0.02);">
+              <span style="color:#00eeff;">class</span> Handler:<br/>
+              &nbsp;&nbsp;<span style="color:#00eeff;">def</span> do_GET():<br/>
+              &nbsp;&nbsp;&nbsp;&nbsp;...
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="font-size:11px; color:#666; margin-top:6px;">One unified panel. Keeps the augmented-ui frame. Most cohesive.</div>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:24px; padding:16px; border:1px solid rgba(255,255,255,0.06); border-radius:6px;">
+  <div style="font-size:11px; color:#00eeff; margin-bottom:8px;">MY RECOMMENDATION</div>
+  <div style="font-size:13px; color:#ccc; line-height:1.6;">
+    <strong style="color:#fff;">C — Toggleable Split.</strong> The augmented-ui panel already appears on select. Instead of adding a second panel, we expand it: info section on top, code section below, all within the same augmented-ui frame. On hover it stays compact (just info). On click/select it expands to show code. This keeps the Atlas view clean (no extra panels eating space) and maintains one cohesive augmented-ui element.
+  </div>
+</div>

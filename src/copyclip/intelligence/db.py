@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -277,6 +278,24 @@ def init_schema(conn: sqlite3.Connection) -> None:
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(project_id, path)
         );
+
+        CREATE TABLE IF NOT EXISTS project_visits (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            visit_kind TEXT DEFAULT 'dashboard_open',
+            visited_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            source TEXT DEFAULT 'local'
+        );
+
+        CREATE TABLE IF NOT EXISTS reentry_checkpoints (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            checkpoint_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            notes TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(project_id, name)
+        );
         """
     )
     # Lightweight migration for existing DBs created before new columns existed.
@@ -318,6 +337,148 @@ def init_schema(conn: sqlite3.Connection) -> None:
         pass
 
     conn.commit()
+
+
+# Brief: get_or_create_project
+
+def get_or_create_project(conn: sqlite3.Connection, project_root: str, name: str | None = None) -> int:
+    root = str(Path(project_root).resolve())
+    row = conn.execute("SELECT id FROM projects WHERE root_path=?", (root,)).fetchone()
+    if row:
+        return int(row[0])
+
+    project_name = name or Path(root).name or root
+    cur = conn.execute(
+        "INSERT INTO projects(root_path, name) VALUES(?, ?)",
+        (root, project_name),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+# Brief: record_project_visit
+
+def record_project_visit(
+    conn: sqlite3.Connection,
+    project_id: int,
+    visit_kind: str = "dashboard_open",
+    visited_at: str | None = None,
+    source: str = "local",
+) -> int:
+    timestamp = visited_at or datetime.now(timezone.utc).isoformat()
+    cur = conn.execute(
+        "INSERT INTO project_visits(project_id, visit_kind, visited_at, source) VALUES(?,?,?,?)",
+        (project_id, visit_kind, timestamp, source),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+# Brief: create_reentry_checkpoint
+
+def create_reentry_checkpoint(
+    conn: sqlite3.Connection,
+    project_id: int,
+    name: str,
+    checkpoint_at: str | None = None,
+    notes: str | None = None,
+) -> int:
+    timestamp = checkpoint_at or datetime.now(timezone.utc).isoformat()
+    cur = conn.execute(
+        """
+        INSERT INTO reentry_checkpoints(project_id, name, checkpoint_at, notes)
+        VALUES(?,?,?,?)
+        ON CONFLICT(project_id, name) DO UPDATE SET checkpoint_at=excluded.checkpoint_at, notes=excluded.notes
+        """,
+        (project_id, name, timestamp, notes),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT id FROM reentry_checkpoints WHERE project_id=? AND name=?",
+        (project_id, name),
+    ).fetchone()
+    return int(row[0]) if row else int(cur.lastrowid or 0)
+
+
+# Brief: get_reentry_baseline
+
+def get_reentry_baseline(
+    conn: sqlite3.Connection,
+    project_id: int,
+    mode: str = "last_seen",
+    window: str = "7d",
+    checkpoint_name: str | None = None,
+):
+    requested_mode = mode
+
+    if mode == "last_seen":
+        row = conn.execute(
+            "SELECT visited_at FROM project_visits WHERE project_id=? ORDER BY visited_at DESC LIMIT 1",
+            (project_id,),
+        ).fetchone()
+        if row:
+            return {
+                "mode": "last_seen",
+                "requested_mode": requested_mode,
+                "available": True,
+                "label": "since last visit",
+                "started_at": row[0],
+            }
+
+        mode = "last_analysis"
+
+    if mode == "last_analysis":
+        row = conn.execute(
+            "SELECT COALESCE(finished_at, started_at) FROM analysis_jobs WHERE project_id=? AND status='completed' ORDER BY COALESCE(finished_at, started_at) DESC LIMIT 1",
+            (project_id,),
+        ).fetchone()
+        if row and row[0]:
+            return {
+                "mode": "last_analysis",
+                "requested_mode": requested_mode,
+                "available": True,
+                "label": "since last analysis",
+                "started_at": row[0],
+            }
+
+        mode = "window"
+
+    if mode == "checkpoint":
+        row = conn.execute(
+            "SELECT checkpoint_at, name FROM reentry_checkpoints WHERE project_id=? AND name=?",
+            (project_id, checkpoint_name),
+        ).fetchone()
+        if row:
+            return {
+                "mode": "checkpoint",
+                "requested_mode": requested_mode,
+                "available": True,
+                "label": f"checkpoint:{row[1]}",
+                "started_at": row[0],
+            }
+        return {
+            "mode": "checkpoint",
+            "requested_mode": requested_mode,
+            "available": False,
+            "label": f"checkpoint:{checkpoint_name or 'unknown'}",
+            "started_at": None,
+        }
+
+    # Synthetic rolling window fallback.
+    amount = 7
+    try:
+        if isinstance(window, str) and window.endswith("d"):
+            amount = max(1, int(window[:-1]))
+    except Exception:
+        amount = 7
+    started_at = (datetime.now(timezone.utc) - timedelta(days=amount)).isoformat()
+    return {
+        "mode": "window",
+        "requested_mode": requested_mode,
+        "available": True,
+        "label": f"window:{amount}d",
+        "started_at": started_at,
+    }
 
 
 # Brief: get_active_decisions

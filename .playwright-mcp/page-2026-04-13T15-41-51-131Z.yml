@@ -1,0 +1,40 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - heading "> copyclip" [level=1] [ref=e6]
+      - navigation [ref=e7]:
+        - generic [ref=e8]:
+          - generic [ref=e9]: Consciousness
+          - generic [ref=e10]:
+            - button "ask the consciousness" [ref=e11] [cursor=pointer]
+            - button "atlas" [ref=e12] [cursor=pointer]
+            - button "chronicle" [ref=e13] [cursor=pointer]
+            - button "intent field" [ref=e14] [cursor=pointer]
+        - generic [ref=e15]:
+          - generic [ref=e16]: Structures
+          - generic [ref=e17]:
+            - button "structure graph" [ref=e18] [cursor=pointer]
+            - button "propagation oracle" [ref=e19] [cursor=pointer]
+            - button "distortion field" [ref=e20] [cursor=pointer]
+        - generic [ref=e21]:
+          - generic [ref=e22]: Bridges
+          - generic [ref=e23]:
+            - button "context forge" [ref=e24] [cursor=pointer]
+            - button "oracle of intent" [ref=e25] [cursor=pointer]
+            - button "nexus" [ref=e26] [cursor=pointer]
+    - generic [ref=e27]:
+      - generic [ref=e28]: / v0.3.0_stable
+      - generic [ref=e29]: last indexed 2026-04-13 15:41
+  - main [ref=e30]:
+    - generic [ref=e32]: ask field
+    - generic [ref=e34]:
+      - generic [ref=e35]:
+        - generic [ref=e36]: // consciousness_interface
+        - heading "Ask the Consciousness" [level=1] [ref=e37]
+        - generic [ref=e38]: Interrogate the living state of the project. Ask about architecture, intent, drift, risk, and the hidden relationships shaping the system.
+      - generic [ref=e40]:
+        - generic [ref=e41]: C
+        - generic [ref=e43]: I am the project's consciousness. Ask about architecture, intent, drift, risks, or the hidden shape of the system.
+      - generic [ref=e45]:
+        - textbox "Ask about architecture, drift, intent, or the hidden shape of the system…" [ref=e46]
+        - button "↑" [disabled] [ref=e47] [cursor=pointer]

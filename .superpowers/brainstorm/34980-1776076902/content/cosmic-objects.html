@@ -1,0 +1,73 @@
+<h2>Visual Identity of Cosmic Objects</h2>
+<p class="subtitle">Each zoom level needs a distinct Three.js geometry so you instantly know what scale you're at.</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Realistic Cosmic Objects</h3>
+      <p>Each level has a unique Three.js geometry and shader that evokes its real cosmic counterpart.</p>
+      <div style="margin-top:12px; display:grid; grid-template-columns: repeat(4,1fr); gap:8px; font-size:9px;">
+        <div style="padding:8px; background:rgba(0,0,0,0.4); border:1px solid #222; border-radius:4px; text-align:center;">
+          <div style="width:40px; height:40px; margin:0 auto 6px; border-radius:50%; background:radial-gradient(ellipse at 30% 40%, rgba(0,238,255,0.4) 0%, rgba(102,51,153,0.3) 40%, transparent 70%); border:1px solid rgba(0,238,255,0.1);"></div>
+          <div style="color:#00eeff;">Galaxy</div>
+          <div style="color:#666; margin-top:2px;">Spiral disc with particle arms. Glow halo. Rotates slowly.</div>
+        </div>
+        <div style="padding:8px; background:rgba(0,0,0,0.4); border:1px solid #222; border-radius:4px; text-align:center;">
+          <div style="width:30px; height:30px; margin:4px auto 6px; border-radius:50%; background:radial-gradient(circle, #ffaa00 0%, #ff6600 60%, transparent 80%); box-shadow:0 0 15px rgba(255,170,0,0.4);"></div>
+          <div style="color:#ffaa00;">Star</div>
+          <div style="color:#666; margin-top:2px;">Glowing sphere with corona. Pulsates. Brightness = complexity.</div>
+        </div>
+        <div style="padding:8px; background:rgba(0,0,0,0.4); border:1px solid #222; border-radius:4px; text-align:center;">
+          <div style="width:22px; height:22px; margin:8px auto 6px; border-radius:50%; background:linear-gradient(135deg, #00eeff 0%, #0066aa 100%); box-shadow:0 0 8px rgba(0,238,255,0.3);"></div>
+          <div style="color:#00eeff;">Planet</div>
+          <div style="color:#666; margin-top:2px;">Solid sphere. Color = debt. Size = connections. Orbits star.</div>
+        </div>
+        <div style="padding:8px; background:rgba(0,0,0,0.4); border:1px solid #222; border-radius:4px; text-align:center;">
+          <div style="width:12px; height:12px; margin:12px auto 6px; border-radius:50%; background:#888; box-shadow:0 0 4px rgba(255,255,255,0.2);"></div>
+          <div style="color:#888;">Moon</div>
+          <div style="color:#666; margin-top:2px;">Small, dim. Orbits planet. = methods inside a class.</div>
+        </div>
+      </div>
+      <div style="font-size:11px; color:#666; margin-top:8px;">Most visually rich. Each object is unmistakable. Requires custom shaders.</div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Abstract Geometric</h3>
+      <p>Different geometries for each level — not realistic but immediately distinguishable.</p>
+      <div style="margin-top:12px; display:grid; grid-template-columns: repeat(4,1fr); gap:8px; font-size:9px;">
+        <div style="padding:8px; background:rgba(0,0,0,0.4); border:1px solid #222; border-radius:4px; text-align:center;">
+          <div style="width:40px; height:40px; margin:0 auto 6px; background:rgba(0,238,255,0.1); border:2px solid rgba(0,238,255,0.3); border-radius:8px; transform:rotate(45deg);"></div>
+          <div style="color:#00eeff;">Folder</div>
+          <div style="color:#666; margin-top:2px;">Diamond/rhombus. Pulsing border.</div>
+        </div>
+        <div style="padding:8px; background:rgba(0,0,0,0.4); border:1px solid #222; border-radius:4px; text-align:center;">
+          <div style="width:30px; height:30px; margin:4px auto 6px; border-radius:50%; background:#ffaa00; opacity:0.8;"></div>
+          <div style="color:#ffaa00;">File</div>
+          <div style="color:#666; margin-top:2px;">Circle/sphere. Standard node.</div>
+        </div>
+        <div style="padding:8px; background:rgba(0,0,0,0.4); border:1px solid #222; border-radius:4px; text-align:center;">
+          <div style="width:0; height:0; margin:8px auto 6px; border-left:15px solid transparent; border-right:15px solid transparent; border-bottom:26px solid #00eeff;"></div>
+          <div style="color:#00eeff;">Class</div>
+          <div style="color:#666; margin-top:2px;">Triangle/pyramid. Structural.</div>
+        </div>
+        <div style="padding:8px; background:rgba(0,0,0,0.4); border:1px solid #222; border-radius:4px; text-align:center;">
+          <div style="width:22px; height:22px; margin:8px auto 6px; background:#10b981; border-radius:3px;"></div>
+          <div style="color:#10b981;">Function</div>
+          <div style="color:#666; margin-top:2px;">Square/cube. Atomic unit.</div>
+        </div>
+      </div>
+      <div style="font-size:11px; color:#666; margin-top:8px;">Cleaner. Faster to render. Less immersive but more readable.</div>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:24px; padding:16px; border:1px solid rgba(255,255,255,0.06); border-radius:6px;">
+  <div style="font-size:11px; color:#00eeff; margin-bottom:8px;">MY RECOMMENDATION</div>
+  <div style="font-size:13px; color:#ccc; line-height:1.6;">
+    <strong style="color:#fff;">A — Realistic Cosmic Objects.</strong> The whole point of the Atlas is the cosmic metaphor. Galaxies should look like galaxies — spiral particle systems with glow halos. Stars should pulse and have corona effects. Planets should orbit. This is what makes CopyClip's Atlas unforgettable and what competitors can't replicate. Abstract shapes would work but would feel like every other graph tool.
+  </div>
+</div>

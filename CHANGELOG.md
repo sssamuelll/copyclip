@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.4.0 - 2026-04-14
+
+### Changed
+- Packaging and dependency declarations aligned with the current runtime and test setup.
+- Local development now uses `python3 -m pip install -e '\''.[dev]'\''` as the canonical editable-install path.
+- `pytest.ini` now declares asyncio test support for the MCP-related test suite.
+- Local smoke verification now runs the full backend pytest suite plus the frontend build.
+
+### Fixed
+- Test collection and execution drift caused by missing dev dependencies and async pytest configuration.
+- MCP/runtime dependency declaration drift in packaging files.
+- Documentation drift between the shipped CLI and the local development path.
+
+### Test status
+- 81 passed, 1 skipped.
+
 ## v0.3.0 - 2026-03-04
 
 ### Added

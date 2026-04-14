@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .context_bundle_builder import build_context_bundle
 from .db import connect, init_schema
+from .reacquaintance import build_reacquaintance_briefing
 from .phases import (
     PHASE_COMPLETED,
     PHASE_DISCOVERY,
@@ -426,6 +427,15 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     "service": "copyclip-intelligence",
                     "version": os.getenv("COPYCLIP_VERSION", "dev"),
                 }))
+                return
+
+            if parsed.path == "/api/reacquaintance":
+                q = parse_qs(parsed.query or "")
+                mode = (q.get("mode", ["last_seen"])[0] or "last_seen").strip()
+                window = (q.get("window", ["7d"])[0] or "7d").strip()
+                checkpoint = (q.get("checkpoint", [None])[0] or None)
+                payload = build_reacquaintance_briefing(root, baseline_mode=mode, window=window, checkpoint_name=checkpoint)
+                self._json(with_meta(payload))
                 return
 
             if parsed.path == "/api/cognitive-load":

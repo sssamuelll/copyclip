@@ -1,0 +1,70 @@
+<h2>Info Panel Content (on node select)</h2>
+<p class="subtitle">What should the augmented-ui panel show when a node is clicked?</p>
+
+<div class="split">
+  <div class="mockup" data-choice="a" onclick="toggleSelect(this)" style="cursor:pointer;">
+    <div class="mockup-header">A: Compact (current + edges)</div>
+    <div class="mockup-body" style="padding:0;">
+      <div style="padding:16px; background:#0a0a0a; font-family:monospace; min-height:280px;">
+        <div style="font-size:9px; color:#00eeff; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Persistent link established</div>
+        <div style="font-size:16px; color:#fff; margin-bottom:14px;">intelligence/server</div>
+
+        <div style="padding:10px; background:rgba(255,255,255,0.02); border:1px solid #222; margin-bottom:10px;">
+          <div style="font-size:10px; color:#666; margin-bottom:3px;">COGNITIVE_DEBT</div>
+          <div style="font-size:14px; color:#ff4444;">72.3%</div>
+        </div>
+
+        <div style="padding:10px; background:rgba(255,255,255,0.02); border:1px solid #222; margin-bottom:10px;">
+          <div style="font-size:10px; color:#666; margin-bottom:6px;">CONNECTIONS</div>
+          <div style="display:flex; gap:16px;">
+            <div><span style="color:#00eeff; font-size:14px;">12</span> <span style="font-size:10px; color:#666;">inbound</span></div>
+            <div><span style="color:#00eeff; font-size:14px;">8</span> <span style="font-size:10px; color:#666;">outbound</span></div>
+          </div>
+        </div>
+
+        <div style="font-size:11px; color:#00eeff; opacity:0.6;">Click deep space to release</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mockup" data-choice="b" onclick="toggleSelect(this)" style="cursor:pointer;">
+    <div class="mockup-header">B: Detailed (neighbors list)</div>
+    <div class="mockup-body" style="padding:0;">
+      <div style="padding:16px; background:#0a0a0a; font-family:monospace; min-height:280px;">
+        <div style="font-size:9px; color:#00eeff; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Persistent link established</div>
+        <div style="font-size:16px; color:#fff; margin-bottom:14px;">intelligence/server</div>
+
+        <div style="padding:10px; background:rgba(255,255,255,0.02); border:1px solid #222; margin-bottom:10px;">
+          <div style="font-size:10px; color:#666; margin-bottom:3px;">COGNITIVE_DEBT</div>
+          <div style="font-size:14px; color:#ff4444;">72.3%</div>
+        </div>
+
+        <div style="margin-bottom:10px;">
+          <div style="font-size:10px; color:#666; margin-bottom:6px;">IMPORTS (outbound)</div>
+          <div style="font-size:11px; color:#888; line-height:1.8;">
+            <span style="color:#00eeff;">db</span> <span style="color:#333;">|</span>
+            <span style="color:#00eeff;">analyzer</span> <span style="color:#333;">|</span>
+            <span style="color:#ffaa00;">agents</span> <span style="color:#333;">|</span>
+            <span style="color:#00eeff;">cli</span>
+          </div>
+        </div>
+
+        <div>
+          <div style="font-size:10px; color:#666; margin-bottom:6px;">DEPENDENTS (inbound)</div>
+          <div style="font-size:11px; color:#888; line-height:1.8;">
+            <span style="color:#00eeff;">mcp_server</span> <span style="color:#333;">|</span>
+            <span style="color:#00eeff;">__main__</span> <span style="color:#333;">|</span>
+            <span style="color:#ff4444;">scanner</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:24px; padding:16px; border:1px solid rgba(255,255,255,0.06); border-radius:6px;">
+  <div style="font-size:11px; color:#00eeff; margin-bottom:8px;">MY RECOMMENDATION</div>
+  <div style="font-size:13px; color:#ccc; line-height:1.6;">
+    <strong style="color:#fff;">B — Detailed with neighbor list.</strong> The whole point of the graph view is understanding relationships. Showing the actual module names (color-coded by their debt level) for both inbound and outbound connections makes the info panel complement the visual. You can see the graph structure AND read the specifics without having to trace lines visually.
+  </div>
+</div>

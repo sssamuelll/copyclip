@@ -1,0 +1,47 @@
+<h2>Graph Layout Engine</h2>
+<p class="subtitle">How should nodes position themselves? This is the foundation of the Obsidian-like feel.</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Force-Directed (like Obsidian)</h3>
+      <p>Nodes repel each other, edges act as springs pulling connected nodes together. Produces organic, self-organizing clusters. This is exactly what Obsidian uses.</p>
+      <div style="margin-top:12px; padding:12px; background:rgba(0,238,255,0.05); border:1px solid rgba(0,238,255,0.15); border-radius:4px;">
+        <div style="font-size:11px; color:#888; margin-bottom:6px;">TECH: D3-force in 2D canvas or Three.js</div>
+        <div style="font-size:12px; color:#ccc;">Nodes float and settle naturally. Highly-connected modules cluster together. Isolated nodes drift to the edges. Real-time physics simulation.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Force-Directed 3D (cosmic upgrade)</h3>
+      <p>Same physics simulation but in 3D space using Three.js + OrbitControls (which Atlas already has). Nodes become spheres in space connected by glowing lines. More immersive, keeps the cosmic aesthetic.</p>
+      <div style="margin-top:12px; padding:12px; background:rgba(102,51,153,0.08); border:1px solid rgba(102,51,153,0.2); border-radius:4px;">
+        <div style="font-size:11px; color:#888; margin-bottom:6px;">TECH: Three.js + d3-force-3d</div>
+        <div style="font-size:12px; color:#ccc;">Extends what Atlas already does. Reuses the existing Three.js setup, OrbitControls, raycaster, starfield. Adds edge lines + force simulation. Depth adds visual separation between clusters.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>2D Canvas (lightweight)</h3>
+      <p>Flat 2D graph rendered on HTML5 Canvas with pan/zoom. Simpler, faster, easier to add labels and overlays. Less immersive but more practical for daily use.</p>
+      <div style="margin-top:12px; padding:12px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:4px;">
+        <div style="font-size:11px; color:#888; margin-bottom:6px;">TECH: Canvas 2D + custom force sim or sigma.js</div>
+        <div style="font-size:12px; color:#ccc;">Fast rendering, crisp text, no WebGL required. But loses the cosmic 3D feel that Atlas currently has.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:24px; padding:16px; border:1px solid rgba(255,255,255,0.06); border-radius:6px;">
+  <div style="font-size:11px; color:#00eeff; margin-bottom:8px;">MY RECOMMENDATION</div>
+  <div style="font-size:13px; color:#ccc; line-height:1.6;">
+    <strong style="color:#fff;">B — Force-Directed 3D.</strong> Atlas already has the Three.js engine, OrbitControls, raycaster, and starfield. Adding d3-force-3d gives us Obsidian's organic clustering in 3D space. We keep the cosmic immersion while gaining the relationship visibility you want. The edge lines between nodes will look like constellation links.
+  </div>
+</div>

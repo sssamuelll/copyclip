@@ -1,0 +1,97 @@
+<h2>Info Panel: What Shows at Each Zoom Level?</h2>
+<p class="subtitle">Progressive disclosure — each level shows only what matters at that scale. No scroll dumps.</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Contextual Panel — adapts to zoom level</h3>
+      <p>The augmented-ui panel morphs based on what you're looking at. Same panel, different content per level.</p>
+      <div style="margin-top:12px; display:grid; grid-template-columns: 1fr 1fr; gap:10px; font-size:9px;">
+        <div style="padding:10px; background:rgba(0,238,255,0.03); border:1px solid #222; border-radius:4px;">
+          <div style="color:#00eeff; font-size:10px; margin-bottom:6px;">UNIVERSE LEVEL (hover galaxy)</div>
+          <div style="color:#888; line-height:1.6;">
+            <strong style="color:#ccc;">src/copyclip</strong><br/>
+            12 files · 3 sub-folders<br/>
+            Debt: 42% avg<br/>
+            Hottest: server.py (72%)
+          </div>
+        </div>
+        <div style="padding:10px; background:rgba(102,51,153,0.05); border:1px solid #222; border-radius:4px;">
+          <div style="color:#ae63e4; font-size:10px; margin-bottom:6px;">GALAXY LEVEL (hover star)</div>
+          <div style="color:#888; line-height:1.6;">
+            <strong style="color:#ccc;">server.py</strong><br/>
+            2,172 lines · 45 imports<br/>
+            Debt: 72%<br/>
+            5 classes · 23 functions
+          </div>
+        </div>
+        <div style="padding:10px; background:rgba(255,170,0,0.05); border:1px solid #222; border-radius:4px;">
+          <div style="color:#ffaa00; font-size:10px; margin-bottom:6px;">STAR SYSTEM LEVEL (hover planet)</div>
+          <div style="color:#888; line-height:1.6;">
+            <strong style="color:#ccc;">IntelligenceHandler</strong><br/>
+            class · lines 85-2100<br/>
+            12 methods<br/>
+            Calls: db.connect, analyze
+          </div>
+        </div>
+        <div style="padding:10px; background:rgba(16,185,129,0.05); border:1px solid #222; border-radius:4px;">
+          <div style="color:#10b981; font-size:10px; margin-bottom:6px;">PLANET LEVEL (click method)</div>
+          <div style="color:#888; line-height:1.6;">
+            <strong style="color:#ccc;">do_GET</strong><br/>
+            method · lines 120-1850<br/>
+            Complexity: 47<br/>
+            + CodeMirror viewer
+          </div>
+        </div>
+      </div>
+      <div style="font-size:11px; color:#666; margin-top:8px;">The panel always fits in one screen. No scroll. Just the right info for the current scale.</div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Minimal HUD — no panel, info overlaid on the 3D scene</h3>
+      <p>Instead of a side panel, information floats as holographic labels directly in the 3D space near the objects. Like a spacecraft HUD.</p>
+      <div style="margin-top:12px; padding:12px; background:rgba(0,0,0,0.4); border:1px solid #222; border-radius:4px; text-align:center; position:relative; height:80px;">
+        <div style="position:absolute; top:10px; left:20px; font-size:8px; color:#00eeff; border:1px solid rgba(0,238,255,0.2); padding:2px 6px;">server.py</div>
+        <div style="position:absolute; top:10px; right:20px; font-size:8px; color:#ff3333; border:1px solid rgba(255,51,51,0.2); padding:2px 6px;">72% debt</div>
+        <div style="width:20px; height:20px; border-radius:50%; background:#00eeff; margin:20px auto 0;"></div>
+        <div style="position:absolute; bottom:8px; left:50%; transform:translateX(-50%); font-size:7px; color:#666;">2,172 lines · 45 imports</div>
+      </div>
+      <div style="font-size:11px; color:#666; margin-top:8px;">Most immersive. No UI chrome blocking the view. But limited information density.</div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Both: HUD labels in scene + detail panel on click</h3>
+      <p>Key metrics float as HUD labels in 3D space (always visible). Click/select opens the augmented-ui detail panel with deeper info + code viewer. Best of both worlds.</p>
+      <div style="margin-top:12px; display:flex; gap:12px; align-items:center;">
+        <div style="flex:1; padding:10px; background:rgba(0,0,0,0.4); border:1px solid #222; border-radius:4px; text-align:center; position:relative; height:70px;">
+          <div style="position:absolute; top:6px; right:6px; font-size:7px; color:#ff3333; background:rgba(255,0,0,0.1); padding:1px 4px;">72%</div>
+          <div style="width:16px; height:16px; border-radius:50%; background:#00eeff; margin:18px auto 0;"></div>
+          <div style="font-size:7px; color:#888; margin-top:4px;">server.py</div>
+        </div>
+        <div style="font-size:14px; color:#00eeff;">click →</div>
+        <div style="flex:1.5; padding:8px; border:1px solid #00eeff; border-radius:4px; font-size:8px; color:#888; line-height:1.6;">
+          <div style="color:#00eeff; font-size:9px; margin-bottom:4px;">PERSISTENT LINK</div>
+          <strong style="color:#fff;">server.py</strong><br/>
+          2,172 lines · Debt 72%<br/>
+          5 classes · 23 functions<br/>
+          <span style="color:#666;">[code viewer below]</span>
+        </div>
+      </div>
+      <div style="font-size:11px; color:#666; margin-top:8px;">Hover = HUD labels. Click = full detail. The spaceship sees metadata at a glance, docks for deep inspection.</div>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:24px; padding:16px; border:1px solid rgba(255,255,255,0.06); border-radius:6px;">
+  <div style="font-size:11px; color:#00eeff; margin-bottom:8px;">MY RECOMMENDATION</div>
+  <div style="font-size:13px; color:#ccc; line-height:1.6;">
+    <strong style="color:#fff;">C — HUD + detail panel.</strong> The spaceship metaphor demands that the pilot sees key metrics at a glance (HUD labels floating in space: name, debt%, size) without clicking anything. When they want to inspect deeper, they dock (click) and the augmented-ui panel opens with the contextual detail for that zoom level. This is how real space games work — HUD for awareness, dock for interaction.
+  </div>
+</div>
