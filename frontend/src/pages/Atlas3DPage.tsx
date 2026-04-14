@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 // @ts-ignore - d3-force-3d has no type declarations
 import { forceSimulation, forceManyBody, forceCenter, forceCollide, forceLink } from 'd3-force-3d'
 import { api } from '../api/client'
@@ -6,81 +6,73 @@ import type {
   ArchEdge,
   ArchNode,
   CognitiveLoadItem,
-  DecisionItem,
   ModuleSourceFile,
   Overview,
-  RiskItem,
   SymbolItem,
   TreeNode,
 } from '../types/api'
 
-type LayoutNode = {
+type GraphNode = {
   id: string
-  name: string
+  label: string
+  path: string
+  kind: 'module' | 'folder' | 'file'
   group: string
   degree: number
   debt: number
-  x: number
-  y: number
-  radius: number
+  size: number
+  modulePath: string
 }
 
-type ModuleDetails = {
-  module: string
-  treeNode: TreeNode | null
-  inbound: string[]
-  outbound: string[]
-  degree: number
-  debt: number
-  group: string
-  cognitive: CognitiveLoadItem | null
+type GraphEdge = {
+  id: string
+  source: string
+  target: string
+  type: 'import' | 'contains'
 }
 
-const GRAPH_WIDTH = 940
-const GRAPH_HEIGHT = 620
-const GRAPH_PADDING = 72
+type GraphDataset = {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  source: 'dependencies' | 'tree'
+}
 
-const groupColors: Record<string, string> = {
+type Viewport = { x: number; y: number; k: number }
+
+const CANVAS_WIDTH = 1200
+const CANVAS_HEIGHT = 760
+
+const GROUP_COLORS: Record<string, string> = {
   intelligence: '#67e8f9',
   llm: '#f59e0b',
   frontend: '#86efac',
   tests: '#fda4af',
   docs: '#c4b5fd',
-  automation: '#fdba74',
+  scripts: '#fdba74',
   config: '#94a3b8',
-  core: '#f9fafb',
-}
-
-const groupLabels: Record<string, string> = {
-  intelligence: 'Intelligence Engine',
-  llm: 'LLM Layer',
-  frontend: 'UI Layer',
-  tests: 'Tests',
-  docs: 'Docs',
-  automation: 'Automation',
-  config: 'Config',
-  core: 'Core',
+  root: '#e5e7eb',
 }
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
 }
 
-function getModuleLeaf(moduleName: string) {
-  const parts = moduleName.split('/')
-  return parts[parts.length - 1] || moduleName
+function getLeafLabel(path: string) {
+  if (!path) return 'root'
+  const pieces = path.split('/')
+  return pieces[pieces.length - 1] || path
 }
 
-function getModuleGroup(moduleName: string) {
-  const value = moduleName.toLowerCase()
-  if (value.includes('frontend')) return 'frontend'
-  if (value.includes('/llm') || value.includes(' copyclip.llm') || value.startsWith('copyclip.llm')) return 'llm'
-  if (value.includes('intelligence')) return 'intelligence'
-  if (value.includes('test')) return 'tests'
-  if (value.includes('docs') || value.endsWith('.md')) return 'docs'
-  if (value.includes('scripts') || value.includes('install')) return 'automation'
-  if (value.startsWith('.') || value.includes('package.json') || value.includes('pyproject') || value.includes('requirements')) return 'config'
-  return 'core'
+function getGroup(value: string) {
+  const lower = value.toLowerCase()
+  if (lower.includes('frontend')) return 'frontend'
+  if (lower.includes('intelligence')) return 'intelligence'
+  if (lower.includes('/llm') || lower.startsWith('copyclip/llm') || lower.startsWith('src/copyclip/llm')) return 'llm'
+  if (lower.includes('test')) return 'tests'
+  if (lower.includes('docs')) return 'docs'
+  if (lower.includes('script')) return 'scripts'
+  if (lower.startsWith('.') || lower.includes('package') || lower.includes('pyproject') || lower.includes('requirements')) return 'config'
+  return 'root'
 }
 
 function getDebtColor(debt: number) {
@@ -89,98 +81,233 @@ function getDebtColor(debt: number) {
   return '#67e8f9'
 }
 
-function getDebtTone(debt: number) {
-  if (debt >= 70) return 'High'
-  if (debt >= 45) return 'Medium'
-  return 'Low'
-}
-
 function collectTreeNodes(root: TreeNode | null) {
   if (!root) return []
-  const nodes: TreeNode[] = []
+  const out: TreeNode[] = []
   const walk = (node: TreeNode) => {
-    nodes.push(node)
+    out.push(node)
     ;(node.children || []).forEach(walk)
   }
   walk(root)
-  return nodes
+  return out
 }
 
-function matchTreeNode(root: TreeNode | null, moduleName: string) {
-  const allNodes = collectTreeNodes(root)
-  const exact = allNodes.find((node) => node.path === moduleName)
+function findTreeNode(root: TreeNode | null, modulePath: string) {
+  const nodes = collectTreeNodes(root)
+  const exact = nodes.find((node) => node.path === modulePath)
   if (exact) return exact
-
-  const bySuffix = allNodes.find((node) => node.path && (node.path.endsWith(moduleName) || moduleName.endsWith(node.path)))
-  if (bySuffix) return bySuffix
-
-  const leaf = getModuleLeaf(moduleName)
-  return allNodes.find((node) => node.name === leaf) || null
+  const suffix = nodes.find((node) => node.path && (node.path.endsWith(modulePath) || modulePath.endsWith(node.path)))
+  if (suffix) return suffix
+  return nodes.find((node) => node.name === getLeafLabel(modulePath)) || null
 }
 
-function summarizeModule(details: ModuleDetails) {
-  const groupLabel = groupLabels[details.group] || groupLabels.core
-  const fileCount = details.treeNode?.file_count || (details.treeNode?.type === 'file' ? 1 : 0)
-  if (details.group === 'intelligence') {
-    return `Este módulo pertenece al motor de inteligencia. Ayuda a interpretar el repositorio y conecta con ${details.outbound.length} dependencias para producir análisis reutilizable.`
-  }
-  if (details.group === 'frontend') {
-    return `Este módulo forma parte de la interfaz. Traduce la estructura técnica a una vista legible y recibe señal desde ${details.inbound.length} conexiones del resto del sistema.`
-  }
-  if (details.group === 'llm') {
-    return `Este módulo está en la capa de modelos. Su trabajo es convertir contexto del proyecto en prompts, decisiones y respuestas ejecutables.`
-  }
-  if (details.group === 'tests') {
-    return `Este módulo vive en la red de verificación. Actúa como guardarraíl para evitar regresiones y valida ${details.degree} relaciones dentro del proyecto.`
-  }
-  return `${groupLabel}. Tiene ${fileCount} ${fileCount === 1 ? 'archivo asociado' : 'archivos asociados'} y sirve como pieza de coordinación dentro del mapa del proyecto.`
-}
-
-function buildLayout(
-  nodes: ArchNode[],
-  edges: ArchEdge[],
+function buildDependencyGraph(
   tree: TreeNode | null,
+  rawNodes: ArchNode[],
+  rawEdges: ArchEdge[],
   cognitiveMap: Map<string, CognitiveLoadItem>,
 ) {
-  if (nodes.length === 0) return { layoutNodes: [] as LayoutNode[], visibleEdges: [] as ArchEdge[] }
+  const candidates = rawNodes
+    .map((node) => {
+      const treeNode = findTreeNode(tree, node.name)
+      if (!treeNode && node.name !== 'root') return null
+      const cognitive = cognitiveMap.get(node.name)
+      const debt = cognitive?.cognitive_debt_score || treeNode?.debt || treeNode?.avg_debt || 0
+      return {
+        id: node.name,
+        label: getLeafLabel(node.name),
+        path: node.name,
+        kind: 'module' as const,
+        group: getGroup(node.name),
+        degree: 0,
+        debt,
+        size: 18,
+        modulePath: node.name,
+      }
+    })
+    .filter(Boolean) as GraphNode[]
 
-  const degrees = new Map<string, number>()
-  nodes.forEach((node) => degrees.set(node.name, 0))
+  const nodeIds = new Set(candidates.map((node) => node.id))
+  const edges = rawEdges
+    .filter((edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to) && edge.from !== edge.to)
+    .map((edge) => ({
+      id: `${edge.from}__${edge.to}`,
+      source: edge.from,
+      target: edge.to,
+      type: 'import' as const,
+    }))
+
+  const degreeMap = new Map<string, number>()
+  candidates.forEach((node) => degreeMap.set(node.id, 0))
   edges.forEach((edge) => {
-    degrees.set(edge.from, (degrees.get(edge.from) || 0) + 1)
-    degrees.set(edge.to, (degrees.get(edge.to) || 0) + 1)
+    degreeMap.set(edge.source, (degreeMap.get(edge.source) || 0) + 1)
+    degreeMap.set(edge.target, (degreeMap.get(edge.target) || 0) + 1)
   })
 
-  const simNodes = nodes.map((node) => {
-    const treeNode = matchTreeNode(tree, node.name)
-    const cognitive = cognitiveMap.get(node.name)
-    const debt = cognitive?.cognitive_debt_score || treeNode?.debt || treeNode?.avg_debt || 0
-    const degree = degrees.get(node.name) || 0
+  const nodes = candidates.map((node) => {
+    const degree = degreeMap.get(node.id) || 0
     return {
-      id: node.name,
-      name: node.name,
+      ...node,
       degree,
-      debt,
-      group: getModuleGroup(node.name),
-      radius: clamp(16 + Math.sqrt(Math.max(degree, 1)) * 5, 18, 42),
-      x: 0,
-      y: 0,
-      z: 0,
+      size: clamp(10 + Math.sqrt(Math.max(degree, 1)) * 4, 10, 28),
     }
   })
 
-  const nodeIds = new Set(simNodes.map((node) => node.id))
-  const visibleEdges = edges.filter((edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to) && edge.from !== edge.to)
-  const links = visibleEdges.map((edge) => ({ source: edge.from, target: edge.to }))
+  if (nodes.length < 3 || edges.length < 2) return null
+  return { nodes, edges, source: 'dependencies' as const }
+}
 
-  const simulation = forceSimulation(simNodes, 3)
-    .force('charge', forceManyBody().strength(-220))
-    .force('center', forceCenter(0, 0, 0))
-    .force('collide', forceCollide().radius((node: LayoutNode) => node.radius + 18))
-    .force('link', forceLink(links).id((node: LayoutNode) => node.id).distance(110).strength(0.22))
+function buildTreeGraph(tree: TreeNode | null) {
+  if (!tree) {
+    return { nodes: [] as GraphNode[], edges: [] as GraphEdge[], source: 'tree' as const }
+  }
+
+  const nodes: GraphNode[] = []
+  const edges: GraphEdge[] = []
+  let visibleFiles = 0
+
+  const walk = (node: TreeNode, parent: TreeNode | null, depth: number) => {
+    const path = node.path || node.name || 'root'
+    const isRoot = node.name === 'root'
+    const isHidden = node.name.startsWith('.') && !isRoot
+    if (isHidden) return
+
+    if (node.type === 'file') {
+      if (visibleFiles >= 140) return
+      visibleFiles += 1
+    }
+
+    if (depth > 4 && node.type === 'folder') return
+
+    const sizeBase = node.type === 'folder' ? Math.log2((node.file_count || 1) + 2) * 3 : Math.log2((node.lines || 40) + 2)
+    nodes.push({
+      id: path,
+      label: isRoot ? 'root' : node.name,
+      path,
+      kind: node.type === 'folder' ? 'folder' : 'file',
+      group: getGroup(path),
+      degree: 0,
+      debt: node.debt || node.avg_debt || 0,
+      size: clamp(sizeBase, node.type === 'folder' ? 10 : 7, node.type === 'folder' ? 20 : 15),
+      modulePath: node.type === 'file'
+        ? (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) || 'root' : 'root')
+        : path || 'root',
+    })
+
+    if (parent) {
+      edges.push({
+        id: `${parent.path || parent.name}__${path}`,
+        source: parent.path || parent.name,
+        target: path,
+        type: 'contains',
+      })
+    }
+
+    ;(node.children || []).forEach((child) => walk(child, node, depth + 1))
+  }
+
+  walk(tree, null, 0)
+
+  const degreeMap = new Map<string, number>()
+  nodes.forEach((node) => degreeMap.set(node.id, 0))
+  edges.forEach((edge) => {
+    degreeMap.set(edge.source, (degreeMap.get(edge.source) || 0) + 1)
+    degreeMap.set(edge.target, (degreeMap.get(edge.target) || 0) + 1)
+  })
+
+  return {
+    nodes: nodes.map((node) => ({ ...node, degree: degreeMap.get(node.id) || 0 })),
+    edges,
+    source: 'tree' as const,
+  }
+}
+
+function makeDataset(
+  tree: TreeNode | null,
+  rawNodes: ArchNode[],
+  rawEdges: ArchEdge[],
+  cognitiveMap: Map<string, CognitiveLoadItem>,
+) {
+  return buildDependencyGraph(tree, rawNodes, rawEdges, cognitiveMap) || buildTreeGraph(tree)
+}
+
+function localGraph(dataset: GraphDataset, centerId: string | null, depth: number) {
+  if (!centerId) return dataset
+  const adjacency = new Map<string, Set<string>>()
+  dataset.nodes.forEach((node) => adjacency.set(node.id, new Set()))
+  dataset.edges.forEach((edge) => {
+    adjacency.get(edge.source)?.add(edge.target)
+    adjacency.get(edge.target)?.add(edge.source)
+  })
+
+  const keep = new Set<string>([centerId])
+  let frontier = new Set<string>([centerId])
+  for (let level = 0; level < depth; level += 1) {
+    const next = new Set<string>()
+    frontier.forEach((id) => {
+      adjacency.get(id)?.forEach((neighbor) => {
+        if (!keep.has(neighbor)) {
+          keep.add(neighbor)
+          next.add(neighbor)
+        }
+      })
+    })
+    frontier = next
+  }
+
+  return {
+    ...dataset,
+    nodes: dataset.nodes.filter((node) => keep.has(node.id)),
+    edges: dataset.edges.filter((edge) => keep.has(edge.source) && keep.has(edge.target)),
+  }
+}
+
+function filteredGraph(dataset: GraphDataset, search: string, showOrphans: boolean) {
+  const term = search.trim().toLowerCase()
+  const matchedNodes = dataset.nodes.filter((node) => {
+    if (!term) return true
+    return node.label.toLowerCase().includes(term) || node.path.toLowerCase().includes(term)
+  })
+  const keep = new Set(matchedNodes.map((node) => node.id))
+  const edges = dataset.edges.filter((edge) => keep.has(edge.source) && keep.has(edge.target))
+
+  if (showOrphans) {
+    return { ...dataset, nodes: matchedNodes, edges }
+  }
+
+  const connected = new Set<string>()
+  edges.forEach((edge) => {
+    connected.add(edge.source)
+    connected.add(edge.target)
+  })
+
+  return {
+    ...dataset,
+    nodes: matchedNodes.filter((node) => connected.has(node.id)),
+    edges,
+  }
+}
+
+function runLayout(dataset: GraphDataset, forces: { center: number; repel: number; link: number; distance: number }) {
+  const simNodes = dataset.nodes.map((node) => ({ ...node, x: 0, y: 0, z: 0 }))
+  const sim = forceSimulation(simNodes, 3)
+    .force('charge', forceManyBody().strength(-Math.max(forces.repel, 10)))
+    .force('center', forceCenter(0, 0, 0).strength(Math.max(forces.center, 0.01)))
+    .force('collide', forceCollide().radius((node: GraphNode) => node.size + 12))
+    .force(
+      'link',
+      forceLink(dataset.edges.map((edge) => ({ source: edge.source, target: edge.target })))
+        .id((node: GraphNode) => node.id)
+        .distance(Math.max(forces.distance, 20))
+        .strength(Math.max(forces.link, 0.01)),
+    )
     .stop()
 
-  for (let tick = 0; tick < 280; tick += 1) simulation.tick()
+  for (let i = 0; i < 240; i += 1) sim.tick()
+
+  if (simNodes.length === 1) {
+    return new Map([[simNodes[0].id, { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 }]])
+  }
 
   let minX = Infinity
   let maxX = -Infinity
@@ -196,29 +323,38 @@ function buildLayout(
 
   const spanX = Math.max(maxX - minX, 1)
   const spanY = Math.max(maxY - minY, 1)
-
-  const layoutNodes = simNodes.map((node) => ({
-    ...node,
-    x: GRAPH_PADDING + ((node.x - minX) / spanX) * (GRAPH_WIDTH - GRAPH_PADDING * 2),
-    y: GRAPH_PADDING + ((node.y - minY) / spanY) * (GRAPH_HEIGHT - GRAPH_PADDING * 2),
-  }))
-
-  return { layoutNodes, visibleEdges }
+  const positions = new Map<string, { x: number; y: number }>()
+  simNodes.forEach((node) => {
+    positions.set(node.id, {
+      x: 80 + ((node.x - minX) / spanX) * (CANVAS_WIDTH - 160),
+      y: 80 + ((node.y - minY) / spanY) * (CANVAS_HEIGHT - 160),
+    })
+  })
+  return positions
 }
 
 export function Atlas3DPage() {
+  const svgRef = useRef<SVGSVGElement>(null)
+  const interactionRef = useRef<{ mode: 'pan' | 'drag'; id?: string; x: number; y: number } | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [overview, setOverview] = useState<Overview | null>(null)
   const [tree, setTree] = useState<TreeNode | null>(null)
-  const [graphNodes, setGraphNodes] = useState<ArchNode[]>([])
-  const [graphEdges, setGraphEdges] = useState<ArchEdge[]>([])
-  const [layoutNodes, setLayoutNodes] = useState<LayoutNode[]>([])
+  const [archNodes, setArchNodes] = useState<ArchNode[]>([])
+  const [archEdges, setArchEdges] = useState<ArchEdge[]>([])
   const [cognitiveItems, setCognitiveItems] = useState<CognitiveLoadItem[]>([])
-  const [decisions, setDecisions] = useState<DecisionItem[]>([])
-  const [risks, setRisks] = useState<RiskItem[]>([])
-  const [selectedModule, setSelectedModule] = useState<string | null>(null)
-  const [hoveredModule, setHoveredModule] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [hoveredId, setHoveredId] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [localMode, setLocalMode] = useState(false)
+  const [depth, setDepth] = useState(1)
+  const [showOrphans, setShowOrphans] = useState(false)
+  const [showLabels, setShowLabels] = useState(true)
+  const [showArrows, setShowArrows] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
+  const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, k: 1 })
+  const [forces, setForces] = useState({ center: 1, repel: 260, link: 0.18, distance: 100, nodeScale: 1, linkWidth: 1.4, textFade: 0.22 })
+  const [positions, setPositions] = useState<Map<string, { x: number; y: number }>>(new Map())
   const [sourceFiles, setSourceFiles] = useState<ModuleSourceFile[]>([])
   const [symbols, setSymbols] = useState<SymbolItem[]>([])
   const [activeFileIdx, setActiveFileIdx] = useState(0)
@@ -228,36 +364,20 @@ export function Atlas3DPage() {
 
   useEffect(() => {
     let cancelled = false
-
     ;(async () => {
       try {
-        setLoading(true)
-        const [overviewRes, treeRes, architectureRes, cognitiveRes, decisionsRes, risksRes] = await Promise.all([
+        const [overviewRes, treeRes, graphRes, cognitiveRes] = await Promise.all([
           api.overview(),
           api.architectureTree(),
           api.architecture(),
           api.cognitiveLoad(),
-          api.decisions(),
-          api.risks(),
         ])
-
         if (cancelled) return
-
-        const trimmedNodes = architectureRes.nodes.slice(0, 70)
-        const nodeNames = new Set(trimmedNodes.map((node) => node.name))
-        const filteredEdges = architectureRes.edges.filter((edge) => nodeNames.has(edge.from) && nodeNames.has(edge.to))
-        const cognitiveMap = new Map(cognitiveRes.items.map((item) => [item.module, item]))
-        const { layoutNodes: nextLayoutNodes } = buildLayout(trimmedNodes, filteredEdges, treeRes, cognitiveMap)
-
         setOverview(overviewRes)
         setTree(treeRes)
-        setGraphNodes(trimmedNodes)
-        setGraphEdges(filteredEdges)
-        setLayoutNodes(nextLayoutNodes)
-        setCognitiveItems(cognitiveRes.items)
-        setDecisions(decisionsRes.items)
-        setRisks(risksRes.items)
-        setSelectedModule(trimmedNodes[0]?.name || null)
+        setArchNodes(graphRes.nodes)
+        setArchEdges(graphRes.edges)
+        setCognitiveItems(cognitiveRes.items || [])
         setError(null)
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Atlas failed to load')
@@ -265,14 +385,32 @@ export function Atlas3DPage() {
         if (!cancelled) setLoading(false)
       }
     })()
-
     return () => {
       cancelled = true
     }
   }, [])
 
+  const cognitiveMap = useMemo(() => new Map(cognitiveItems.map((item) => [item.module, item])), [cognitiveItems])
+  const baseDataset = useMemo(() => makeDataset(tree, archNodes, archEdges, cognitiveMap), [tree, archNodes, archEdges, cognitiveMap])
+  const activeId = selectedId || hoveredId || baseDataset.nodes[0]?.id || null
+  const step1 = useMemo(() => filteredGraph(baseDataset, search, showOrphans), [baseDataset, search, showOrphans])
+  const visibleDataset = useMemo(
+    () => (localMode ? localGraph(step1, activeId, depth) : step1),
+    [step1, localMode, activeId, depth],
+  )
+
   useEffect(() => {
-    if (!selectedModule) {
+    const nextId = visibleDataset.nodes.find((node) => node.id === selectedId)?.id || visibleDataset.nodes[0]?.id || null
+    setSelectedId(nextId)
+  }, [visibleDataset, selectedId])
+
+  useEffect(() => {
+    setPositions(runLayout(visibleDataset, forces))
+  }, [visibleDataset, forces.center, forces.repel, forces.link, forces.distance])
+
+  useEffect(() => {
+    const selectedNode = visibleDataset.nodes.find((node) => node.id === selectedId)
+    if (!selectedNode) {
       setSourceFiles([])
       setSymbols([])
       return
@@ -280,13 +418,19 @@ export function Atlas3DPage() {
 
     let cancelled = false
     setLoadingDetails(true)
-
-    Promise.all([api.moduleSource(selectedModule), api.moduleSymbols(selectedModule)])
-      .then(([sourceRes, symbolsRes]) => {
+    Promise.all([api.moduleSource(selectedNode.modulePath), api.moduleSymbols(selectedNode.modulePath)])
+      .then(([sourceRes, symbolRes]) => {
         if (cancelled) return
-        setSourceFiles(sourceRes.files || [])
-        setSymbols(symbolsRes.symbols || [])
-        setActiveFileIdx(0)
+        const files = sourceRes.files || []
+        setSourceFiles(files)
+        if (selectedNode.kind === 'file') {
+          setSymbols((symbolRes.symbols || []).filter((item) => item.file_path === selectedNode.path))
+          const idx = files.findIndex((file) => file.path === selectedNode.path)
+          setActiveFileIdx(idx >= 0 ? idx : 0)
+        } else {
+          setSymbols(symbolRes.symbols || [])
+          setActiveFileIdx(0)
+        }
       })
       .catch(() => {
         if (!cancelled) {
@@ -301,28 +445,23 @@ export function Atlas3DPage() {
     return () => {
       cancelled = true
     }
-  }, [selectedModule])
+  }, [selectedId, visibleDataset.nodes])
 
   useEffect(() => {
     const file = sourceFiles[activeFileIdx]
     if (!file) return
-
     const timer = window.setTimeout(() => {
       const root = codeMirrorRef.current
       if (!root) return
-
       if (cmInstanceRef.current) {
         cmInstanceRef.current.toTextArea()
         cmInstanceRef.current = null
       }
-
       while (root.firstChild) root.removeChild(root.firstChild)
       const textarea = document.createElement('textarea')
       root.appendChild(textarea)
-
       const CodeMirror = (window as any).CodeMirror
       if (!CodeMirror) return
-
       cmInstanceRef.current = CodeMirror.fromTextArea(textarea, {
         value: file.content,
         mode: file.language || null,
@@ -332,57 +471,90 @@ export function Atlas3DPage() {
       })
       cmInstanceRef.current.setValue(file.content)
     }, 40)
-
     return () => window.clearTimeout(timer)
   }, [sourceFiles, activeFileIdx])
 
-  const activeModule = selectedModule || hoveredModule || graphNodes[0]?.name || null
-  const cognitiveMap = new Map(cognitiveItems.map((item) => [item.module, item]))
-  const nodeMap = new Map(layoutNodes.map((node) => [node.id, node]))
-  const connectedToActive = new Set<string>()
-
-  if (activeModule) {
-    connectedToActive.add(activeModule)
-    graphEdges.forEach((edge) => {
-      if (edge.from === activeModule) connectedToActive.add(edge.to)
-      if (edge.to === activeModule) connectedToActive.add(edge.from)
+  const activeNode = visibleDataset.nodes.find((node) => node.id === activeId) || null
+  const connected = useMemo(() => {
+    const set = new Set<string>()
+    if (!activeId) return set
+    set.add(activeId)
+    visibleDataset.edges.forEach((edge) => {
+      if (edge.source === activeId) set.add(edge.target)
+      if (edge.target === activeId) set.add(edge.source)
     })
+    return set
+  }, [visibleDataset, activeId])
+
+  const nodeById = useMemo(() => {
+    const map = new Map<string, GraphNode>()
+    visibleDataset.nodes.forEach((node) => map.set(node.id, node))
+    return map
+  }, [visibleDataset])
+
+  const screenToWorld = (clientX: number, clientY: number) => {
+    const rect = svgRef.current?.getBoundingClientRect()
+    if (!rect) return { x: 0, y: 0 }
+    const sx = ((clientX - rect.left) / rect.width) * CANVAS_WIDTH
+    const sy = ((clientY - rect.top) / rect.height) * CANVAS_HEIGHT
+    return {
+      x: (sx - viewport.x) / viewport.k,
+      y: (sy - viewport.y) / viewport.k,
+    }
   }
 
-  const details: ModuleDetails | null = activeModule
-    ? (() => {
-        const treeNode = matchTreeNode(tree, activeModule)
-        const inbound = graphEdges.filter((edge) => edge.to === activeModule).map((edge) => edge.from)
-        const outbound = graphEdges.filter((edge) => edge.from === activeModule).map((edge) => edge.to)
-        const cognitive = cognitiveMap.get(activeModule) || null
-        const debt = cognitive?.cognitive_debt_score || treeNode?.debt || treeNode?.avg_debt || 0
-        return {
-          module: activeModule,
-          treeNode,
-          inbound,
-          outbound,
-          degree: inbound.length + outbound.length,
-          debt,
-          group: getModuleGroup(activeModule),
-          cognitive,
-        }
-      })()
-    : null
-
-  const focusModules = [...layoutNodes]
-    .sort((a, b) => b.degree - a.degree)
-    .slice(0, 4)
-
-  const decisionHighlights = decisions.filter((item) => item.status === 'accepted' || item.status === 'resolved').slice(0, 3)
-  const topRisks = risks.slice(0, 3)
-  const symbolGroups = {
-    classes: symbols.filter((item) => item.kind === 'class' || item.kind === 'struct' || item.kind === 'interface'),
-    functions: symbols.filter((item) => item.kind === 'function'),
+  const onWheel = (event: React.WheelEvent<SVGSVGElement>) => {
+    event.preventDefault()
+    const rect = svgRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const px = ((event.clientX - rect.left) / rect.width) * CANVAS_WIDTH
+    const py = ((event.clientY - rect.top) / rect.height) * CANVAS_HEIGHT
+    const nextK = clamp(viewport.k * (event.deltaY > 0 ? 0.92 : 1.08), 0.35, 3.2)
+    setViewport((current) => ({
+      x: px - ((px - current.x) / current.k) * nextK,
+      y: py - ((py - current.y) / current.k) * nextK,
+      k: nextK,
+    }))
   }
 
-  const handleSymbolClick = (symbol: SymbolItem) => {
-    const fileIndex = sourceFiles.findIndex((file) => file.path === symbol.file_path)
-    if (fileIndex >= 0) setActiveFileIdx(fileIndex)
+  const onPointerDownBackground = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (event.target !== event.currentTarget) return
+    interactionRef.current = { mode: 'pan', x: event.clientX, y: event.clientY }
+  }
+
+  const onPointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
+    const interaction = interactionRef.current
+    if (!interaction) return
+    if (interaction.mode === 'pan') {
+      const dx = ((event.clientX - interaction.x) / (svgRef.current?.getBoundingClientRect().width || 1)) * CANVAS_WIDTH
+      const dy = ((event.clientY - interaction.y) / (svgRef.current?.getBoundingClientRect().height || 1)) * CANVAS_HEIGHT
+      interactionRef.current = { ...interaction, x: event.clientX, y: event.clientY }
+      setViewport((current) => ({ ...current, x: current.x + dx, y: current.y + dy }))
+      return
+    }
+    if (interaction.mode === 'drag' && interaction.id) {
+      const world = screenToWorld(event.clientX, event.clientY)
+      setPositions((current) => new Map(current).set(interaction.id!, world))
+    }
+  }
+
+  const clearInteraction = () => {
+    interactionRef.current = null
+  }
+
+  const onNodePointerDown = (event: React.PointerEvent<SVGGElement>, id: string) => {
+    event.stopPropagation()
+    interactionRef.current = { mode: 'drag', id, x: event.clientX, y: event.clientY }
+  }
+
+  const resetView = () => {
+    setViewport({ x: 0, y: 0, k: 1 })
+    setPositions(runLayout(visibleDataset, forces))
+  }
+
+  const jumpToSymbol = (symbol: SymbolItem) => {
+    const fileIdx = sourceFiles.findIndex((file) => file.path === symbol.file_path)
+    if (fileIdx >= 0) setActiveFileIdx(fileIdx)
     window.setTimeout(() => {
       cmInstanceRef.current?.scrollIntoView({ line: Math.max(symbol.line_start - 1, 0), ch: 0 }, 120)
       cmInstanceRef.current?.setCursor({ line: Math.max(symbol.line_start - 1, 0), ch: 0 })
@@ -390,334 +562,276 @@ export function Atlas3DPage() {
   }
 
   return (
-    <div className="atlas-page">
-      <section className="atlas-hero">
-        <div>
-          <div className="muted atlas-kicker">// project_atlas</div>
-          <h1 className="atlas-title">Atlas</h1>
-          <p className="atlas-subtitle">
-            Un mapa didáctico del proyecto. La idea no es solo ver módulos, sino entender cómo se hablan, dónde vive la complejidad y por dónde conviene empezar a leer.
-          </p>
-        </div>
-        <div className="atlas-vitals">
-          <div className="atlas-vital">
-            <span>modules</span>
-            <strong>{graphNodes.length}</strong>
+    <div className="atlas-shell">
+      <div className="atlas-toolbar">
+        <div className="atlas-toolbar-left">
+          <div>
+            <div className="muted atlas-toolbar-kicker">// atlas_graph</div>
+            <h1>Atlas</h1>
           </div>
-          <div className="atlas-vital">
-            <span>edges</span>
-            <strong>{graphEdges.length}</strong>
-          </div>
-          <div className="atlas-vital">
-            <span>decisions</span>
-            <strong>{overview?.decisions || 0}</strong>
-          </div>
-          <div className="atlas-vital">
-            <span>risks</span>
-            <strong>{overview?.risks || 0}</strong>
+          <div className="atlas-toolbar-meta">
+            <span>{baseDataset.source === 'dependencies' ? 'dependency graph' : 'tree graph'}</span>
+            <span>{visibleDataset.nodes.length} nodes</span>
+            <span>{visibleDataset.edges.length} links</span>
+            <span>{overview?.modules || 0} indexed modules</span>
           </div>
         </div>
-      </section>
 
-      {error && <div className="error">{error}</div>}
+        <div className="atlas-toolbar-actions">
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search files or modules"
+            className="atlas-search"
+          />
+          <button className={`atlas-toggle${localMode ? ' atlas-toggle--active' : ''}`} onClick={() => setLocalMode((value) => !value)}>
+            Local graph
+          </button>
+          <button className="atlas-toggle" onClick={resetView}>Reset view</button>
+          <button className={`atlas-toggle${showSettings ? ' atlas-toggle--active' : ''}`} onClick={() => setShowSettings((value) => !value)}>
+            Settings
+          </button>
+        </div>
+      </div>
 
       {loading ? (
-        <div className="atlas-loading">Materializing the map...</div>
+        <div className="atlas-loading">Loading graph…</div>
+      ) : error ? (
+        <div className="error">{error}</div>
       ) : (
-        <div className="atlas-layout">
-          <aside className="atlas-sidebar">
-            <section className="atlas-card atlas-story-card">
-              <div className="atlas-card-label">Project Story</div>
-              <p>{overview?.story || 'Run analyze to generate the project narrative.'}</p>
-            </section>
-
-            <section className="atlas-card">
-              <div className="atlas-card-head">
-                <span className="atlas-card-label">How To Read This</span>
-              </div>
-              <div className="atlas-learning-path">
-                <div>
-                  <strong>1. Mira el grafo.</strong>
-                  <span>Los hubs grandes son puntos de coordinación. Los colores separan capas del sistema.</span>
-                </div>
-                <div>
-                  <strong>2. Selecciona un nodo.</strong>
-                  <span>El panel derecho traduce ese módulo a lenguaje humano: rol, dependencias, símbolos y código.</span>
-                </div>
-                <div>
-                  <strong>3. Sigue las conexiones.</strong>
-                  <span>Imports y dependents te dejan reconstruir el flujo real del proyecto sin perderte en archivos sueltos.</span>
-                </div>
-              </div>
-            </section>
-
-            <section className="atlas-card">
-              <div className="atlas-card-head">
-                <span className="atlas-card-label">Suggested Entry Points</span>
-              </div>
-              <div className="atlas-entry-list">
-                {focusModules.map((module) => (
-                  <button
-                    key={module.id}
-                    className={`atlas-entry-item${selectedModule === module.id ? ' atlas-entry-item--active' : ''}`}
-                    onClick={() => setSelectedModule(module.id)}
-                  >
-                    <span>{getModuleLeaf(module.name)}</span>
-                    <small>{groupLabels[module.group] || groupLabels.core}</small>
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <section className="atlas-card">
-              <div className="atlas-card-head">
-                <span className="atlas-card-label">Architectural Intent</span>
-              </div>
-              <div className="atlas-signal-list">
-                {decisionHighlights.length > 0 ? (
-                  decisionHighlights.map((decision) => (
-                    <div key={decision.id} className="atlas-signal-item">
-                      <strong>{decision.title}</strong>
-                      <span>{decision.summary || 'No summary yet.'}</span>
-                    </div>
-                  ))
-                ) : (
-                  <div className="muted">No accepted decisions yet.</div>
-                )}
-              </div>
-            </section>
-          </aside>
-
-          <main className="atlas-graph-card">
-            <div className="atlas-graph-head">
-              <div>
-                <div className="atlas-card-label">Knowledge Graph</div>
-                <div className="atlas-graph-caption">Obsidian-style view of module relationships</div>
-              </div>
-              <div className="atlas-legend">
-                {Object.entries(groupLabels).map(([group, label]) => (
-                  <span key={group}>
-                    <i style={{ background: groupColors[group] || groupColors.core }} />
-                    {label}
-                  </span>
-                ))}
-              </div>
+        <div className="atlas-grid">
+          <section className="atlas-graph-panel">
+            <div className="atlas-panel-head">
+              <div className="atlas-panel-title">Graph</div>
+              <div className="atlas-panel-caption">Hover to highlight, drag nodes, wheel to zoom, drag canvas to pan</div>
             </div>
 
-            <div className="atlas-graph-frame">
-              <svg viewBox={`0 0 ${GRAPH_WIDTH} ${GRAPH_HEIGHT}`} className="atlas-graph">
+            <div className="atlas-graph-controls">
+              {localMode && (
+                <label className="atlas-inline-control">
+                  <span>Depth</span>
+                  <input type="range" min="1" max="4" value={depth} onChange={(event) => setDepth(Number(event.target.value))} />
+                  <strong>{depth}</strong>
+                </label>
+              )}
+              <label className="atlas-inline-check">
+                <input type="checkbox" checked={showOrphans} onChange={(event) => setShowOrphans(event.target.checked)} />
+                <span>Show orphans</span>
+              </label>
+              <label className="atlas-inline-check">
+                <input type="checkbox" checked={showLabels} onChange={(event) => setShowLabels(event.target.checked)} />
+                <span>Labels</span>
+              </label>
+              <label className="atlas-inline-check">
+                <input type="checkbox" checked={showArrows} onChange={(event) => setShowArrows(event.target.checked)} />
+                <span>Arrows</span>
+              </label>
+            </div>
+
+            {showSettings && (
+              <div className="atlas-settings-panel">
+                <label className="atlas-range">
+                  <span>Center force</span>
+                  <input type="range" min="0.2" max="3" step="0.1" value={forces.center} onChange={(event) => setForces((current) => ({ ...current, center: Number(event.target.value) }))} />
+                </label>
+                <label className="atlas-range">
+                  <span>Repel force</span>
+                  <input type="range" min="40" max="600" step="10" value={forces.repel} onChange={(event) => setForces((current) => ({ ...current, repel: Number(event.target.value) }))} />
+                </label>
+                <label className="atlas-range">
+                  <span>Link force</span>
+                  <input type="range" min="0.05" max="1" step="0.01" value={forces.link} onChange={(event) => setForces((current) => ({ ...current, link: Number(event.target.value) }))} />
+                </label>
+                <label className="atlas-range">
+                  <span>Link distance</span>
+                  <input type="range" min="40" max="180" step="5" value={forces.distance} onChange={(event) => setForces((current) => ({ ...current, distance: Number(event.target.value) }))} />
+                </label>
+                <label className="atlas-range">
+                  <span>Node size</span>
+                  <input type="range" min="0.6" max="2" step="0.05" value={forces.nodeScale} onChange={(event) => setForces((current) => ({ ...current, nodeScale: Number(event.target.value) }))} />
+                </label>
+                <label className="atlas-range">
+                  <span>Link thickness</span>
+                  <input type="range" min="0.6" max="3" step="0.1" value={forces.linkWidth} onChange={(event) => setForces((current) => ({ ...current, linkWidth: Number(event.target.value) }))} />
+                </label>
+                <label className="atlas-range">
+                  <span>Text fade</span>
+                  <input type="range" min="0" max="0.9" step="0.05" value={forces.textFade} onChange={(event) => setForces((current) => ({ ...current, textFade: Number(event.target.value) }))} />
+                </label>
+              </div>
+            )}
+
+            <div className="atlas-graph-frame atlas-graph-frame--obsidian">
+              <svg
+                ref={svgRef}
+                className="atlas-graph-svg"
+                viewBox={`0 0 ${CANVAS_WIDTH} ${CANVAS_HEIGHT}`}
+                onWheel={onWheel}
+                onPointerDown={onPointerDownBackground}
+                onPointerMove={onPointerMove}
+                onPointerUp={clearInteraction}
+                onPointerLeave={clearInteraction}
+              >
                 <defs>
-                  <radialGradient id="atlasGlow" cx="50%" cy="50%" r="65%">
-                    <stop offset="0%" stopColor="rgba(103, 232, 249, 0.28)" />
-                    <stop offset="100%" stopColor="rgba(103, 232, 249, 0)" />
-                  </radialGradient>
+                  <marker id="atlas-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+                    <path d="M0,0 L7,3.5 L0,7 z" fill="rgba(103, 232, 249, 0.8)" />
+                  </marker>
                 </defs>
-
-                {graphEdges.map((edge) => {
-                  const from = nodeMap.get(edge.from)
-                  const to = nodeMap.get(edge.to)
-                  if (!from || !to) return null
-                  const active = activeModule && (edge.from === activeModule || edge.to === activeModule)
-                  const faded = activeModule && !active
-                  return (
-                    <line
-                      key={`${edge.from}-${edge.to}`}
-                      x1={from.x}
-                      y1={from.y}
-                      x2={to.x}
-                      y2={to.y}
-                      className={`atlas-edge${active ? ' atlas-edge--active' : ''}${faded ? ' atlas-edge--faded' : ''}`}
-                    />
-                  )
-                })}
-
-                {layoutNodes.map((node) => {
-                  const active = activeModule === node.id
-                  const adjacent = connectedToActive.has(node.id)
-                  const faded = activeModule && !adjacent
-                  return (
-                    <g
-                      key={node.id}
-                      className={`atlas-node${active ? ' atlas-node--active' : ''}${faded ? ' atlas-node--faded' : ''}`}
-                      transform={`translate(${node.x}, ${node.y})`}
-                      onMouseEnter={() => setHoveredModule(node.id)}
-                      onMouseLeave={() => setHoveredModule((current) => (current === node.id ? null : current))}
-                      onClick={() => setSelectedModule(node.id)}
-                    >
-                      <circle className="atlas-node-glow" r={node.radius * 1.9} fill="url(#atlasGlow)" />
-                      <circle
-                        r={node.radius}
-                        fill={groupColors[node.group] || groupColors.core}
-                        stroke={active ? '#ffffff' : getDebtColor(node.debt)}
-                        strokeWidth={active ? 2.5 : 1.25}
+                <g transform={`translate(${viewport.x} ${viewport.y}) scale(${viewport.k})`}>
+                  {visibleDataset.edges.map((edge) => {
+                    const source = positions.get(edge.source)
+                    const target = positions.get(edge.target)
+                    if (!source || !target) return null
+                    const active = activeId && (edge.source === activeId || edge.target === activeId)
+                    const faded = activeId && !active
+                    return (
+                      <line
+                        key={edge.id}
+                        x1={source.x}
+                        y1={source.y}
+                        x2={target.x}
+                        y2={target.y}
+                        className={`atlas-edge${active ? ' atlas-edge--active' : ''}${faded ? ' atlas-edge--faded' : ''}`}
+                        strokeWidth={forces.linkWidth}
+                        markerEnd={showArrows && edge.type === 'import' ? 'url(#atlas-arrow)' : undefined}
                       />
-                      <text y={node.radius + 18} textAnchor="middle">
-                        {getModuleLeaf(node.name)}
-                      </text>
-                    </g>
-                  )
-                })}
+                    )
+                  })}
+
+                  {visibleDataset.nodes.map((node) => {
+                    const pos = positions.get(node.id)
+                    if (!pos) return null
+                    const active = activeId === node.id
+                    const adjacent = connected.has(node.id)
+                    const faded = activeId && !adjacent
+                    const radius = node.size * forces.nodeScale
+                    const labelOpacity = showLabels ? (active || adjacent ? 1 : 1 - forces.textFade) : 0
+                    return (
+                      <g
+                        key={node.id}
+                        transform={`translate(${pos.x}, ${pos.y})`}
+                        className={`atlas-node${active ? ' atlas-node--active' : ''}${faded ? ' atlas-node--faded' : ''}`}
+                        onPointerDown={(event) => onNodePointerDown(event, node.id)}
+                        onMouseEnter={() => setHoveredId(node.id)}
+                        onMouseLeave={() => setHoveredId((current) => (current === node.id ? null : current))}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          setSelectedId(node.id)
+                        }}
+                      >
+                        <circle className="atlas-node-ring" r={radius + 5} fill="transparent" stroke={getDebtColor(node.debt)} strokeOpacity="0.15" />
+                        <circle r={radius} fill={GROUP_COLORS[node.group] || GROUP_COLORS.root} stroke={active ? '#ffffff' : getDebtColor(node.debt)} strokeWidth={active ? 2 : 1.1} />
+                        {showLabels && (
+                          <text y={radius + 16} textAnchor="middle" style={{ opacity: labelOpacity }}>
+                            {node.label}
+                          </text>
+                        )}
+                      </g>
+                    )
+                  })}
+                </g>
               </svg>
             </div>
+          </section>
 
-            <div className="atlas-graph-footer">
-              <div className="atlas-focus-strip">
-                {focusModules.map((module) => (
-                  <button
-                    key={module.id}
-                    className={`atlas-mini-pill${selectedModule === module.id ? ' atlas-mini-pill--active' : ''}`}
-                    onClick={() => setSelectedModule(module.id)}
-                  >
-                    {getModuleLeaf(module.name)}
-                  </button>
-                ))}
+          <aside className="atlas-inspector">
+            <section className="atlas-card atlas-card--compact">
+              <div className="atlas-panel-head">
+                <div className="atlas-panel-title">Selection</div>
               </div>
-
-              <div className="atlas-risk-strip">
-                {topRisks.length > 0 ? (
-                  topRisks.map((risk, index) => (
-                    <div key={`${risk.area}-${index}`} className="atlas-risk-chip">
-                      <strong>{risk.area}</strong>
-                      <span>{risk.rationale}</span>
-                    </div>
-                  ))
-                ) : (
-                  <div className="muted">No risk signals available.</div>
-                )}
-              </div>
-            </div>
-          </main>
-
-          <aside className="atlas-detail">
-            {details ? (
-              <>
-                <section className="atlas-card atlas-detail-card">
-                  <div className="atlas-detail-top">
+              {activeNode ? (
+                <>
+                  <h2 className="atlas-node-title">{activeNode.path}</h2>
+                  <div className="atlas-inspector-grid">
                     <div>
-                      <div className="atlas-card-label">Selected Module</div>
-                      <h2>{details.module}</h2>
+                      <span>Type</span>
+                      <strong>{activeNode.kind}</strong>
                     </div>
-                    <span className="atlas-detail-badge" style={{ borderColor: getDebtColor(details.debt), color: getDebtColor(details.debt) }}>
-                      {getDebtTone(details.debt)} debt
-                    </span>
-                  </div>
-                  <p className="atlas-detail-story">{summarizeModule(details)}</p>
-                  <div className="atlas-metrics">
                     <div>
                       <span>Group</span>
-                      <strong>{groupLabels[details.group] || groupLabels.core}</strong>
+                      <strong>{activeNode.group}</strong>
                     </div>
                     <div>
-                      <span>Connections</span>
-                      <strong>{details.degree}</strong>
+                      <span>Degree</span>
+                      <strong>{activeNode.degree}</strong>
                     </div>
                     <div>
                       <span>Debt</span>
-                      <strong style={{ color: getDebtColor(details.debt) }}>{Math.round(details.debt)}%</strong>
-                    </div>
-                    <div>
-                      <span>Files</span>
-                      <strong>{details.treeNode?.file_count || (details.treeNode?.type === 'file' ? 1 : 0)}</strong>
+                      <strong style={{ color: getDebtColor(activeNode.debt) }}>{Math.round(activeNode.debt)}%</strong>
                     </div>
                   </div>
-                </section>
+                </>
+              ) : (
+                <div className="muted">No node selected.</div>
+              )}
+            </section>
 
-                <section className="atlas-card">
-                  <div className="atlas-card-head">
-                    <span className="atlas-card-label">Why It Matters</span>
-                  </div>
-                  <div className="atlas-relations">
-                    <div>
-                      <strong>Imports</strong>
-                      <div className="atlas-chip-list">
-                        {details.outbound.length > 0 ? (
-                          details.outbound.slice(0, 8).map((module) => (
-                            <button key={module} className="atlas-chip" onClick={() => setSelectedModule(module)}>
-                              {getModuleLeaf(module)}
-                            </button>
-                          ))
-                        ) : (
-                          <span className="muted">No outbound dependencies.</span>
-                        )}
-                      </div>
-                    </div>
+            <section className="atlas-card atlas-card--compact">
+              <div className="atlas-panel-head">
+                <div className="atlas-panel-title">Neighbors</div>
+              </div>
+              <div className="atlas-chip-list">
+                {activeNode ? (
+                  visibleDataset.edges
+                    .filter((edge) => edge.source === activeNode.id || edge.target === activeNode.id)
+                    .map((edge) => {
+                      const otherId = edge.source === activeNode.id ? edge.target : edge.source
+                      const other = nodeById.get(otherId)
+                      if (!other) return null
+                      return (
+                        <button key={edge.id} className="atlas-chip" onClick={() => setSelectedId(other.id)}>
+                          {other.label}
+                        </button>
+                      )
+                    })
+                ) : (
+                  <span className="muted">No neighbors.</span>
+                )}
+              </div>
+            </section>
 
-                    <div>
-                      <strong>Dependents</strong>
-                      <div className="atlas-chip-list">
-                        {details.inbound.length > 0 ? (
-                          details.inbound.slice(0, 8).map((module) => (
-                            <button key={module} className="atlas-chip" onClick={() => setSelectedModule(module)}>
-                              {getModuleLeaf(module)}
-                            </button>
-                          ))
-                        ) : (
-                          <span className="muted">No inbound dependents.</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </section>
+            <section className="atlas-card atlas-card--compact">
+              <div className="atlas-panel-head">
+                <div className="atlas-panel-title">Symbols</div>
+              </div>
+              <div className="atlas-symbol-list">
+                {symbols.length > 0 ? (
+                  symbols.slice(0, 16).map((symbol) => (
+                    <button key={`${symbol.file_path}-${symbol.name}`} className="atlas-symbol-row" onClick={() => jumpToSymbol(symbol)}>
+                      <span>{symbol.name}</span>
+                      <small>{symbol.kind}</small>
+                    </button>
+                  ))
+                ) : (
+                  <div className="muted">{loadingDetails ? 'Loading symbols…' : 'No symbols available.'}</div>
+                )}
+              </div>
+            </section>
 
-                <section className="atlas-card">
-                  <div className="atlas-card-head">
-                    <span className="atlas-card-label">Definitions Inside</span>
+            <section className="atlas-card atlas-card--compact atlas-code-card">
+              <div className="atlas-panel-head">
+                <div className="atlas-panel-title">Code</div>
+                <div className="atlas-panel-caption">{loadingDetails ? 'loading…' : ''}</div>
+              </div>
+              {sourceFiles.length > 0 ? (
+                <>
+                  <div className="atlas-file-tabs">
+                    {sourceFiles.map((file, index) => (
+                      <button
+                        key={file.path}
+                        className={`atlas-file-tab${index === activeFileIdx ? ' atlas-file-tab--active' : ''}`}
+                        onClick={() => setActiveFileIdx(index)}
+                      >
+                        {getLeafLabel(file.path)}
+                      </button>
+                    ))}
                   </div>
-                  <div className="atlas-symbol-panel">
-                    {symbolGroups.classes.length === 0 && symbolGroups.functions.length === 0 ? (
-                      <div className="muted">{loadingDetails ? 'Loading definitions...' : 'No symbol data for this module.'}</div>
-                    ) : (
-                      <>
-                        {symbolGroups.classes.slice(0, 6).map((symbol) => (
-                          <button key={`${symbol.file_path}-${symbol.name}`} className="atlas-symbol-row" onClick={() => handleSymbolClick(symbol)}>
-                            <span>{symbol.name}</span>
-                            <small>{symbol.kind}</small>
-                          </button>
-                        ))}
-                        {symbolGroups.functions.slice(0, 6).map((symbol) => (
-                          <button key={`${symbol.file_path}-${symbol.name}`} className="atlas-symbol-row" onClick={() => handleSymbolClick(symbol)}>
-                            <span>{symbol.name}</span>
-                            <small>{symbol.kind}</small>
-                          </button>
-                        ))}
-                      </>
-                    )}
-                  </div>
-                </section>
-
-                <section className="atlas-card atlas-code-card">
-                  <div className="atlas-card-head">
-                    <span className="atlas-card-label">Code Preview</span>
-                    {loadingDetails && <span className="muted">loading…</span>}
-                  </div>
-
-                  {sourceFiles.length > 0 ? (
-                    <>
-                      <div className="atlas-file-tabs">
-                        {sourceFiles.map((file, index) => (
-                          <button
-                            key={file.path}
-                            className={`atlas-file-tab${index === activeFileIdx ? ' atlas-file-tab--active' : ''}`}
-                            onClick={() => setActiveFileIdx(index)}
-                          >
-                            {getModuleLeaf(file.path)}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="atlas-code-container" ref={codeMirrorRef} />
-                    </>
-                  ) : (
-                    <div className="atlas-code-empty">
-                      {loadingDetails ? 'Loading module source…' : 'No source preview available for this module.'}
-                    </div>
-                  )}
-                </section>
-              </>
-            ) : (
-              <section className="atlas-card">
-                <div className="muted">Select a module to inspect it.</div>
-              </section>
-            )}
+                  <div className="atlas-code-container" ref={codeMirrorRef} />
+                </>
+              ) : (
+                <div className="atlas-code-empty">No source preview available.</div>
+              )}
+            </section>
           </aside>
         </div>
       )}
