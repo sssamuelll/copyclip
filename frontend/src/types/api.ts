@@ -89,15 +89,41 @@ export type AgentResponse = {
 }
 
 export type AskCitation = {
-  type: 'decision' | 'risk' | 'commit'
+  type: 'decision' | 'risk' | 'commit' | 'file'
   id: string | number
   label: string
 }
 
+export type AskEvidenceItem = {
+  id: string | number
+  label: string
+  snippet?: string
+}
+
+export type AskEvidenceGroup = {
+  files: AskEvidenceItem[]
+  commits: AskEvidenceItem[]
+  decisions: AskEvidenceItem[]
+  risks: AskEvidenceItem[]
+  symbols: AskEvidenceItem[]
+}
+
 export type AskResponse = {
   answer: string
+  answer_summary: string
+  answer_kind: 'grounded_answer' | 'insufficient_evidence' | 'contradiction_detected'
+  confidence: 'low' | 'medium' | 'high'
   citations: AskCitation[]
   grounded: boolean
+  evidence: AskEvidenceGroup
+  evidence_selection_rationale: string[]
+  gaps_or_unknowns: string[]
+  next_questions: string[]
+  next_drill_down: {
+    type: 'file' | 'commit' | 'decision' | 'risk' | 'module' | 'none'
+    target: string | number | null
+  }
+  bundle_manifest?: Array<Record<string, unknown>>
 }
 
 export type AlertRule = {

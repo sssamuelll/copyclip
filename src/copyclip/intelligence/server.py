@@ -15,6 +15,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .context_bundle_builder import build_context_bundle
+from .ask_project import build_ask_response
 from .db import connect, init_schema
 from .reacquaintance import build_reacquaintance_briefing, record_reacquaintance_visit
 from .phases import (
@@ -1929,127 +1930,14 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     self._json({"error": "question_required"}, 400)
                     return
 
-                # Lightweight retrieval over indexed artifacts + deterministic compact bundle.
-                terms = [t for t in re.findall(r"[a-zA-Z0-9_\-]{3,}", question.lower()) if t not in {"the", "and", "for", "with", "that", "this", "what", "how"}]
-                bundle = build_context_bundle(conn, pid, question, max_files=20)
+                payload = build_ask_response(conn, pid, question)
 
-                evidence = []
-
-                # Decisions
-                for r in conn.execute(
-                    "SELECT id,title,summary,status FROM decisions WHERE project_id=? ORDER BY id DESC LIMIT 200",
-                    (pid,),
-                ).fetchall():
-                    text = f"{r[1]} {r[2] or ''} {r[3]}".lower()
-                    score = sum(1 for t in terms if t in text)
-                    if score > 0:
-                        evidence.append({
-                            "score": score + 2,
-                            "type": "decision",
-                            "id": r[0],
-                            "title": r[1],
-                            "snippet": (r[2] or "")[:240],
-                        })
-
-                # Risks
-                for r in conn.execute(
-                    "SELECT area,kind,rationale,score FROM risks WHERE project_id=? ORDER BY score DESC LIMIT 300",
-                    (pid,),
-                ).fetchall():
-                    text = f"{r[0]} {r[1]} {r[2] or ''}".lower()
-                    score = sum(1 for t in terms if t in text)
-                    if score > 0:
-                        evidence.append({
-                            "score": score + 1,
-                            "type": "risk",
-                            "id": r[0],
-                            "title": f"{r[0]} ({r[1]})",
-                            "snippet": (r[2] or "")[:240],
-                        })
-
-                # Commits
-                for r in conn.execute(
-                    "SELECT sha,message,date FROM commits WHERE project_id=? ORDER BY date DESC LIMIT 300",
-                    (pid,),
-                ).fetchall():
-                    text = f"{r[0]} {r[1] or ''}".lower()
-                    score = sum(1 for t in terms if t in text)
-                    if score > 0:
-                        evidence.append({
-                            "score": score,
-                            "type": "commit",
-                            "id": r[0],
-                            "title": (r[1] or "")[:120],
-                            "snippet": f"commit {r[0][:7]} on {(r[2] or '')[:10]}",
-                        })
-
-                # Compact-bundle file evidence (deterministic + explainable).
-                for item in bundle.get("manifest", [])[:10]:
-                    evidence.append({
-                        "score": max(1, int(item.get("score") or 0) // 20),
-                        "type": "file",
-                        "id": item.get("path"),
-                        "title": item.get("path"),
-                        "snippet": ", ".join(item.get("reasons") or []),
-                    })
-
-                # Prefer governance artifacts over raw activity noise.
-                type_boost = {"decision": 1000, "risk": 500, "commit": 100, "file": 50}
-                for e in evidence:
-                    e["rank"] = type_boost.get(e["type"], 0) + e["score"]
-
-                evidence.sort(key=lambda x: x["rank"], reverse=True)
-
-                # Deduplicate by (type,id)
-                seen = set()
-                top = []
-                for e in evidence:
-                    k = (e["type"], e["id"])
-                    if k in seen:
-                        continue
-                    seen.add(k)
-                    top.append(e)
-                    if len(top) >= 5:
-                        break
-
-                if not top:
-                    self._json(with_meta({
-                        "answer": "I don’t have enough indexed evidence to answer that yet. Re-run analyze or ask with more specific entities (module/file/decision).",
-                        "citations": [],
-                        "grounded": False,
-                        "bundle_manifest": bundle.get("manifest", []),
-                    }))
-                    return
-
-                citations = []
-                lines = []
-                for e in top:
-                    if e["type"] == "decision":
-                        citations.append({"type": "decision", "id": e["id"], "label": f"decision #{e['id']}"})
-                        lines.append(f"Decision #{e['id']}: {e['title']}")
-                    elif e["type"] == "risk":
-                        citations.append({"type": "risk", "id": e["id"], "label": e["title"]})
-                        lines.append(f"Risk signal: {e['title']}")
-                    elif e["type"] == "commit":
-                        citations.append({"type": "commit", "id": e["id"], "label": f"commit {e['id'][:7]}"})
-                        lines.append(f"Recent commit: {e['title']}")
-                    elif e["type"] == "file":
-                        citations.append({"type": "file", "id": e["id"], "label": e["title"]})
-                        lines.append(f"Relevant file: {e['title']}")
-
-                answer = "Based on indexed project evidence, here are the strongest signals:\n- " + "\n- ".join(lines)
-
-                # Strict grounding contract: no claim without citations.
-                if not citations:
+                # Strict grounding contract: no claim without citations for grounded answers.
+                if payload.get("grounded") and not payload.get("citations"):
                     self._json({"error": "ungrounded_answer_blocked"}, 500)
                     return
 
-                self._json(with_meta({
-                    "answer": answer,
-                    "citations": citations,
-                    "grounded": True,
-                    "bundle_manifest": bundle.get("manifest", []),
-                }))
+                self._json(with_meta(payload))
                 return
 
             if parsed.path == "/api/assemble-context":

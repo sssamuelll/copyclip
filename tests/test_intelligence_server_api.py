@@ -119,7 +119,7 @@ def test_decision_history_endpoint():
         assert any(item["action"] == "status_change" for item in hist["items"])
 
 
-def test_ask_endpoint_returns_grounded_answer_with_citations():
+def test_ask_endpoint_returns_evidence_first_contract():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         root_path = str(root.absolute())
@@ -151,6 +151,131 @@ def test_ask_endpoint_returns_grounded_answer_with_citations():
         assert len(res["citations"]) >= 1
         assert any(c["type"] == "decision" for c in res["citations"])
         assert "bundle_manifest" in res
+        assert res["answer_kind"] == "grounded_answer"
+        assert res["confidence"] in {"medium", "high"}
+        assert isinstance(res["answer_summary"], str) and res["answer_summary"]
+        assert isinstance(res["evidence"], dict)
+        assert set(res["evidence"].keys()) == {"files", "commits", "decisions", "risks", "symbols"}
+        assert len(res["evidence"]["decisions"]) >= 1
+        assert isinstance(res["evidence_selection_rationale"], list) and res["evidence_selection_rationale"]
+        assert isinstance(res["gaps_or_unknowns"], list)
+        assert isinstance(res["next_questions"], list)
+        assert isinstance(res["next_drill_down"], dict)
+        assert set(res["next_drill_down"].keys()) == {"type", "target"}
+
+
+def test_ask_endpoint_returns_structured_insufficient_evidence_response():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        root_path = str(root.absolute())
+        conn = connect(root_path)
+        init_schema(conn)
+        conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root_path, "tmp"))
+        conn.commit()
+
+        port = _free_port()
+        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
+        th.start()
+        _wait_port(port)
+
+        res = _post_json(f"http://127.0.0.1:{port}/api/ask", {"question": "what happened to quantum orchard lattice?"})
+        assert res["grounded"] is False
+        assert res["answer_kind"] == "insufficient_evidence"
+        assert res["confidence"] == "low"
+        assert res["citations"] == []
+        assert res["answer_summary"]
+        assert res["evidence"] == {
+            "files": [],
+            "commits": [],
+            "decisions": [],
+            "risks": [],
+            "symbols": [],
+        }
+        assert res["evidence_selection_rationale"]
+        assert res["gaps_or_unknowns"]
+        assert res["next_questions"]
+        assert res["next_drill_down"] == {"type": "none", "target": None}
+
+
+def test_ask_endpoint_does_not_ground_vague_question_from_generic_project_noise():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        root_path = str(root.absolute())
+        conn = connect(root_path)
+        init_schema(conn)
+        conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root_path, "tmp"))
+        pid = conn.execute("SELECT id FROM projects WHERE root_path=?", (root_path,)).fetchone()[0]
+        conn.execute(
+            "INSERT INTO files(project_id,path,language,size_bytes,mtime,hash) VALUES(?,?,?,?,?,?)",
+            (pid, "src/auth/session.ts", "typescript", 1000, 1.0, "h1"),
+        )
+        conn.execute(
+            "INSERT INTO risks(project_id,area,severity,kind,rationale,score) VALUES(?,?,?,?,?,?)",
+            (pid, "src/auth/session.ts", "high", "churn", "frequent edits", 90),
+        )
+        conn.commit()
+
+        port = _free_port()
+        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
+        th.start()
+        _wait_port(port)
+
+        res = _post_json(f"http://127.0.0.1:{port}/api/ask", {"question": "what happened?"})
+        assert res["grounded"] is False
+        assert res["answer_kind"] == "insufficient_evidence"
+        assert res["confidence"] == "low"
+        assert res["citations"] == []
+        assert res["gaps_or_unknowns"]
+
+
+def test_ask_endpoint_does_not_ground_common_word_match_in_decision_text():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        root_path = str(root.absolute())
+        conn = connect(root_path)
+        init_schema(conn)
+        conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root_path, "tmp"))
+        pid = conn.execute("SELECT id FROM projects WHERE root_path=?", (root_path,)).fetchone()[0]
+        conn.execute(
+            "INSERT INTO decisions(project_id,title,summary,status,source_type) VALUES(?,?,?,?,?)",
+            (pid, "About auth rollout", "About the staged release plan", "accepted", "manual"),
+        )
+        conn.commit()
+
+        port = _free_port()
+        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
+        th.start()
+        _wait_port(port)
+
+        res = _post_json(f"http://127.0.0.1:{port}/api/ask", {"question": "what about it?"})
+        assert res["grounded"] is False
+        assert res["answer_kind"] == "insufficient_evidence"
+        assert res["citations"] == []
+
+
+def test_ask_endpoint_does_not_ground_common_word_file_path_match():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        root_path = str(root.absolute())
+        conn = connect(root_path)
+        init_schema(conn)
+        conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root_path, "tmp"))
+        pid = conn.execute("SELECT id FROM projects WHERE root_path=?", (root_path,)).fetchone()[0]
+        conn.execute(
+            "INSERT INTO files(project_id,path,language,size_bytes,mtime,hash) VALUES(?,?,?,?,?,?)",
+            (pid, "src/teller/session.ts", "typescript", 1000, 1.0, "h1"),
+        )
+        conn.commit()
+
+        port = _free_port()
+        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
+        th.start()
+        _wait_port(port)
+
+        res = _post_json(f"http://127.0.0.1:{port}/api/ask", {"question": "tell me about it"})
+        assert res["grounded"] is False
+        assert res["answer_kind"] == "insufficient_evidence"
+        assert res["citations"] == []
 
 
 def test_context_bundle_endpoint_returns_manifest():

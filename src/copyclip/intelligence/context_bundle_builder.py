@@ -7,7 +7,7 @@ def _terms(text: str) -> List[str]:
     return [
         t
         for t in re.findall(r"[a-zA-Z0-9_\-]{3,}", (text or "").lower())
-        if t not in {"the", "and", "for", "with", "that", "this", "what", "how", "about"}
+        if t not in {"the", "and", "for", "with", "that", "this", "what", "how", "about", "tell", "happened"}
     ]
 
 
