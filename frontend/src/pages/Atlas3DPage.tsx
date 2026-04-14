@@ -102,6 +102,12 @@ function normalizePath(value: string) {
   return value.replace(/\\/g, '/').replace(/^\.?\//, '').replace(/\/+/g, '/')
 }
 
+function isHiddenPath(value: string) {
+  const normalized = normalizePath(value)
+  if (!normalized || normalized === 'root') return false
+  return normalized.split('/').some((segment) => segment.startsWith('.'))
+}
+
 function getLeafLabel(path: string) {
   if (!path) return 'root'
   const pieces = normalizePath(path).split('/')
@@ -145,6 +151,7 @@ function buildFlowData(tree: TreeNode | null, archNodes: ArchNode[], archEdges: 
   const links: FlowLink[] = []
   const pathToId = new Map<string, number>()
   const moduleToId = new Map<string, number>()
+  const nodeIndexById = new Map<number, number>()
   const maxFiles = 220
   let nextId = 1
   let visibleFiles = 0
@@ -157,7 +164,14 @@ function buildFlowData(tree: TreeNode | null, archNodes: ArchNode[], archEdges: 
     nextId += 1
     pathToId.set(normalizedPath, id)
     nodes.push({ id, name, type, path: normalizedPath })
+    nodeIndexById.set(id, nodes.length - 1)
     return id
+  }
+
+  const setNodeType = (id: number, type: FlowNodeType) => {
+    const index = nodeIndexById.get(id)
+    if (index == null) return
+    nodes[index] = { ...nodes[index], type }
   }
 
   const addLink = (source: number, target: number, type: FlowEdgeType) => {
@@ -171,7 +185,7 @@ function buildFlowData(tree: TreeNode | null, archNodes: ArchNode[], archEdges: 
     const rawPath = node.path || node.name || 'root'
     const normalizedPath = rawPath === 'root' ? 'root' : normalizePath(rawPath)
     const isRoot = normalizedPath === 'root' || node.name === 'root'
-    const isHidden = node.name.startsWith('.') && !isRoot
+    const isHidden = isHiddenPath(normalizedPath) && !isRoot
 
     if (isHidden) return
     if (depth > 6 && node.type === 'folder') return
@@ -193,6 +207,13 @@ function buildFlowData(tree: TreeNode | null, archNodes: ArchNode[], archEdges: 
 
   archNodes.forEach((node) => {
     const normalizedName = normalizePath(node.name)
+    if (!normalizedName || normalizedName === 'root' || isHiddenPath(normalizedName)) return
+    const existingId = pathToId.get(normalizedName)
+    if (existingId) {
+      if (nodes[nodeIndexById.get(existingId) || 0]?.type === 'Directory') setNodeType(existingId, 'Module')
+      moduleToId.set(node.name, existingId)
+      return
+    }
     const owner = findTreeNode(tree, normalizedName)
     const ownerPath = owner?.path ? normalizePath(owner.path) : 'root'
     const ownerId = pathToId.get(ownerPath) || rootId
@@ -272,13 +293,10 @@ const FlowchartCanvas = forwardRef<FlowHandle, FlowchartCanvasProps>(function Fl
   )
 
   const initialExpanded = useMemo(() => {
-    const next = new Set<number>(roots)
+    const next = new Set<number>()
     roots.forEach((rootId) => {
-      ;(childMap.get(rootId) || []).forEach((childId) => {
-        next.add(childId)
-        const grandchildren = childMap.get(childId) || []
-        if (grandchildren.length <= 3) grandchildren.forEach((grandchildId) => next.add(grandchildId))
-      })
+      const children = childMap.get(rootId) || []
+      if (children.length <= 10) next.add(rootId)
     })
     return next
   }, [roots, childMap])
