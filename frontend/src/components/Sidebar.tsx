@@ -4,6 +4,7 @@ const GROUPS = [
   {
     label: 'Consciousness',
     pages: [
+      { id: 'reacquaintance', label: 'catch me up' },
       { id: 'ask', label: 'ask the consciousness' },
       { id: 'atlas-3d', label: 'atlas' },
       { id: 'timeline', label: 'chronicle' },
@@ -13,6 +14,7 @@ const GROUPS = [
   {
     label: 'Structures',
     pages: [
+      { id: 'changes', label: 'change field' },
       { id: 'architecture', label: 'structure graph' },
       { id: 'impact', label: 'propagation oracle' },
       { id: 'risks', label: 'distortion field' },
@@ -60,7 +62,7 @@ export function Sidebar({ page, setPage, lastIndexedText }: Props) {
 
       <div style={{ display: 'grid', gap: 12, padding: '0 4px' }}>
         <div className="panel" style={{ padding: '10px', fontSize: 11, color: 'var(--text-tertiary)', background: 'transparent' }}>
-          / v0.3.0_stable
+          / v0.4.0_stable
         </div>
         <div style={{ fontSize: 10, color: 'var(--text-tertiary)', paddingLeft: '10px' }}>
           {lastIndexedText || 'consciousness active'}

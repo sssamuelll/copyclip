@@ -128,6 +128,9 @@ docs/_build/
 
 # local intelligence runtime data
 .copyclip/
+.playwright-mcp/
+.superpowers/
+atlas-*.png
 
 # frontend artifacts
 frontend/node_modules/

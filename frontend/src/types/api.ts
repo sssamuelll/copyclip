@@ -249,6 +249,88 @@ export type StoryTimelineResponse = {
   }
 }
 
+export type ReacquaintanceEvidenceItem = {
+  id: string
+  type: 'story' | 'snapshot' | 'file' | 'commit' | 'decision' | 'risk'
+  label: string
+  ref: string
+}
+
+export type ReacquaintanceProjectRefresher = {
+  summary: string
+  confidence: 'low' | 'medium' | 'high'
+  why_now: string
+  evidence: string[]
+}
+
+export type ReacquaintanceTopChange = {
+  title: string
+  importance: number
+  summary: string
+  change_kind: string
+  primary_area: string
+  evidence: string[]
+  why_selected: string[]
+}
+
+export type ReacquaintanceReadFirstItem = {
+  rank: number
+  target_type: 'file' | 'module' | 'decision'
+  target: string
+  score: number
+  reason: string
+  expected_payoff: string
+  estimated_minutes: number
+  evidence: string[]
+}
+
+export type ReacquaintanceDecisionItem = {
+  id: number
+  title: string
+  status: string
+  relevance_score: number
+  why_now: string
+  evidence: string[]
+}
+
+export type ReacquaintanceRiskItem = {
+  area: string
+  severity: string
+  kind: string
+  score: number
+  summary: string
+  recommended_first_action: string
+  evidence: string[]
+} | null
+
+export type ReacquaintanceQuestion = {
+  question: string
+  priority: 'low' | 'medium' | 'high'
+  derived_from: string[]
+  next_step: string
+}
+
+export type ReacquaintanceResponse = {
+  meta: {
+    project?: string
+    generated_at?: string
+    briefing_version?: string
+    baseline_mode?: string
+    baseline_label?: string
+    baseline_started_at?: string | null
+    baseline_available?: boolean
+    confidence?: 'low' | 'medium' | 'high'
+  }
+  project_refresher: ReacquaintanceProjectRefresher
+  top_changes: ReacquaintanceTopChange[]
+  read_first: ReacquaintanceReadFirstItem[]
+  relevant_decisions: ReacquaintanceDecisionItem[]
+  top_risk: ReacquaintanceRiskItem
+  open_questions: ReacquaintanceQuestion[]
+  evidence_index: ReacquaintanceEvidenceItem[]
+  fallback_notes: string[]
+}
+
 export type AdvisorConflict = {
   decision_id: number
   title: string

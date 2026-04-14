@@ -17,6 +17,7 @@ dependencies = [
   "aiohttp",
   "tiktoken",
   "pyyaml",
+  "mcp>=1.26.0",
   "tree-sitter>=0.21.0",
   "tree-sitter-python",
   "tree-sitter-javascript",
@@ -24,6 +25,12 @@ dependencies = [
   "tree-sitter-css",
   "tree-sitter-cpp",
   "tree-sitter-rust",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=9.0",
+  "pytest-asyncio>=1.0",
 ]
 
 [project.scripts]
