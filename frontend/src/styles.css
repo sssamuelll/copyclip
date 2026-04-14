@@ -301,29 +301,6 @@ body {
   gap: 10px;
 }
 
-.atlas-cosmic-hint {
-  display: grid;
-  gap: 4px;
-  font-size: 11px;
-  color: rgba(0, 238, 255, 0.45);
-  line-height: 1.5;
-}
-
-.atlas-cosmic-hint strong {
-  color: rgba(0, 238, 255, 0.75);
-}
-
-.atlas-cosmic-footer {
-  position: absolute;
-  left: 30px;
-  right: 30px;
-  bottom: 24px;
-  z-index: 5;
-  display: flex;
-  justify-content: flex-start;
-  pointer-events: none;
-}
-
 .atlas-cosmic-graph {
   position: absolute;
   inset: 0;
@@ -662,6 +639,12 @@ body {
   box-shadow: 0 0 20px rgba(0, 238, 255, 0.1);
 }
 
+.atlas-info-panel--bottom {
+  top: auto;
+  right: 30px;
+  bottom: 24px;
+}
+
 .atlas-info-panel--locked {
   width: 380px;
   max-height: 60vh;
@@ -848,16 +831,10 @@ body {
   .atlas-search { min-width: 0; width: 100%; }
   .atlas-cosmic-settings { grid-template-columns: 1fr; top: 132px; }
   .atlas-info-panel {
-    top: auto;
     bottom: 24px;
     left: 24px;
     right: 24px;
     width: auto;
     max-height: 40vh;
-  }
-  .atlas-cosmic-footer {
-    left: 24px;
-    right: 24px;
-    bottom: 12px;
   }
 }
