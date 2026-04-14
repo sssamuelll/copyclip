@@ -4,7 +4,19 @@ from typing import Any
 from .context_bundle_builder import build_context_bundle
 
 
-STOP_WORDS = {"the", "and", "for", "with", "that", "this", "what", "how"}
+STOP_WORDS = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "that",
+    "this",
+    "what",
+    "how",
+    "about",
+    "tell",
+    "happened",
+}
 TYPE_BOOST = {"decision": 1000, "risk": 500, "commit": 100, "file": 50}
 
 
@@ -23,6 +35,28 @@ def _empty_evidence_groups() -> dict[str, list[dict[str, Any]]]:
         "decisions": [],
         "risks": [],
         "symbols": [],
+    }
+
+
+def _insufficient_evidence_response(bundle_manifest: list[dict[str, Any]], question: str | None = None) -> dict[str, Any]:
+    return {
+        "answer": "I don’t have enough indexed evidence to answer that yet. Re-run analyze or ask with more specific entities (module/file/decision).",
+        "answer_summary": "I don’t have enough indexed evidence to answer that yet.",
+        "answer_kind": "insufficient_evidence",
+        "confidence": "low",
+        "citations": [],
+        "grounded": False,
+        "evidence": _empty_evidence_groups(),
+        "evidence_selection_rationale": ["No indexed artifacts matched the current question strongly enough."],
+        "gaps_or_unknowns": [
+            "The current index does not contain enough query-linked evidence for a grounded answer.",
+        ],
+        "next_questions": [
+            "Ask about a specific file, decision, commit, or module.",
+            "Re-run analyze if the relevant area changed recently.",
+        ],
+        "next_drill_down": {"type": "none", "target": None},
+        "bundle_manifest": bundle_manifest,
     }
 
 
@@ -46,6 +80,7 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
                     "id": r[0],
                     "title": r[1],
                     "snippet": (r[2] or "")[:240],
+                    "query_linked": True,
                 }
             )
 
@@ -63,6 +98,7 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
                     "id": r[0],
                     "title": f"{r[0]} ({r[1]})",
                     "snippet": (r[2] or "")[:240],
+                    "query_linked": True,
                 }
             )
 
@@ -80,17 +116,20 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
                     "id": r[0],
                     "title": (r[1] or "")[:120],
                     "snippet": f"commit {r[0][:7]} on {(r[2] or '')[:10]}",
+                    "query_linked": True,
                 }
             )
 
     for item in bundle.get("manifest", [])[:10]:
+        reasons = item.get("reasons") or []
         evidence.append(
             {
                 "score": max(1, int(item.get("score") or 0) // 20),
                 "type": "file",
                 "id": item.get("path"),
                 "title": item.get("path"),
-                "snippet": ", ".join(item.get("reasons") or []),
+                "snippet": ", ".join(reasons),
+                "query_linked": any(str(reason).startswith("term-match:") for reason in reasons),
             }
         )
 
@@ -110,23 +149,10 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
             break
 
     if not top:
-        return {
-            "answer": "I don’t have enough indexed evidence to answer that yet. Re-run analyze or ask with more specific entities (module/file/decision).",
-            "answer_summary": "I don’t have enough indexed evidence to answer that yet.",
-            "answer_kind": "insufficient_evidence",
-            "confidence": "low",
-            "citations": [],
-            "grounded": False,
-            "evidence": _empty_evidence_groups(),
-            "evidence_selection_rationale": ["No indexed artifacts matched the current question strongly enough."],
-            "gaps_or_unknowns": ["The current index does not contain enough matching evidence for a grounded answer."],
-            "next_questions": [
-                "Ask about a specific file, decision, commit, or module.",
-                "Re-run analyze if the relevant area changed recently.",
-            ],
-            "next_drill_down": {"type": "none", "target": None},
-            "bundle_manifest": bundle.get("manifest", []),
-        }
+        return _insufficient_evidence_response(bundle.get("manifest", []))
+
+    if not any(bool(e.get("query_linked")) for e in top):
+        return _insufficient_evidence_response(bundle.get("manifest", []))
 
     citations = []
     lines = []
