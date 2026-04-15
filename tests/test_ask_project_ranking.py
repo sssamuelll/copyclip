@@ -90,6 +90,7 @@ def test_build_ask_response_returns_symbol_evidence_for_symbol_query(tmp_path):
     assert response["grounded"] is True
     assert response["evidence"]["symbols"]
     assert response["evidence"]["symbols"][0]["label"] == "SessionManager"
+    assert any(c["type"] == "file" and c["id"] == "src/auth/session.ts" for c in response["citations"])
     assert response["next_drill_down"]["target"] in {"src/auth/session.ts", "SessionManager"}
 
 

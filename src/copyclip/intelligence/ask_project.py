@@ -262,6 +262,9 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
             lines.append(f"Relevant file: {e['title']}")
             evidence_groups["files"].append(item)
         elif e["type"] == "symbol":
+            file_path = e.get("file_path")
+            if file_path:
+                citations.append({"type": "file", "id": file_path, "label": file_path})
             lines.append(f"Relevant symbol: {e['title']}")
             evidence_groups["symbols"].append(item)
 
