@@ -17,7 +17,7 @@ STOP_WORDS = {
     "tell",
     "happened",
 }
-TYPE_BOOST = {"decision": 1000, "risk": 500, "commit": 100, "file": 50}
+TYPE_BOOST = {"decision": 1000, "risk": 500, "commit": 100, "file": 50, "symbol": 750}
 
 
 def _terms(question: str) -> list[str]:
@@ -60,9 +60,56 @@ def _insufficient_evidence_response(bundle_manifest: list[dict[str, Any]], quest
     }
 
 
+def _churn_by_file(conn, project_id: int) -> dict[str, int]:
+    return {
+        row[0]: int(row[1] or 0)
+        for row in conn.execute(
+            "SELECT file_path, COUNT(*) AS c FROM file_changes WHERE project_id=? GROUP BY file_path",
+            (project_id,),
+        ).fetchall()
+        if row[0]
+    }
+
+
+def _risk_by_file(conn, project_id: int) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for row in conn.execute(
+        "SELECT area, kind, rationale, score FROM risks WHERE project_id=? ORDER BY score DESC, id DESC",
+        (project_id,),
+    ).fetchall():
+        area = row[0]
+        if area and area not in out:
+            out[area] = {
+                "kind": row[1],
+                "rationale": row[2] or "",
+                "score": int(row[3] or 0),
+            }
+    return out
+
+
+def _decision_ref_targets(conn, project_id: int) -> dict[str, list[int]]:
+    out: dict[str, list[int]] = {}
+    for row in conn.execute(
+        """
+        SELECT dr.ref_value, d.id
+        FROM decision_refs dr
+        JOIN decisions d ON d.id = dr.decision_id
+        WHERE d.project_id=? AND d.status IN ('accepted', 'resolved') AND dr.ref_type='file'
+        ORDER BY d.id DESC
+        """,
+        (project_id,),
+    ).fetchall():
+        if row[0]:
+            out.setdefault(str(row[0]), []).append(int(row[1]))
+    return out
+
+
 def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
     terms = _terms(question)
     bundle = build_context_bundle(conn, project_id, question, max_files=20)
+    churn_by_file = _churn_by_file(conn, project_id)
+    risk_by_file = _risk_by_file(conn, project_id)
+    decision_refs_by_file = _decision_ref_targets(conn, project_id)
 
     evidence: list[dict[str, Any]] = []
 
@@ -122,16 +169,54 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
 
     for item in bundle.get("manifest", [])[:10]:
         reasons = item.get("reasons") or []
+        file_path = item.get("path")
+        lexical_hits = sum(1 for t in terms if file_path and t in str(file_path).lower())
+        churn = churn_by_file.get(str(file_path), 0) if file_path else 0
+        linked_decisions = len(decision_refs_by_file.get(str(file_path), [])) if file_path else 0
+        risk_score = int((risk_by_file.get(str(file_path), {}) or {}).get("score", 0)) if file_path else 0
+        score = (
+            lexical_hits * 30
+            + min(churn * 10, 60)
+            + min(linked_decisions * 40, 80)
+            + min(risk_score, 100)
+            + max(1, int(item.get("score") or 0) // 20)
+        )
         evidence.append(
             {
-                "score": max(1, int(item.get("score") or 0) // 20),
+                "score": score,
                 "type": "file",
-                "id": item.get("path"),
-                "title": item.get("path"),
+                "id": file_path,
+                "title": file_path,
                 "snippet": ", ".join(reasons),
-                "query_linked": any(str(reason).startswith("term-match:") for reason in reasons),
+                "query_linked": lexical_hits > 0,
+                "signal_details": {
+                    "lexical_hits": lexical_hits,
+                    "churn": churn,
+                    "decision_refs": linked_decisions,
+                    "risk_score": risk_score,
+                },
             }
         )
+
+    for row in conn.execute(
+        "SELECT name, kind, file_path, module FROM symbols WHERE project_id=? ORDER BY id DESC LIMIT 300",
+        (project_id,),
+    ).fetchall():
+        name, kind, file_path, module = row[0], row[1], row[2], row[3] or ""
+        text = f"{name} {kind} {file_path} {module}".lower()
+        score = sum(1 for t in terms if t in text)
+        if score > 0:
+            evidence.append(
+                {
+                    "score": score * 45 + min(churn_by_file.get(file_path, 0) * 5, 40),
+                    "type": "symbol",
+                    "id": name,
+                    "title": name,
+                    "snippet": f"{kind} in {file_path}",
+                    "query_linked": True,
+                    "file_path": file_path,
+                }
+            )
 
     for e in evidence:
         e["rank"] = TYPE_BOOST.get(e["type"], 0) + e["score"]
@@ -176,6 +261,9 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
             citations.append({"type": "file", "id": e["id"], "label": e["title"]})
             lines.append(f"Relevant file: {e['title']}")
             evidence_groups["files"].append(item)
+        elif e["type"] == "symbol":
+            lines.append(f"Relevant symbol: {e['title']}")
+            evidence_groups["symbols"].append(item)
 
     rationale = []
     if evidence_groups["decisions"]:
@@ -185,7 +273,9 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
     if evidence_groups["commits"]:
         rationale.append("Included recent commits to show the latest activity around the topic.")
     if evidence_groups["files"]:
-        rationale.append("Included files from the compact context bundle for direct drill-down.")
+        rationale.append("Included files using lexical match plus decision, churn, and risk signals from the compact context bundle.")
+    if evidence_groups["symbols"]:
+        rationale.append("Included symbol-level evidence because the question referenced named code entities or modules.")
 
     next_drill_down = {"type": "none", "target": None}
     if evidence_groups["decisions"]:
@@ -194,6 +284,8 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
         next_drill_down = {"type": "risk", "target": evidence_groups["risks"][0]["id"]}
     elif evidence_groups["files"]:
         next_drill_down = {"type": "file", "target": evidence_groups["files"][0]["id"]}
+    elif evidence_groups["symbols"]:
+        next_drill_down = {"type": "file", "target": top[[e["type"] for e in top].index("symbol")].get("file_path")}
     elif evidence_groups["commits"]:
         next_drill_down = {"type": "commit", "target": evidence_groups["commits"][0]["id"]}
 
