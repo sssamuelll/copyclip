@@ -99,15 +99,16 @@ def _churn_by_file(conn, project_id: int) -> dict[str, int]:
 def _risk_by_file(conn, project_id: int) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for row in conn.execute(
-        "SELECT area, kind, rationale, score FROM risks WHERE project_id=? ORDER BY score DESC, id DESC",
+        "SELECT id, area, kind, rationale, score FROM risks WHERE project_id=? ORDER BY score DESC, id DESC",
         (project_id,),
     ).fetchall():
-        area = row[0]
+        area = row[1]
         if area and area not in out:
             out[area] = {
-                "kind": row[1],
-                "rationale": row[2] or "",
-                "score": int(row[3] or 0),
+                "id": int(row[0]),
+                "kind": row[2],
+                "rationale": row[3] or "",
+                "score": int(row[4] or 0),
             }
     return out
 
@@ -157,20 +158,21 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
             )
 
     for r in conn.execute(
-        "SELECT area,kind,rationale,score FROM risks WHERE project_id=? ORDER BY score DESC LIMIT 300",
+        "SELECT id, area, kind, rationale, score FROM risks WHERE project_id=? ORDER BY score DESC LIMIT 300",
         (project_id,),
     ).fetchall():
-        text = f"{r[0]} {r[1]} {r[2] or ''}".lower()
+        text = f"{r[1]} {r[2]} {r[3] or ''}".lower()
         score = sum(1 for t in terms if t in text)
         if score > 0:
             evidence.append(
                 {
                     "score": score + 1,
                     "type": "risk",
-                    "id": r[0],
-                    "title": f"{r[0]} ({r[1]})",
-                    "snippet": (r[2] or "")[:240],
+                    "id": int(r[0]),
+                    "title": f"{r[1]} ({r[2]})",
+                    "snippet": (r[3] or "")[:240],
                     "query_linked": True,
+                    "area": r[1],
                 }
             )
 
@@ -224,10 +226,10 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
         )
 
     for row in conn.execute(
-        "SELECT name, kind, file_path, module FROM symbols WHERE project_id=? ORDER BY id DESC LIMIT 300",
+        "SELECT id, name, kind, file_path, module FROM symbols WHERE project_id=? ORDER BY id DESC LIMIT 300",
         (project_id,),
     ).fetchall():
-        name, kind, file_path, module = row[0], row[1], row[2], row[3] or ""
+        symbol_id, name, kind, file_path, module = int(row[0]), row[1], row[2], row[3], row[4] or ""
         text = f"{name} {kind} {file_path} {module}".lower()
         score = sum(1 for t in terms if t in text)
         if score > 0:
@@ -235,11 +237,12 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
                 {
                     "score": score * 45 + min(churn_by_file.get(file_path, 0) * 5, 40),
                     "type": "symbol",
-                    "id": name,
+                    "id": symbol_id,
                     "title": name,
                     "snippet": f"{kind} in {file_path}",
                     "query_linked": True,
                     "file_path": file_path,
+                    "symbol_name": name,
                 }
             )
 
@@ -298,6 +301,7 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
                 "Risk severity and score increased its ranking priority.",
             ]
             item["ref"] = {"type": "risk", "target": e["id"]}
+            item["related_file"] = e.get("area")
             evidence_groups["risks"].append(item)
         elif e["type"] == "commit":
             citations.append({"type": "commit", "id": e["id"], "label": f"commit {str(e['id'])[:7]}"})
@@ -334,6 +338,7 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
                 "Symbol-aware retrieval linked the question to a concrete definition.",
             ]
             item["ref"] = {"type": "symbol", "target": e["id"]}
+            item["related_file"] = file_path
             evidence_groups["symbols"].append(item)
 
         answer_evidence_ids.append(item["evidence_id"])

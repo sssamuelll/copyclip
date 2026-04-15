@@ -72,7 +72,8 @@ def test_build_ask_response_includes_file_and_risk_provenance_details(tmp_path):
     risk_item = response["evidence"]["risks"][0]
     assert file_item["ref"] == {"type": "file", "target": "src/auth/session.ts"}
     assert "lexical" in " ".join(file_item["why_selected"]).lower() or "decision" in " ".join(file_item["why_selected"]).lower()
-    assert risk_item["ref"] == {"type": "risk", "target": "src/auth/session.ts"}
+    assert risk_item["ref"] == {"type": "risk", "target": 1}
+    assert risk_item["related_file"] == "src/auth/session.ts"
     assert risk_item["why_selected"]
     assert file_item["evidence_id"] in response["answer_evidence_ids"]
     assert risk_item["evidence_id"] in response["answer_evidence_ids"]
@@ -88,7 +89,36 @@ def test_build_ask_response_symbol_provenance_points_back_to_file(tmp_path):
     conn.close()
 
     symbol_item = response["evidence"]["symbols"][0]
-    assert symbol_item["ref"] == {"type": "symbol", "target": "SessionManager"}
+    assert symbol_item["ref"] == {"type": "symbol", "target": 1}
     assert symbol_item["related_file"] == "src/auth/session.ts"
     assert symbol_item["why_selected"]
     assert response["next_drill_down"]["target"] == "src/auth/session.ts"
+
+
+def test_build_ask_response_uses_stable_ids_for_duplicate_symbols_and_risks(tmp_path):
+    root = str(tmp_path)
+    conn = connect(root)
+    init_schema(conn)
+    pid = _seed_provenance_project(conn, root)
+
+    conn.execute(
+        "INSERT INTO files(project_id, path, language, size_bytes, mtime, hash) VALUES(?,?,?,?,?,?)",
+        (pid, "src/auth/secondary.ts", "typescript", 1000, 1.0, "h-auth-2"),
+    )
+    conn.execute(
+        "INSERT INTO symbols(project_id, name, kind, file_path, line_start, line_end, module) VALUES(?,?,?,?,?,?,?)",
+        (pid, "SessionManager", "class", "src/auth/secondary.ts", 5, 20, "auth"),
+    )
+    conn.execute(
+        "INSERT INTO risks(project_id, area, severity, kind, rationale, score) VALUES(?,?,?,?,?,?)",
+        (pid, "src/auth/session.ts", "medium", "complexity", "Separate auth complexity signal.", 70),
+    )
+    conn.commit()
+
+    response = build_ask_response(conn, pid, "where is SessionManager defined and what is the auth session risk?")
+    conn.close()
+
+    symbol_targets = {item["ref"]["target"] for item in response["evidence"]["symbols"]}
+    risk_targets = {item["ref"]["target"] for item in response["evidence"]["risks"]}
+    assert all(isinstance(target, int) for target in symbol_targets)
+    assert all(isinstance(target, int) for target in risk_targets)
