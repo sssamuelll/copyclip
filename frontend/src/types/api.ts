@@ -95,9 +95,17 @@ export type AskCitation = {
 }
 
 export type AskEvidenceItem = {
+  evidence_id: string
   id: string | number
   label: string
   snippet?: string
+  score: number
+  why_selected: string[]
+  ref: {
+    type: 'file' | 'commit' | 'decision' | 'risk' | 'symbol'
+    target: string | number
+  }
+  related_file?: string
 }
 
 export type AskEvidenceGroup = {
@@ -116,6 +124,7 @@ export type AskResponse = {
   citations: AskCitation[]
   grounded: boolean
   evidence: AskEvidenceGroup
+  answer_evidence_ids: string[]
   evidence_selection_rationale: string[]
   gaps_or_unknowns: string[]
   next_questions: string[]

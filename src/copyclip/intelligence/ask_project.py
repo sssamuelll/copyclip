@@ -47,6 +47,7 @@ def _insufficient_evidence_response(bundle_manifest: list[dict[str, Any]], quest
         "citations": [],
         "grounded": False,
         "evidence": _empty_evidence_groups(),
+        "answer_evidence_ids": [],
         "evidence_selection_rationale": ["No indexed artifacts matched the current question strongly enough."],
         "gaps_or_unknowns": [
             "The current index does not contain enough query-linked evidence for a grounded answer.",
@@ -58,6 +59,30 @@ def _insufficient_evidence_response(bundle_manifest: list[dict[str, Any]], quest
         "next_drill_down": {"type": "none", "target": None},
         "bundle_manifest": bundle_manifest,
     }
+
+
+def _build_evidence_item(
+    evidence_type: str,
+    item_id: Any,
+    label: str,
+    snippet: str,
+    score: int | float,
+    why_selected: list[str],
+    ref_target: Any,
+    related_file: str | None = None,
+) -> dict[str, Any]:
+    item = {
+        "evidence_id": f"{evidence_type}:{item_id}",
+        "id": item_id,
+        "label": label,
+        "snippet": snippet,
+        "score": score,
+        "why_selected": why_selected,
+        "ref": {"type": evidence_type, "target": ref_target},
+    }
+    if related_file:
+        item["related_file"] = related_file
+    return item
 
 
 def _churn_by_file(conn, project_id: int) -> dict[str, int]:
@@ -74,15 +99,16 @@ def _churn_by_file(conn, project_id: int) -> dict[str, int]:
 def _risk_by_file(conn, project_id: int) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for row in conn.execute(
-        "SELECT area, kind, rationale, score FROM risks WHERE project_id=? ORDER BY score DESC, id DESC",
+        "SELECT id, area, kind, rationale, score FROM risks WHERE project_id=? ORDER BY score DESC, id DESC",
         (project_id,),
     ).fetchall():
-        area = row[0]
+        area = row[1]
         if area and area not in out:
             out[area] = {
-                "kind": row[1],
-                "rationale": row[2] or "",
-                "score": int(row[3] or 0),
+                "id": int(row[0]),
+                "kind": row[2],
+                "rationale": row[3] or "",
+                "score": int(row[4] or 0),
             }
     return out
 
@@ -132,20 +158,21 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
             )
 
     for r in conn.execute(
-        "SELECT area,kind,rationale,score FROM risks WHERE project_id=? ORDER BY score DESC LIMIT 300",
+        "SELECT id, area, kind, rationale, score FROM risks WHERE project_id=? ORDER BY score DESC LIMIT 300",
         (project_id,),
     ).fetchall():
-        text = f"{r[0]} {r[1]} {r[2] or ''}".lower()
+        text = f"{r[1]} {r[2]} {r[3] or ''}".lower()
         score = sum(1 for t in terms if t in text)
         if score > 0:
             evidence.append(
                 {
                     "score": score + 1,
                     "type": "risk",
-                    "id": r[0],
-                    "title": f"{r[0]} ({r[1]})",
-                    "snippet": (r[2] or "")[:240],
+                    "id": int(r[0]),
+                    "title": f"{r[1]} ({r[2]})",
+                    "snippet": (r[3] or "")[:240],
                     "query_linked": True,
+                    "area": r[1],
                 }
             )
 
@@ -199,10 +226,10 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
         )
 
     for row in conn.execute(
-        "SELECT name, kind, file_path, module FROM symbols WHERE project_id=? ORDER BY id DESC LIMIT 300",
+        "SELECT id, name, kind, file_path, module FROM symbols WHERE project_id=? ORDER BY id DESC LIMIT 300",
         (project_id,),
     ).fetchall():
-        name, kind, file_path, module = row[0], row[1], row[2], row[3] or ""
+        symbol_id, name, kind, file_path, module = int(row[0]), row[1], row[2], row[3], row[4] or ""
         text = f"{name} {kind} {file_path} {module}".lower()
         score = sum(1 for t in terms if t in text)
         if score > 0:
@@ -210,11 +237,12 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
                 {
                     "score": score * 45 + min(churn_by_file.get(file_path, 0) * 5, 40),
                     "type": "symbol",
-                    "id": name,
+                    "id": symbol_id,
                     "title": name,
                     "snippet": f"{kind} in {file_path}",
                     "query_linked": True,
                     "file_path": file_path,
+                    "symbol_name": name,
                 }
             )
 
@@ -242,31 +270,78 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
     citations = []
     lines = []
     evidence_groups = _empty_evidence_groups()
+    answer_evidence_ids: list[str] = []
 
     for e in top:
-        item = {"id": e["id"], "label": e["title"], "snippet": e.get("snippet", "")}
+        score = e.get("rank", e.get("score", 0))
+        item = _build_evidence_item(
+            e["type"],
+            e["id"],
+            e["title"],
+            e.get("snippet", ""),
+            score,
+            [],
+            e["id"],
+            related_file=e.get("file_path"),
+        )
         if e["type"] == "decision":
             citations.append({"type": "decision", "id": e["id"], "label": f"decision #{e['id']}"})
             lines.append(f"Decision #{e['id']}: {e['title']}")
+            item["why_selected"] = [
+                "Matched the question terms directly in the decision title or summary.",
+                "Accepted decisions are ranked ahead of raw activity signals.",
+            ]
+            item["ref"] = {"type": "decision", "target": e["id"]}
             evidence_groups["decisions"].append(item)
         elif e["type"] == "risk":
             citations.append({"type": "risk", "id": e["id"], "label": e["title"]})
             lines.append(f"Risk signal: {e['title']}")
+            item["why_selected"] = [
+                "Matched the question against a known project risk.",
+                "Risk severity and score increased its ranking priority.",
+            ]
+            item["ref"] = {"type": "risk", "target": e["id"]}
+            item["related_file"] = e.get("area")
             evidence_groups["risks"].append(item)
         elif e["type"] == "commit":
             citations.append({"type": "commit", "id": e["id"], "label": f"commit {str(e['id'])[:7]}"})
             lines.append(f"Recent commit: {e['title']}")
+            item["why_selected"] = [
+                "Matched the question terms inside a recent commit message.",
+                "Recent activity provides temporal provenance for this answer.",
+            ]
+            item["ref"] = {"type": "commit", "target": e["id"]}
             evidence_groups["commits"].append(item)
         elif e["type"] == "file":
             citations.append({"type": "file", "id": e["id"], "label": e["title"]})
             lines.append(f"Relevant file: {e['title']}")
+            signal = e.get("signal_details", {})
+            why = []
+            if signal.get("lexical_hits"):
+                why.append("Lexical file/path match with the question terms.")
+            if signal.get("decision_refs"):
+                why.append("Linked from accepted decision refs, increasing architectural relevance.")
+            if signal.get("churn"):
+                why.append("Recent churn increased the ranking for this file.")
+            if signal.get("risk_score"):
+                why.append("Risk score contributed to the file ranking.")
+            item["why_selected"] = why or ["Selected from the compact context bundle."]
+            item["ref"] = {"type": "file", "target": e["id"]}
             evidence_groups["files"].append(item)
         elif e["type"] == "symbol":
             file_path = e.get("file_path")
             if file_path:
                 citations.append({"type": "file", "id": file_path, "label": file_path})
             lines.append(f"Relevant symbol: {e['title']}")
+            item["why_selected"] = [
+                "The question referenced a named code entity or module.",
+                "Symbol-aware retrieval linked the question to a concrete definition.",
+            ]
+            item["ref"] = {"type": "symbol", "target": e["id"]}
+            item["related_file"] = file_path
             evidence_groups["symbols"].append(item)
+
+        answer_evidence_ids.append(item["evidence_id"])
 
     rationale = []
     if evidence_groups["decisions"]:
@@ -304,6 +379,7 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
         "citations": citations,
         "grounded": True,
         "evidence": evidence_groups,
+        "answer_evidence_ids": answer_evidence_ids,
         "evidence_selection_rationale": rationale or ["Selected the strongest indexed artifacts for this question."],
         "gaps_or_unknowns": [],
         "next_questions": [
