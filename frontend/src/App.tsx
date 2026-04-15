@@ -100,7 +100,7 @@ export function App() {
 
         <div style={{ padding: '24px', flex: 1 }}>
           {page === 'reacquaintance' && <ReacquaintancePage onOpenDecision={openDecision} onOpenRisk={openRisk} onOpenChanges={openChanges} />}
-          {page === 'ask' && <AskPage onNotify={notify} />}
+          {page === 'ask' && <AskPage onNotify={notify} onOpenDecision={openDecision} onOpenRisk={openRisk} onOpenChanges={openChanges} />}
           {page === 'atlas-3d' && <Atlas3DPage />}
           {page === 'timeline' && <TimelinePage />}
           {page === 'planning' && <PlanningPage />}
