@@ -194,7 +194,58 @@ def test_ask_endpoint_returns_structured_insufficient_evidence_response():
         assert res["evidence_selection_rationale"]
         assert res["gaps_or_unknowns"]
         assert res["next_questions"]
+        assert any("specific" in q.lower() or "re-run analyze" in q.lower() for q in res["next_questions"])
         assert res["next_drill_down"] == {"type": "none", "target": None}
+
+
+def test_ask_endpoint_surfaces_contradictory_signals_instead_of_false_certainty():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        root_path = str(root.absolute())
+        conn = connect(root_path)
+        init_schema(conn)
+        conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root_path, "tmp"))
+        pid = conn.execute("SELECT id FROM projects WHERE root_path=?", (root_path,)).fetchone()[0]
+        conn.execute(
+            "INSERT INTO decisions(project_id,title,summary,status,source_type) VALUES(?,?,?,?,?)",
+            (pid, "Keep auth session flow stable", "Avoid structural churn in auth session handling.", "accepted", "manual"),
+        )
+        conn.execute(
+            "INSERT INTO decision_refs(decision_id,ref_type,ref_value) VALUES(?,?,?)",
+            (1, "file", "src/auth/session.ts"),
+        )
+        conn.execute(
+            "INSERT INTO files(project_id,path,language,size_bytes,mtime,hash) VALUES(?,?,?,?,?,?)",
+            (pid, "src/auth/session.ts", "typescript", 1000, 1.0, "h-auth"),
+        )
+        conn.execute(
+            "INSERT INTO risks(project_id,area,severity,kind,rationale,score) VALUES(?,?,?,?,?,?)",
+            (pid, "src/auth/session.ts", "high", "intent_drift", "Recent changes appear to conflict with the accepted auth direction.", 95),
+        )
+        conn.execute(
+            "INSERT INTO commits(project_id,sha,author,date,message) VALUES(?,?,?,?,?)",
+            (pid, "sha-auth", "samuel", "2026-04-15T10:00:00Z", "rewrite auth session behavior"),
+        )
+        conn.execute(
+            "INSERT INTO file_changes(project_id,commit_sha,file_path,additions,deletions) VALUES(?,?,?,?,?)",
+            (pid, "sha-auth", "src/auth/session.ts", 40, 12),
+        )
+        conn.commit()
+
+        port = _free_port()
+        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
+        th.start()
+        _wait_port(port)
+
+        res = _post_json(f"http://127.0.0.1:{port}/api/ask", {"question": "is auth session flow stable?"})
+        assert res["answer_kind"] == "contradiction_detected"
+        assert res["grounded"] is False
+        assert res["confidence"] == "low"
+        assert res["citations"]
+        assert res["gaps_or_unknowns"]
+        assert any("contradict" in item.lower() or "conflict" in item.lower() for item in res["gaps_or_unknowns"])
+        assert res["next_questions"]
+        assert res["next_drill_down"]["target"] is not None
 
 
 def test_ask_endpoint_does_not_ground_vague_question_from_generic_project_noise():

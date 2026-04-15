@@ -61,6 +61,38 @@ def _insufficient_evidence_response(bundle_manifest: list[dict[str, Any]], quest
     }
 
 
+def _contradiction_response(
+    bundle_manifest: list[dict[str, Any]],
+    citations: list[dict[str, Any]],
+    evidence_groups: dict[str, list[dict[str, Any]]],
+    answer_evidence_ids: list[str],
+    next_drill_down: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "answer": "Indexed project evidence is pulling in conflicting directions, so I can’t give a confident grounded answer yet.",
+        "answer_summary": "The strongest project signals contradict each other.",
+        "answer_kind": "contradiction_detected",
+        "confidence": "low",
+        "citations": citations,
+        "grounded": False,
+        "evidence": evidence_groups,
+        "answer_evidence_ids": answer_evidence_ids,
+        "evidence_selection_rationale": [
+            "A decision suggests one direction while current risk signals suggest the area is drifting or under tension.",
+        ],
+        "gaps_or_unknowns": [
+            "The decision record and current risk/change signals appear to conflict.",
+            "Inspect the linked file and decision history before trusting a single interpretation.",
+        ],
+        "next_questions": [
+            "Which recent commit introduced the conflicting behavior?",
+            "Does the accepted decision still match the current implementation?",
+        ],
+        "next_drill_down": next_drill_down,
+        "bundle_manifest": bundle_manifest,
+    }
+
+
 def _build_evidence_item(
     evidence_type: str,
     item_id: Any,
@@ -368,6 +400,31 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
         next_drill_down = {"type": "commit", "target": evidence_groups["commits"][0]["id"]}
 
     confidence = "high" if len({c["type"] for c in citations}) >= 2 else "medium"
+    contradiction_detected = bool(evidence_groups["decisions"]) and any(
+        (item.get("related_file") or "") in {file_item["id"] for file_item in evidence_groups["files"]}
+        and "drift" in " ".join(item.get("why_selected", [])).lower()
+        for item in evidence_groups["risks"]
+    )
+    if not contradiction_detected:
+        contradiction_detected = bool(evidence_groups["decisions"]) and any(
+            isinstance(item.get("related_file"), str) and item.get("related_file")
+            and any(file_item["id"] == item["related_file"] for file_item in evidence_groups["files"])
+            and any("risk" in why.lower() for why in item.get("why_selected", []))
+            for item in evidence_groups["risks"]
+        ) and any(
+            "drift" in (risk_by_file.get(str(file_item["id"]), {}) or {}).get("kind", "")
+            for file_item in evidence_groups["files"]
+        )
+
+    if contradiction_detected:
+        return _contradiction_response(
+            bundle.get("manifest", []),
+            citations,
+            evidence_groups,
+            answer_evidence_ids,
+            next_drill_down,
+        )
+
     answer = "Based on indexed project evidence, here are the strongest signals:\n- " + "\n- ".join(lines)
     answer_summary = lines[0] if lines else "Grounded answer generated from indexed project evidence."
 
