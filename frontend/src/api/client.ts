@@ -1,4 +1,4 @@
-import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, AgentResponse, AskResponse, RiskTrends, AlertRule, AlertsResponse, WeeklyExport, SchedulerState, AnalyzeJob, ArchaeologyResponse, StoryTimelineResponse, AdvisorCheckResponse, IdentityDriftResponse, DecisionLinkItem, CognitiveLoadResponse, ModuleSourceResponse, ModuleSymbolsResponse, TreeNode, ReacquaintanceResponse } from '../types/api'
+import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, AgentResponse, AskResponse, RiskTrends, AlertRule, AlertsResponse, WeeklyExport, SchedulerState, AnalyzeJob, ArchaeologyResponse, StoryTimelineResponse, AdvisorCheckResponse, IdentityDriftResponse, DecisionLinkItem, CognitiveLoadResponse, ModuleSourceResponse, ModuleSymbolsResponse, TreeNode, ReacquaintanceResponse, HandoffPacket, HandoffPacketListResponse, HandoffPacketState } from '../types/api'
 
 // --- Debugging Suite Helpers ---
 const logAPI = (method: string, url: string, start: number, payload?: any, response?: any, error?: any) => {
@@ -12,12 +12,33 @@ const logAPI = (method: string, url: string, start: number, payload?: any, respo
   console.groupEnd()
 }
 
+async function readJSONSafely(r: Response): Promise<any> {
+  const text = await r.text()
+  if (!text) return null
+  try {
+    return JSON.parse(text)
+  } catch {
+    return text
+  }
+}
+
+function toAPIError(payload: any, status: number) {
+  const message =
+    (payload && typeof payload === 'object' && (payload.message || payload.error || payload.detail)) ||
+    (typeof payload === 'string' ? payload : '') ||
+    `Request failed: ${status}`
+  const err = new Error(String(message))
+  ;(err as any).payload = payload
+  ;(err as any).status = status
+  return err
+}
+
 async function getJSON<T>(url: string): Promise<T> {
   const start = Date.now()
   try {
     const r = await fetch(url)
-    if (!r.ok) throw new Error(`Request failed: ${r.status}`)
-    const data = await r.json()
+    const data = await readJSONSafely(r)
+    if (!r.ok) throw toAPIError(data, r.status)
     logAPI('GET', url, start, undefined, data)
     return data as T
   } catch (e) {
@@ -34,8 +55,8 @@ async function postJSON<T>(url: string, data: any): Promise<T> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     })
-    if (!r.ok) throw new Error(`Request failed: ${r.status}`)
-    const resData = await r.json()
+    const resData = await readJSONSafely(r)
+    if (!r.ok) throw toAPIError(resData, r.status)
     logAPI('POST', url, start, data, resData)
     return resData as T
   } catch (e) {
@@ -52,8 +73,8 @@ async function patchJSON<T>(url: string, data: any): Promise<T> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     })
-    if (!r.ok) throw new Error(`Request failed: ${r.status}`)
-    const resData = await r.json()
+    const resData = await readJSONSafely(r)
+    if (!r.ok) throw toAPIError(resData, r.status)
     logAPI('PATCH', url, start, data, resData)
     return resData as T
   } catch (e) {
@@ -66,8 +87,8 @@ async function deleteJSON<T>(url: string): Promise<T> {
   const start = Date.now()
   try {
     const r = await fetch(url, { method: 'DELETE' })
-    if (!r.ok) throw new Error(`Request failed: ${r.status}`)
-    const resData = await r.json()
+    const resData = await readJSONSafely(r)
+    if (!r.ok) throw toAPIError(resData, r.status)
     logAPI('DELETE', url, start, undefined, resData)
     return resData as T
   } catch (e) {
@@ -137,6 +158,20 @@ export const api = {
   architecture: () => getJSON<{ nodes: ArchNode[]; edges: ArchEdge[] }>('/api/architecture/graph'),
   architectureTree: () => getJSON<TreeNode>('/api/architecture/tree'),
   ask: (question: string) => postJSON<AskResponse>('/api/ask', { question }),
+  handoffPackets: () => getJSON<HandoffPacketListResponse>('/api/handoff-packets'),
+  createHandoffPacket: (payload: {
+    task_prompt: string
+    declared_files?: string[]
+    declared_modules?: string[]
+    do_not_touch?: Array<{ target: string; reason?: string; severity?: string }>
+    acceptance_criteria?: string[]
+    delegation_target?: string
+  }) => postJSON<{ packet: HandoffPacket }>('/api/handoff-packets', payload),
+  handoffPacket: (packetId: string) => getJSON<{ packet: HandoffPacket }>(`/api/handoff-packets/${encodeURIComponent(packetId)}`),
+  updateHandoffPacket: (
+    packetId: string,
+    patch: Partial<{ state: HandoffPacketState; approved_by: string; delegation_target: string; notes: string[] }>,
+  ) => patchJSON<{ packet: HandoffPacket }>(`/api/handoff-packets/${encodeURIComponent(packetId)}`, patch),
   decisionAdvisorCheck: (intent: string, files: string[] = []) => postJSON<AdvisorCheckResponse>('/api/decision-advisor/check', { intent, files }),
   assembleContext: (p: ContextPayload) => postJSON<{ context: string; warnings: string[] }>('/api/assemble-context', p),
   moduleSource: (module: string) => getJSON<ModuleSourceResponse>(`/api/module/source?module=${encodeURIComponent(module)}`),
