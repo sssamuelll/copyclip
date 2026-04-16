@@ -388,7 +388,6 @@ function buildStateActions(state: HandoffPacketState): StateAction[] {
         { label: 'approve for handoff', state: 'approved_for_handoff' as const, requiresApproval: true },
       ]
     case 'approved_for_handoff':
-      return [{ label: 'send back to draft', state: 'draft' as const }]
     default:
       return []
   }
