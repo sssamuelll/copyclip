@@ -8,6 +8,20 @@ from typing import Any
 from .context_bundle_builder import build_context_bundle
 
 
+PACKET_TRANSITIONS = {
+    "draft": {"ready_for_review", "superseded"},
+    "ready_for_review": {"draft", "approved_for_handoff", "superseded"},
+    "approved_for_handoff": {"delegated", "cancelled", "superseded"},
+    "delegated": {"change_received", "cancelled", "superseded"},
+    "change_received": {"reviewed", "superseded"},
+    "reviewed": {"superseded"},
+    "superseded": set(),
+    "cancelled": set(),
+}
+
+REVIEW_STATES = {"not_started", "generated", "human_reviewed", "accepted", "changes_requested"}
+
+
 STOP_WORDS = {
     "the",
     "and",
@@ -401,3 +415,137 @@ def build_handoff_packet(
     }
     packet["meta"]["packet_id"] = _stable_packet_id(packet)
     return packet
+
+
+def save_handoff_packet(conn, project_id: int, packet: dict[str, Any], commit: bool = True) -> dict[str, Any]:
+    packet_id = str(packet.get("meta", {}).get("packet_id") or "")
+    if not packet_id:
+        raise ValueError("packet_id_required")
+    state = str(packet.get("meta", {}).get("state") or "draft")
+    objective = str(((packet.get("objective") or {}).get("summary")) or "")
+    conn.execute(
+        """
+        INSERT INTO handoff_packets(project_id, packet_id, state, objective_summary, packet_json, created_at, updated_at)
+        VALUES(?,?,?,?,?,?,?)
+        ON CONFLICT(project_id, packet_id) DO UPDATE SET
+            state=excluded.state,
+            objective_summary=excluded.objective_summary,
+            packet_json=excluded.packet_json,
+            updated_at=excluded.updated_at
+        """,
+        (
+            project_id,
+            packet_id,
+            state,
+            objective,
+            json.dumps(packet, sort_keys=True),
+            packet["meta"].get("created_at"),
+            packet["meta"].get("updated_at"),
+        ),
+    )
+    if commit:
+        conn.commit()
+    return packet
+
+
+def list_handoff_packets(conn, project_id: int, limit: int = 100, offset: int = 0) -> dict[str, Any]:
+    total = conn.execute("SELECT COUNT(*) FROM handoff_packets WHERE project_id=?", (project_id,)).fetchone()[0]
+    rows = conn.execute(
+        "SELECT packet_id, state, objective_summary, created_at, updated_at FROM handoff_packets WHERE project_id=? ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?",
+        (project_id, limit, offset),
+    ).fetchall()
+    return {
+        "items": [
+            {
+                "packet_id": row[0],
+                "state": row[1],
+                "objective_summary": row[2],
+                "created_at": row[3],
+                "updated_at": row[4],
+            }
+            for row in rows
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+def get_handoff_packet(conn, project_id: int, packet_id: str) -> dict[str, Any] | None:
+    row = conn.execute(
+        "SELECT packet_json FROM handoff_packets WHERE project_id=? AND packet_id=?",
+        (project_id, packet_id),
+    ).fetchone()
+    if not row:
+        return None
+    return json.loads(row[0])
+
+
+def update_handoff_packet(conn, project_id: int, packet_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    packet = get_handoff_packet(conn, project_id, packet_id)
+    if not packet:
+        return None
+    meta = packet.setdefault("meta", {})
+    current_state = str(meta.get("state") or "draft")
+    next_state = updates.get("state")
+    if next_state is not None:
+        next_state = str(next_state)
+        allowed = PACKET_TRANSITIONS.get(current_state, set())
+        if next_state != current_state and next_state not in allowed:
+            raise ValueError(f"invalid_state_transition:{current_state}->{next_state}")
+        meta["state"] = next_state
+    if "approved_by" in updates:
+        meta["approved_by"] = updates.get("approved_by")
+    if "delegation_target" in updates:
+        meta["delegation_target"] = updates.get("delegation_target")
+    if "notes" in updates and isinstance(updates.get("notes"), list):
+        packet["notes"] = updates.get("notes")
+    meta["updated_at"] = updates.get("updated_at") or _now_iso()
+    return save_handoff_packet(conn, project_id, packet, commit=False)
+
+
+def save_handoff_review_summary(
+    conn,
+    project_id: int,
+    packet_id: str,
+    review_summary: dict[str, Any],
+    commit: bool = True,
+) -> dict[str, Any]:
+    meta = review_summary.get("meta") or {}
+    review_state = str(meta.get("review_state") or "generated")
+    if review_state not in REVIEW_STATES:
+        raise ValueError("invalid_review_state")
+    meta_packet_id = meta.get("packet_id")
+    if meta_packet_id and str(meta_packet_id) != packet_id:
+        raise ValueError("review_packet_id_mismatch")
+    conn.execute(
+        """
+        INSERT INTO handoff_review_summaries(project_id, packet_id, review_state, review_json, created_at, updated_at)
+        VALUES(?,?,?,?,?,?)
+        ON CONFLICT(project_id, packet_id) DO UPDATE SET
+            review_state=excluded.review_state,
+            review_json=excluded.review_json,
+            updated_at=excluded.updated_at
+        """,
+        (
+            project_id,
+            packet_id,
+            review_state,
+            json.dumps(review_summary, sort_keys=True),
+            (review_summary.get("meta") or {}).get("generated_at"),
+            (review_summary.get("meta") or {}).get("generated_at"),
+        ),
+    )
+    if commit:
+        conn.commit()
+    return review_summary
+
+
+def get_handoff_review_summary(conn, project_id: int, packet_id: str) -> dict[str, Any] | None:
+    row = conn.execute(
+        "SELECT review_json FROM handoff_review_summaries WHERE project_id=? AND packet_id=?",
+        (project_id, packet_id),
+    ).fetchone()
+    if not row:
+        return None
+    return json.loads(row[0])

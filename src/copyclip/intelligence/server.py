@@ -16,6 +16,15 @@ from urllib.parse import parse_qs, urlparse
 
 from .context_bundle_builder import build_context_bundle
 from .ask_project import build_ask_response
+from .handoff import (
+    build_handoff_packet,
+    get_handoff_packet,
+    get_handoff_review_summary,
+    list_handoff_packets,
+    save_handoff_packet,
+    save_handoff_review_summary,
+    update_handoff_packet,
+)
 from .db import connect, init_schema
 from .reacquaintance import build_reacquaintance_briefing, record_reacquaintance_visit
 from .phases import (
@@ -942,6 +951,38 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 }))
                 return
 
+            if parsed.path == "/api/handoff-packets":
+                if not pid:
+                    self._json(with_meta({"items": [], "total": 0, "limit": 0, "offset": 0}))
+                    return
+                limit, offset = _pagination(parsed)
+                self._json(with_meta(list_handoff_packets(conn, pid, limit=limit, offset=offset)))
+                return
+
+            if parsed.path.startswith("/api/handoff-packets/") and parsed.path.endswith("/review-summary"):
+                if not pid:
+                    self._json({"error": "run_analyze_first"}, 400)
+                    return
+                packet_id = parsed.path.split("/")[3]
+                review_summary = get_handoff_review_summary(conn, pid, packet_id)
+                if not review_summary:
+                    self._json({"error": "review_summary_not_found"}, 404)
+                    return
+                self._json(with_meta({"review_summary": review_summary}))
+                return
+
+            if parsed.path.startswith("/api/handoff-packets/"):
+                if not pid:
+                    self._json({"error": "run_analyze_first"}, 400)
+                    return
+                packet_id = parsed.path.rsplit("/", 1)[-1]
+                packet = get_handoff_packet(conn, pid, packet_id)
+                if not packet:
+                    self._json({"error": "handoff_packet_not_found"}, 404)
+                    return
+                self._json(with_meta({"packet": packet}))
+                return
+
             if parsed.path == "/api/decisions":
                 if not pid:
                     self._json(with_meta({"items": [], "total": 0, "limit": 0, "offset": 0}))
@@ -1610,6 +1651,25 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 self._json({"ok": True, "id": rule_id})
                 return
 
+            if parsed.path.startswith("/api/handoff-packets/"):
+                packet_id = parsed.path.rsplit("/", 1)[-1]
+                length = int(self.headers.get("Content-Length", "0"))
+                raw = self.rfile.read(length) if length else b"{}"
+                data = json.loads(raw.decode("utf-8"))
+                try:
+                    packet = update_handoff_packet(conn, pid, packet_id, data)
+                    conn.commit()
+                except ValueError as e:
+                    if str(e).startswith("invalid_state_transition:"):
+                        self._json({"error": "invalid_state_transition", "detail": str(e)}, 409)
+                        return
+                    raise
+                if not packet:
+                    self._json({"error": "handoff_packet_not_found"}, 404)
+                    return
+                self._json(with_meta({"packet": packet}))
+                return
+
             if parsed.path.startswith("/api/decisions/"): 
                 try:
                     decision_id = int(parsed.path.rsplit("/", 1)[-1])
@@ -1695,6 +1755,77 @@ def run_server(project_root: str, port: int = 4310) -> None:
             pid = _project_id(conn, root)
             if not pid:
                 self._json({"error": "run_analyze_first"}, 400)
+                return
+
+            if parsed.path == "/api/handoff-packets":
+                length = int(self.headers.get("Content-Length", "0"))
+                raw = self.rfile.read(length) if length else b"{}"
+                data = json.loads(raw.decode("utf-8"))
+                task_prompt = (data.get("task_prompt") or "").strip()
+                if not task_prompt:
+                    self._json({"error": "task_prompt_required"}, 400)
+                    return
+                packet = build_handoff_packet(
+                    conn,
+                    pid,
+                    task_prompt=task_prompt,
+                    declared_files=[str(x) for x in (data.get("declared_files") or [])],
+                    declared_modules=[str(x) for x in (data.get("declared_modules") or [])],
+                    do_not_touch=data.get("do_not_touch") or [],
+                    acceptance_criteria=[str(x) for x in (data.get("acceptance_criteria") or [])],
+                    delegation_target=data.get("delegation_target"),
+                    generated_at=data.get("generated_at"),
+                )
+                save_handoff_packet(conn, pid, packet)
+                self._json(with_meta({"packet": packet}))
+                return
+
+            if parsed.path.startswith("/api/handoff-packets/") and parsed.path.endswith("/review-summary"):
+                packet_id = parsed.path.split("/")[3]
+                packet = get_handoff_packet(conn, pid, packet_id)
+                if not packet:
+                    self._json({"error": "handoff_packet_not_found"}, 404)
+                    return
+                packet_state = str(((packet.get("meta") or {}).get("state")) or "draft")
+                if packet_state not in {"change_received", "reviewed"}:
+                    self._json({"error": "invalid_review_state_for_packet", "packet_state": packet_state}, 409)
+                    return
+                length = int(self.headers.get("Content-Length", "0"))
+                raw = self.rfile.read(length) if length else b"{}"
+                data = json.loads(raw.decode("utf-8"))
+                review_summary = {
+                    "meta": {
+                        "review_id": f"review_{packet_id}",
+                        "packet_id": packet_id,
+                        "review_state": str(data.get("review_state") or "generated"),
+                        "generated_at": str(data.get("generated_at") or datetime.now(timezone.utc).isoformat()),
+                    },
+                    "result": data.get("result") or {},
+                    "scope_check": data.get("scope_check") or {},
+                    "decision_conflicts": data.get("decision_conflicts") or [],
+                    "blast_radius": data.get("blast_radius") or {},
+                    "dark_zone_entry": data.get("dark_zone_entry") or [],
+                    "unresolved_questions": data.get("unresolved_questions") or [],
+                    "review_evidence": data.get("review_evidence") or [],
+                }
+                try:
+                    conn.execute("BEGIN")
+                    save_handoff_review_summary(conn, pid, packet_id, review_summary, commit=False)
+                    updated_packet = update_handoff_packet(conn, pid, packet_id, {"state": "reviewed"})
+                    conn.commit()
+                except ValueError as e:
+                    conn.rollback()
+                    if str(e) == "invalid_review_state":
+                        self._json({"error": "invalid_review_state"}, 400)
+                        return
+                    if str(e).startswith("invalid_state_transition:"):
+                        self._json({"error": "invalid_state_transition", "detail": str(e)}, 409)
+                        return
+                    if str(e) == "review_packet_id_mismatch":
+                        self._json({"error": "review_packet_id_mismatch"}, 400)
+                        return
+                    raise
+                self._json(with_meta({"review_summary": review_summary, "packet": updated_packet}))
                 return
 
             if parsed.path == "/api/analyze/start":

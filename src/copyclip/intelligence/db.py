@@ -296,6 +296,29 @@ def init_schema(conn: sqlite3.Connection) -> None:
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(project_id, name)
         );
+
+        CREATE TABLE IF NOT EXISTS handoff_packets (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            packet_id TEXT NOT NULL,
+            state TEXT NOT NULL,
+            objective_summary TEXT,
+            packet_json TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(project_id, packet_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS handoff_review_summaries (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            packet_id TEXT NOT NULL,
+            review_state TEXT NOT NULL,
+            review_json TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(project_id, packet_id)
+        );
         """
     )
     # Lightweight migration for existing DBs created before new columns existed.
