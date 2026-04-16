@@ -1652,10 +1652,18 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 return
 
             if parsed.path.startswith("/api/handoff-packets/"):
+                if not pid:
+                    self._json({"error": "run_analyze_first"}, 400)
+                    return
                 packet_id = parsed.path.rsplit("/", 1)[-1]
                 length = int(self.headers.get("Content-Length", "0"))
                 raw = self.rfile.read(length) if length else b"{}"
                 data = json.loads(raw.decode("utf-8"))
+                if str(data.get("state") or "") == "reviewed":
+                    review_summary = get_handoff_review_summary(conn, pid, packet_id)
+                    if not review_summary:
+                        self._json({"error": "review_summary_required"}, 409)
+                        return
                 try:
                     packet = update_handoff_packet(conn, pid, packet_id, data)
                     conn.commit()

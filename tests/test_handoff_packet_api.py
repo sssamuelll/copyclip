@@ -194,3 +194,60 @@ def test_handoff_packet_create_blocks_without_scope_or_with_invalid_state_transi
             body = json.loads(e.read().decode("utf-8"))
             assert e.code == 409
             assert body["error"] == "invalid_review_state_for_packet"
+
+
+def test_handoff_packet_patch_cannot_mark_reviewed_without_review_summary():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        root_path = str(root.absolute())
+        conn = connect(root_path)
+        init_schema(conn)
+        _seed_handoff_api_project(conn, root_path)
+        conn.close()
+
+        port = _free_port()
+        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
+        th.start()
+        _wait_port(port)
+
+        created = _post_json(
+            f"http://127.0.0.1:{port}/api/handoff-packets",
+            {
+                "task_prompt": "Build a bounded handoff packet generator for MCP delegation.",
+                "declared_files": ["src/copyclip/mcp_server.py"],
+                "declared_modules": ["copyclip.mcp"],
+            },
+        )
+        packet_id = created["packet"]["meta"]["packet_id"]
+
+        _patch_json(
+            f"http://127.0.0.1:{port}/api/handoff-packets/{packet_id}",
+            {"state": "approved_for_handoff"},
+        )
+        _patch_json(
+            f"http://127.0.0.1:{port}/api/handoff-packets/{packet_id}",
+            {"state": "delegated"},
+        )
+        _patch_json(
+            f"http://127.0.0.1:{port}/api/handoff-packets/{packet_id}",
+            {"state": "change_received"},
+        )
+
+        try:
+            _patch_json(
+                f"http://127.0.0.1:{port}/api/handoff-packets/{packet_id}",
+                {"state": "reviewed"},
+            )
+            raise AssertionError("expected reviewed patch without summary to fail")
+        except HTTPError as e:
+            body = json.loads(e.read().decode("utf-8"))
+            assert e.code == 409
+            assert body["error"] == "review_summary_required"
+
+        try:
+            _get_json(f"http://127.0.0.1:{port}/api/handoff-packets/{packet_id}/review-summary")
+            raise AssertionError("expected missing review summary to remain missing")
+        except HTTPError as e:
+            body = json.loads(e.read().decode("utf-8"))
+            assert e.code == 404
+            assert body["error"] == "review_summary_not_found"
