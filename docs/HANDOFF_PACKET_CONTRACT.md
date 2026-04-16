@@ -39,6 +39,21 @@ The workflow uses two primary objects:
 Optional supporting object:
 3. `handoff_execution_record` — metadata about an agent run or proposal linked to a packet
 
+Minimal execution record shape:
+```json
+{
+  "execution_id": "exec_2026_04_16_001",
+  "packet_id": "handoff_2026_04_16_001",
+  "state": "queued",
+  "executor_kind": "external_agent",
+  "executor_label": "claude-code",
+  "started_at": null,
+  "finished_at": null,
+  "result_ref": null,
+  "notes": []
+}
+```
+
 ## Lifecycle states
 
 ### Packet lifecycle
@@ -70,6 +85,35 @@ Allowed `handoff_review_summary.review_state` values:
 - `human_reviewed`
 - `accepted`
 - `changes_requested`
+
+### Review transitions
+
+Allowed transitions:
+- `not_started -> generated`
+- `generated -> human_reviewed`
+- `generated -> accepted`
+- `generated -> changes_requested`
+- `human_reviewed -> accepted`
+- `human_reviewed -> changes_requested`
+
+Disallowed transitions:
+- no direct reopening from `accepted`
+- no direct reopening from `changes_requested` without generating a new review summary or a superseding packet
+- no terminal review state should mutate packet scope retroactively; review outcomes must request a new packet version when scope changes are needed
+
+### Execution transitions
+
+Allowed transitions:
+- `queued -> running`
+- `queued -> abandoned`
+- `running -> completed`
+- `running -> failed`
+- `running -> abandoned`
+
+Disallowed transitions:
+- no direct `queued -> completed`
+- no direct restart from `completed`
+- retries after `failed` should create a new execution record rather than mutating historical execution state
 
 ## State transition rules
 
