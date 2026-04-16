@@ -248,6 +248,49 @@ def test_ask_endpoint_surfaces_contradictory_signals_instead_of_false_certainty(
         assert res["next_drill_down"]["target"] is not None
 
 
+def test_ask_endpoint_requires_decision_and_drift_risk_to_overlap_on_same_file():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        root_path = str(root.absolute())
+        conn = connect(root_path)
+        init_schema(conn)
+        conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root_path, "tmp"))
+        pid = conn.execute("SELECT id FROM projects WHERE root_path=?", (root_path,)).fetchone()[0]
+        conn.execute(
+            "INSERT INTO decisions(project_id,title,summary,status,source_type) VALUES(?,?,?,?,?)",
+            (pid, "Keep billing flow stable", "Avoid churn in billing session handling.", "accepted", "manual"),
+        )
+        conn.execute(
+            "INSERT INTO decision_refs(decision_id,ref_type,ref_value) VALUES(?,?,?)",
+            (1, "file", "src/billing/session.ts"),
+        )
+        conn.execute(
+            "INSERT INTO files(project_id,path,language,size_bytes,mtime,hash) VALUES(?,?,?,?,?,?)",
+            (pid, "src/auth/session.ts", "typescript", 1000, 1.0, "h-auth"),
+        )
+        conn.execute(
+            "INSERT INTO risks(project_id,area,severity,kind,rationale,score) VALUES(?,?,?,?,?,?)",
+            (pid, "src/auth/session.ts", "high", "intent_drift", "Recent changes appear to conflict with the current auth direction.", 95),
+        )
+        conn.execute(
+            "INSERT INTO commits(project_id,sha,author,date,message) VALUES(?,?,?,?,?)",
+            (pid, "sha-auth", "samuel", "2026-04-15T10:00:00Z", "rewrite auth session behavior"),
+        )
+        conn.execute(
+            "INSERT INTO file_changes(project_id,commit_sha,file_path,additions,deletions) VALUES(?,?,?,?,?)",
+            (pid, "sha-auth", "src/auth/session.ts", 40, 12),
+        )
+        conn.commit()
+
+        port = _free_port()
+        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
+        th.start()
+        _wait_port(port)
+
+        res = _post_json(f"http://127.0.0.1:{port}/api/ask", {"question": "is auth session flow stable?"})
+        assert res["answer_kind"] != "contradiction_detected"
+
+
 def test_ask_endpoint_does_not_ground_vague_question_from_generic_project_noise():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)

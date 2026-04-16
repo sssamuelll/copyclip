@@ -400,21 +400,23 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
         next_drill_down = {"type": "commit", "target": evidence_groups["commits"][0]["id"]}
 
     confidence = "high" if len({c["type"] for c in citations}) >= 2 else "medium"
-    contradiction_detected = bool(evidence_groups["decisions"]) and any(
-        (item.get("related_file") or "") in {file_item["id"] for file_item in evidence_groups["files"]}
-        and "drift" in " ".join(item.get("why_selected", [])).lower()
+    decision_ids = {int(item["id"]) for item in evidence_groups["decisions"]}
+    decision_linked_files = {
+        file_path
+        for file_path, linked_decision_ids in decision_refs_by_file.items()
+        if any(decision_id in decision_ids for decision_id in linked_decision_ids)
+    }
+    file_ids = {str(file_item["id"]) for file_item in evidence_groups["files"]}
+    drift_risk_files = {
+        str(item.get("related_file"))
         for item in evidence_groups["risks"]
+        if isinstance(item.get("related_file"), str)
+        and item.get("related_file")
+        and "drift" in (risk_by_file.get(str(item.get("related_file")), {}) or {}).get("kind", "")
+    }
+    contradiction_detected = bool(decision_ids) and bool(
+        decision_linked_files & file_ids & drift_risk_files
     )
-    if not contradiction_detected:
-        contradiction_detected = bool(evidence_groups["decisions"]) and any(
-            isinstance(item.get("related_file"), str) and item.get("related_file")
-            and any(file_item["id"] == item["related_file"] for file_item in evidence_groups["files"])
-            and any("risk" in why.lower() for why in item.get("why_selected", []))
-            for item in evidence_groups["risks"]
-        ) and any(
-            "drift" in (risk_by_file.get(str(file_item["id"]), {}) or {}).get("kind", "")
-            for file_item in evidence_groups["files"]
-        )
 
     if contradiction_detected:
         return _contradiction_response(
