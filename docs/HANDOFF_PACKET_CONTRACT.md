@@ -125,6 +125,7 @@ Allowed transitions:
 - `ready_for_review -> draft`
 - `approved_for_handoff -> delegated`
 - `approved_for_handoff -> cancelled`
+- `approved_for_handoff -> superseded`
 - `delegated -> change_received`
 - `delegated -> cancelled`
 - `delegated -> superseded`
@@ -139,6 +140,10 @@ Disallowed transitions:
 - no direct `approved_for_handoff -> reviewed`
 - no reopening from `cancelled`
 - no mutation of agent-consumable fields after `delegated` without creating a replacement/superseding packet
+
+Replacement guidance:
+- use `superseded` when a packet is replaced by a newer packet version for the same task
+- use `cancelled` when the packet is intentionally abandoned without a replacement
 
 ### Human gate expectations
 
