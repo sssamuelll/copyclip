@@ -667,7 +667,7 @@ def test_alert_scheduler_state_get_and_set():
 
 
 def test_analyze_job_start_and_status_endpoints():
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)
         root_path = str(root.absolute())
         (root / 'src').mkdir(parents=True, exist_ok=True)
