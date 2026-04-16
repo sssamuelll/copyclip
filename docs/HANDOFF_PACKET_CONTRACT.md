@@ -58,7 +58,7 @@ Minimal execution record shape:
 
 ### Packet lifecycle
 
-Allowed `handoff_packet.state` values:
+Allowed `handoff_packet.meta.state` values:
 - `draft` — packet is still being composed by the human/system
 - `ready_for_review` — enough structure exists to inspect it before delegation
 - `approved_for_handoff` — human approved the packet for agent consumption
@@ -79,7 +79,7 @@ Allowed `handoff_execution_record.state` values:
 
 ### Review lifecycle
 
-Allowed `handoff_review_summary.review_state` values:
+Allowed `handoff_review_summary.meta.review_state` values:
 - `not_started`
 - `generated`
 - `human_reviewed`
@@ -127,7 +127,9 @@ Allowed transitions:
 - `approved_for_handoff -> cancelled`
 - `delegated -> change_received`
 - `delegated -> cancelled`
+- `delegated -> superseded`
 - `change_received -> reviewed`
+- `change_received -> superseded`
 - `reviewed -> superseded`
 - `draft -> superseded`
 - `ready_for_review -> superseded`
