@@ -205,6 +205,7 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
                     "snippet": (r[3] or "")[:240],
                     "query_linked": True,
                     "area": r[1],
+                    "risk_kind": r[2],
                 }
             )
 
@@ -334,6 +335,7 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
             ]
             item["ref"] = {"type": "risk", "target": e["id"]}
             item["related_file"] = e.get("area")
+            item["risk_kind"] = e.get("risk_kind")
             evidence_groups["risks"].append(item)
         elif e["type"] == "commit":
             citations.append({"type": "commit", "id": e["id"], "label": f"commit {str(e['id'])[:7]}"})
@@ -375,6 +377,53 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
 
         answer_evidence_ids.append(item["evidence_id"])
 
+    if not evidence_groups["files"]:
+        supporting_files = []
+        seen_supporting_files = set()
+        for item in evidence_groups["risks"] + evidence_groups["symbols"]:
+            related_file = item.get("related_file")
+            if isinstance(related_file, str) and related_file and related_file not in seen_supporting_files:
+                supporting_files.append(related_file)
+                seen_supporting_files.add(related_file)
+        for file_path, linked_decision_ids in decision_refs_by_file.items():
+            if any(decision["id"] in linked_decision_ids for decision in evidence_groups["decisions"]):
+                if file_path not in seen_supporting_files:
+                    supporting_files.append(file_path)
+                    seen_supporting_files.add(file_path)
+        for file_path in supporting_files[:2]:
+            signal = {
+                "lexical_hits": sum(1 for t in terms if t in str(file_path).lower()),
+                "churn": churn_by_file.get(str(file_path), 0),
+                "decision_refs": len(decision_refs_by_file.get(str(file_path), [])),
+                "risk_score": int((risk_by_file.get(str(file_path), {}) or {}).get("score", 0)),
+            }
+            why = []
+            if signal["lexical_hits"]:
+                why.append("Lexical file/path match with the question terms.")
+            if signal["decision_refs"]:
+                why.append("Linked from accepted decision refs, increasing architectural relevance.")
+            if signal["churn"]:
+                why.append("Recent churn increased the ranking for this file.")
+            if signal["risk_score"]:
+                why.append("Risk score contributed to the file ranking.")
+            if any(risk.get("related_file") == file_path for risk in evidence_groups["risks"]):
+                why.append("Backfilled because risk evidence pointed to this file.")
+            if any(symbol.get("related_file") == file_path for symbol in evidence_groups["symbols"]):
+                why.append("Backfilled because symbol evidence points to this file.")
+            file_item = _build_evidence_item(
+                "file",
+                file_path,
+                file_path,
+                ", ".join(why) or "Supporting file for the strongest ask evidence.",
+                TYPE_BOOST.get("file", 0) + signal["lexical_hits"] * 30 + min(signal["churn"] * 10, 60) + min(signal["decision_refs"] * 40, 80) + min(signal["risk_score"], 100),
+                why or ["Supporting file for the strongest ask evidence."],
+                file_path,
+            )
+            evidence_groups["files"].append(file_item)
+            answer_evidence_ids.append(file_item["evidence_id"])
+            if not any(citation["type"] == "file" and citation["id"] == file_path for citation in citations):
+                citations.append({"type": "file", "id": file_path, "label": file_path})
+
     rationale = []
     if evidence_groups["decisions"]:
         rationale.append("Selected decisions because they directly matched the question terms.")
@@ -412,7 +461,7 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
         for item in evidence_groups["risks"]
         if isinstance(item.get("related_file"), str)
         and item.get("related_file")
-        and "drift" in (risk_by_file.get(str(item.get("related_file")), {}) or {}).get("kind", "")
+        and "drift" in str(item.get("risk_kind") or "")
     }
     contradiction_detected = bool(decision_ids) and bool(
         decision_linked_files & file_ids & drift_risk_files
