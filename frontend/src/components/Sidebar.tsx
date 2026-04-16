@@ -6,6 +6,7 @@ const GROUPS = [
     pages: [
       { id: 'reacquaintance', label: 'catch me up' },
       { id: 'ask', label: 'ask the consciousness' },
+      { id: 'handoff', label: 'safe handoff' },
       { id: 'atlas-3d', label: 'atlas' },
       { id: 'timeline', label: 'chronicle' },
       { id: 'planning', label: 'intent field' },

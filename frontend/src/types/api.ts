@@ -435,3 +435,167 @@ export type CognitiveLoadResponse = {
     generated_at?: string
   }
 }
+
+export type HandoffPacketState =
+  | 'draft'
+  | 'ready_for_review'
+  | 'approved_for_handoff'
+  | 'delegated'
+  | 'change_received'
+  | 'reviewed'
+  | 'superseded'
+  | 'cancelled'
+
+export type HandoffReviewState = 'not_started' | 'generated' | 'human_reviewed' | 'accepted' | 'changes_requested'
+
+export type HandoffBoundary = {
+  target: string
+  reason: string
+  severity: string
+  source?: string[]
+}
+
+export type HandoffDecision = {
+  id: number
+  title: string
+  status: string
+  why_relevant: string
+  linked_targets: string[]
+  evidence: string[]
+}
+
+export type HandoffRiskDarkZone = {
+  risk_id: string | number
+  area: string
+  kind: string
+  severity: string
+  score: number
+  why_it_matters: string
+  recommended_guardrail: string
+  evidence: string[]
+}
+
+export type HandoffQuestion = {
+  question: string
+  priority: string
+  blocking: boolean
+  derived_from: string[]
+  resolution?: string | null
+}
+
+export type HandoffAcceptanceCriterion = {
+  id: string
+  summary: string
+  check_type: string
+}
+
+export type HandoffEvidenceItem = {
+  id: string
+  type: string
+  label: string
+  ref: string | number
+}
+
+export type HandoffBundleManifestItem = {
+  kind?: string
+  path?: string
+  score?: number
+  reasons?: string[]
+}
+
+export type HandoffPacket = {
+  meta: {
+    packet_id: string
+    packet_version: string
+    state: HandoffPacketState
+    created_at: string
+    updated_at: string
+    project: string
+    created_by: string
+    approved_by?: string | null
+    delegation_target?: string | null
+    source_task?: { kind: string; value: string }
+  }
+  objective: {
+    summary: string
+    task_type: string
+    intent: string
+    success_definition: string
+  }
+  scope: {
+    declared_files: string[]
+    declared_modules: string[]
+    supporting_files: string[]
+    supporting_context_rationale: string[]
+    out_of_scope_modules: string[]
+    scope_rationale: string[]
+  }
+  constraints: Array<{
+    constraint_id: string
+    type: string
+    summary: string
+    source: string[]
+    severity: string
+    origin: string
+  }>
+  do_not_touch: HandoffBoundary[]
+  relevant_decisions: HandoffDecision[]
+  risk_dark_zones: HandoffRiskDarkZone[]
+  questions_to_clarify: HandoffQuestion[]
+  acceptance_criteria: HandoffAcceptanceCriterion[]
+  agent_consumable_packet: {
+    objective: string
+    allowed_write_scope: string[]
+    read_scope: string[]
+    constraints: string[]
+    do_not_touch: string[]
+    questions_to_clarify: string[]
+    acceptance_criteria: string[]
+  }
+  review_contract: {
+    expected_review_type: string
+    compare_scope_against_touched_files: boolean
+    check_decision_conflicts: boolean
+    check_dark_zone_entry: boolean
+    check_blast_radius: boolean
+    required_human_questions: string[]
+  }
+  evidence_index: HandoffEvidenceItem[]
+  notes: string[]
+  bundle_manifest: HandoffBundleManifestItem[]
+}
+
+export type HandoffPacketListItem = {
+  packet_id: string
+  state: HandoffPacketState
+  objective_summary: string
+  created_at: string
+  updated_at: string
+}
+
+export type HandoffPacketListResponse = {
+  items: HandoffPacketListItem[]
+  total: number
+  limit: number
+  offset: number
+  meta?: {
+    project?: string
+    generated_at?: string
+  }
+}
+
+export type HandoffReviewSummary = {
+  meta: {
+    review_id: string
+    packet_id: string
+    review_state: HandoffReviewState
+    generated_at: string
+  }
+  result: Record<string, unknown>
+  scope_check: Record<string, unknown>
+  decision_conflicts: unknown[]
+  blast_radius: Record<string, unknown>
+  dark_zone_entry: unknown[]
+  unresolved_questions: unknown[]
+  review_evidence: unknown[]
+}

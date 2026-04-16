@@ -14,10 +14,11 @@ import { ChangesPage } from './pages/ChangesPage'
 import { Atlas3DPage } from './pages/Atlas3DPage'
 import { TimelinePage } from './pages/TimelinePage'
 import { PlanningPage } from './pages/PlanningPage'
+import { HandoffPage } from './pages/HandoffPage'
 
 import type { ArchEdge, ArchNode, ChangeItem, DecisionItem, Overview, RiskItem } from './types/api'
 
-type Page = 'reacquaintance' | 'ask' | 'atlas-3d' | 'timeline' | 'planning' | 'changes' | 'architecture' | 'impact' | 'risks' | 'context-builder' | 'decisions' | 'settings'
+type Page = 'reacquaintance' | 'ask' | 'handoff' | 'atlas-3d' | 'timeline' | 'planning' | 'changes' | 'architecture' | 'impact' | 'risks' | 'context-builder' | 'decisions' | 'settings'
 
 export function App() {
   const [page, setPage] = useState<Page>('reacquaintance')
@@ -101,6 +102,7 @@ export function App() {
         <div style={{ padding: '24px', flex: 1 }}>
           {page === 'reacquaintance' && <ReacquaintancePage onOpenDecision={openDecision} onOpenRisk={openRisk} onOpenChanges={openChanges} />}
           {page === 'ask' && <AskPage onNotify={notify} onOpenDecision={openDecision} onOpenRisk={openRisk} onOpenChanges={openChanges} />}
+          {page === 'handoff' && <HandoffPage onNotify={notify} />}
           {page === 'atlas-3d' && <Atlas3DPage />}
           {page === 'timeline' && <TimelinePage />}
           {page === 'planning' && <PlanningPage />}
