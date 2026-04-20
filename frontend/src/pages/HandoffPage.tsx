@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
-import type { HandoffPacket, HandoffPacketListItem, HandoffPacketState } from '../types/api'
+import type { HandoffPacket, HandoffPacketListItem, HandoffPacketState, HandoffReviewSummary } from '../types/api'
 
 type ComposerState = {
   taskPrompt: string
@@ -78,6 +78,10 @@ export function HandoffPage({ onNotify }: { onNotify?: (msg: string) => void }) 
   const [creating, setCreating] = useState(false)
   const [updating, setUpdating] = useState(false)
   const [error, setError] = useState('')
+  const [touchedFilesInput, setTouchedFilesInput] = useState('')
+  const [reviewSummary, setReviewSummary] = useState<HandoffReviewSummary | null>(null)
+  const [generatingReview, setGeneratingReview] = useState(false)
+  const [reviewError, setReviewError] = useState('')
 
   const approvalReady = useMemo(() => composer.approvedBy.trim() && composer.delegationTarget.trim(), [composer.approvedBy, composer.delegationTarget])
 
@@ -113,10 +117,43 @@ export function HandoffPage({ onNotify }: { onNotify?: (msg: string) => void }) 
         approvedBy: response.packet.meta.approved_by || '',
       }))
       setError('')
+      setReviewError('')
+      if (response.packet.meta.state === 'reviewed') {
+        try {
+          const reviewResp = await api.handoffReviewSummary(packetId)
+          setReviewSummary(reviewResp.review_summary)
+        } catch {
+          setReviewSummary(null)
+        }
+      } else {
+        setReviewSummary(null)
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load handoff packet')
     } finally {
       setLoadingPacket(false)
+    }
+  }
+
+  const handleGenerateReview = async () => {
+    if (!selectedPacketId || generatingReview) return
+    const touchedFiles = splitLines(touchedFilesInput)
+    if (!touchedFiles.length) {
+      setReviewError('Enter at least one touched file to generate a review.')
+      return
+    }
+    setGeneratingReview(true)
+    setReviewError('')
+    try {
+      const response = await api.generateHandoffReviewSummary(selectedPacketId, { touched_files: touchedFiles })
+      setReviewSummary(response.review_summary)
+      setSelectedPacket(response.packet)
+      await loadQueue(selectedPacketId)
+      onNotify?.(`review ${response.review_summary.result.verdict}`)
+    } catch (e) {
+      setReviewError(e instanceof Error ? e.message : 'Failed to generate review summary')
+    } finally {
+      setGeneratingReview(false)
     }
   }
 
@@ -361,6 +398,38 @@ export function HandoffPage({ onNotify }: { onNotify?: (msg: string) => void }) 
                         <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.5 }}>{JSON.stringify(selectedPacket.agent_consumable_packet, null, 2)}</pre>
                       </DetailCard>
                     </div>
+
+                    {(selectedPacket.meta.state === 'change_received' || selectedPacket.meta.state === 'reviewed') && (
+                      <div className="panel" style={{ padding: 12, display: 'grid', gap: 10, border: '1px solid var(--border)' }}>
+                        <div className="section-title">// post_change_review</div>
+                        <div className="muted" style={{ fontSize: 12 }}>
+                          Paste the files the delegated agent touched. The review summary compares them against declared scope, decisions, risks, and boundaries.
+                        </div>
+                        {reviewError && <div className="error">{reviewError}</div>}
+                        <label style={{ display: 'grid', gap: 6 }}>
+                          <span className="muted">touched files · one per line</span>
+                          <textarea
+                            value={touchedFilesInput}
+                            onChange={(e) => setTouchedFilesInput(e.target.value)}
+                            rows={4}
+                            placeholder="src/copyclip/intelligence/server.py"
+                          />
+                        </label>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          <button
+                            className="btn"
+                            onClick={handleGenerateReview}
+                            disabled={generatingReview || !touchedFilesInput.trim()}
+                          >
+                            {generatingReview ? 'generating…' : reviewSummary ? 're-generate review' : 'generate review'}
+                          </button>
+                        </div>
+
+                        {reviewSummary && (
+                          <ReviewSummaryView summary={reviewSummary} />
+                        )}
+                      </div>
+                    )}
                   </>
                 )}
               </div>
@@ -388,6 +457,17 @@ function buildStateActions(state: HandoffPacketState): StateAction[] {
         { label: 'approve for handoff', state: 'approved_for_handoff' as const, requiresApproval: true },
       ]
     case 'approved_for_handoff':
+      return [
+        { label: 'mark delegated', state: 'delegated' as const },
+        { label: 'cancel', state: 'cancelled' as const },
+      ]
+    case 'delegated':
+      return [
+        { label: 'mark change received', state: 'change_received' as const },
+        { label: 'cancel', state: 'cancelled' as const },
+      ]
+    case 'change_received':
+    case 'reviewed':
     default:
       return []
   }
@@ -424,5 +504,113 @@ function ListCard({ title, items, empty }: { title: string; items: string[]; emp
         <div className="muted">{empty}</div>
       )}
     </DetailCard>
+  )
+}
+
+function verdictTone(verdict: string) {
+  if (verdict === 'accepted') return 'high'
+  if (verdict === 'changes_requested') return 'low'
+  return 'med'
+}
+
+function severityTone(severity: string) {
+  if (severity === 'high' || severity === 'hard_boundary') return 'high'
+  if (severity === 'medium') return 'med'
+  return 'low'
+}
+
+function ReviewSummaryView({ summary }: { summary: HandoffReviewSummary }) {
+  const { result, scope_check, decision_conflicts, blast_radius, dark_zone_entry, unresolved_questions } = summary
+  const boundaryViolations = scope_check.boundary_violations || []
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      <div className="insight-card" style={{ margin: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <div className="insight-title">// verdict</div>
+          <span className={`badge badge-${verdictTone(result.verdict)}`}>{result.verdict}</span>
+          <span className="badge" style={{ marginLeft: 'auto' }}>confidence: {result.confidence}</span>
+        </div>
+        <div className="insight-text" style={{ marginTop: 8 }}>{result.summary}</div>
+      </div>
+
+      <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}>
+        <DetailCard title="// scope_check">
+          <div className="muted" style={{ fontSize: 12 }}>{scope_check.summary}</div>
+          {scope_check.out_of_scope_touches.length ? (
+            <div>
+              <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>out of declared scope:</div>
+              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                {scope_check.out_of_scope_touches.map((f) => <li key={f} className="muted">{f}</li>)}
+              </ul>
+            </div>
+          ) : <div className="muted" style={{ fontSize: 11 }}>all touches stayed in declared scope.</div>}
+          {boundaryViolations.length > 0 && (
+            <div>
+              <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>boundary violations:</div>
+              {boundaryViolations.map((v, idx) => (
+                <div key={`${v.target}-${idx}`} className="row-item" style={{ margin: 0, border: '1px solid var(--border)', flexDirection: 'column', alignItems: 'flex-start' }}>
+                  <div style={{ display: 'flex', width: '100%', gap: 8, alignItems: 'center' }}>
+                    <strong>{v.touched_file}</strong>
+                    <span className={`badge badge-${severityTone(v.severity)}`} style={{ marginLeft: 'auto' }}>{v.severity}</span>
+                  </div>
+                  <div className="muted" style={{ fontSize: 12 }}>boundary: {v.target}</div>
+                  <div className="muted" style={{ fontSize: 11 }}>{v.reason}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </DetailCard>
+
+        <DetailCard title="// decision_conflicts">
+          {decision_conflicts.length ? decision_conflicts.map((c) => (
+            <div key={c.decision_id} className="row-item" style={{ margin: 0, border: '1px solid var(--border)', flexDirection: 'column', alignItems: 'flex-start' }}>
+              <div style={{ display: 'flex', width: '100%', gap: 8, alignItems: 'center' }}>
+                <strong>#{c.decision_id} {c.title}</strong>
+                <span className={`badge badge-${severityTone(c.severity)}`} style={{ marginLeft: 'auto' }}>{c.severity}</span>
+              </div>
+              <div className="muted" style={{ fontSize: 12 }}>{c.summary}</div>
+              <div className="muted" style={{ fontSize: 11 }}>touched: {c.touched_targets.join(', ')}</div>
+            </div>
+          )) : <div className="muted">No decision conflicts surfaced.</div>}
+        </DetailCard>
+
+        <DetailCard title="// blast_radius">
+          <div className="muted" style={{ fontSize: 12 }}>{blast_radius.impact_summary}</div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+            <span className="badge">size: {blast_radius.estimated_size}</span>
+            <span className="badge">files: {blast_radius.touched_file_count}</span>
+          </div>
+          {blast_radius.impacted_modules.length ? (
+            <ul style={{ margin: 0, paddingLeft: 18, marginTop: 8 }}>
+              {blast_radius.impacted_modules.map((m) => <li key={m} className="muted">{m}</li>)}
+            </ul>
+          ) : <div className="muted" style={{ fontSize: 11 }}>No module signal for touched files.</div>}
+        </DetailCard>
+
+        <DetailCard title="// dark_zone_entry">
+          {dark_zone_entry.length ? dark_zone_entry.map((d) => (
+            <div key={d.area} className="row-item" style={{ margin: 0, border: '1px solid var(--border)', flexDirection: 'column', alignItems: 'flex-start' }}>
+              <div style={{ display: 'flex', width: '100%', gap: 8, alignItems: 'center' }}>
+                <strong>{d.area}</strong>
+                <span className={`badge badge-${d.expected ? 'med' : 'high'}`} style={{ marginLeft: 'auto' }}>{d.expected ? 'acknowledged' : 'unexpected'}</span>
+              </div>
+              <div className="muted" style={{ fontSize: 12 }}>{d.reason}</div>
+            </div>
+          )) : <div className="muted">No dark zone entries detected.</div>}
+        </DetailCard>
+
+        <DetailCard title="// unresolved_questions">
+          {unresolved_questions.length ? unresolved_questions.map((q, idx) => (
+            <div key={`${q.question}-${idx}`} className="row-item" style={{ margin: 0, border: '1px solid var(--border)', flexDirection: 'column', alignItems: 'flex-start' }}>
+              <div style={{ display: 'flex', width: '100%', gap: 8, alignItems: 'center' }}>
+                <strong>{q.question}</strong>
+                <span className={`badge badge-${q.blocking ? 'high' : q.priority === 'medium' ? 'med' : 'low'}`} style={{ marginLeft: 'auto' }}>{q.blocking ? 'blocking' : q.priority}</span>
+              </div>
+              {q.derived_from?.length ? <div className="muted" style={{ fontSize: 11 }}>derived from: {q.derived_from.join(', ')}</div> : null}
+            </div>
+          )) : <div className="muted">No unresolved questions remain.</div>}
+        </DetailCard>
+      </div>
+    </div>
   )
 }

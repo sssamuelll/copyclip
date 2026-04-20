@@ -584,6 +584,56 @@ export type HandoffPacketListResponse = {
   }
 }
 
+export type HandoffReviewScopeCheck = {
+  declared_scope: string[]
+  touched_files: string[]
+  out_of_scope_touches: string[]
+  boundary_violations: Array<{
+    target: string
+    touched_file: string
+    reason: string
+    severity: string
+  }>
+  summary: string
+}
+
+export type HandoffReviewDecisionConflict = {
+  decision_id: number
+  title: string
+  status: string
+  severity: 'high' | 'medium' | 'low' | string
+  summary: string
+  touched_targets: string[]
+  evidence: string[]
+}
+
+export type HandoffReviewBlastRadius = {
+  impacted_modules: string[]
+  touched_file_count: number
+  estimated_size: 'small' | 'medium' | 'large' | string
+  impact_summary: string
+}
+
+export type HandoffReviewDarkZoneEntry = {
+  area: string
+  expected: boolean
+  reason: string
+  evidence: string[]
+}
+
+export type HandoffReviewUnresolvedQuestion = {
+  question: string
+  priority: 'low' | 'medium' | 'high' | string
+  blocking: boolean
+  derived_from: string[]
+}
+
+export type HandoffReviewResult = {
+  summary: string
+  verdict: 'accepted' | 'changes_requested' | 'needs_human_review' | string
+  confidence: 'low' | 'medium' | 'high' | string
+}
+
 export type HandoffReviewSummary = {
   meta: {
     review_id: string
@@ -591,11 +641,11 @@ export type HandoffReviewSummary = {
     review_state: HandoffReviewState
     generated_at: string
   }
-  result: Record<string, unknown>
-  scope_check: Record<string, unknown>
-  decision_conflicts: unknown[]
-  blast_radius: Record<string, unknown>
-  dark_zone_entry: unknown[]
-  unresolved_questions: unknown[]
-  review_evidence: unknown[]
+  result: HandoffReviewResult
+  scope_check: HandoffReviewScopeCheck
+  decision_conflicts: HandoffReviewDecisionConflict[]
+  blast_radius: HandoffReviewBlastRadius
+  dark_zone_entry: HandoffReviewDarkZoneEntry[]
+  unresolved_questions: HandoffReviewUnresolvedQuestion[]
+  review_evidence: HandoffEvidenceItem[]
 }

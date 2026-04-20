@@ -196,6 +196,57 @@ def test_handoff_packet_create_blocks_without_scope_or_with_invalid_state_transi
             assert body["error"] == "invalid_review_state_for_packet"
 
 
+def test_handoff_review_summary_can_be_generated_from_proposed_changes():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        root_path = str(root.absolute())
+        conn = connect(root_path)
+        init_schema(conn)
+        _seed_handoff_api_project(conn, root_path)
+        conn.close()
+
+        port = _free_port()
+        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
+        th.start()
+        _wait_port(port)
+
+        created = _post_json(
+            f"http://127.0.0.1:{port}/api/handoff-packets",
+            {
+                "task_prompt": "Build a bounded handoff packet generator for MCP delegation.",
+                "declared_files": ["src/copyclip/mcp_server.py"],
+                "do_not_touch": [{"target": "frontend/src/pages/AskPage.tsx", "reason": "Ask UI excluded.", "severity": "hard_boundary"}],
+                "acceptance_criteria": ["Packet includes scope and review contract."],
+                "generated_at": "2026-04-20T10:00:00Z",
+            },
+        )
+        packet_id = created["packet"]["meta"]["packet_id"]
+        _patch_json(f"http://127.0.0.1:{port}/api/handoff-packets/{packet_id}", {"state": "approved_for_handoff", "approved_by": "samuel", "delegation_target": "claude-code"})
+        _patch_json(f"http://127.0.0.1:{port}/api/handoff-packets/{packet_id}", {"state": "delegated"})
+        _patch_json(f"http://127.0.0.1:{port}/api/handoff-packets/{packet_id}", {"state": "change_received"})
+
+        review = _post_json(
+            f"http://127.0.0.1:{port}/api/handoff-packets/{packet_id}/review-summary",
+            {
+                "proposed_changes": {
+                    "touched_files": [
+                        "src/copyclip/mcp_server.py",
+                        "frontend/src/pages/AskPage.tsx",
+                    ]
+                },
+                "generated_at": "2026-04-20T11:00:00Z",
+            },
+        )
+        assert review["review_summary"]["meta"]["packet_id"] == packet_id
+        assert review["review_summary"]["result"]["verdict"] == "changes_requested"
+        assert any(
+            violation["target"] == "frontend/src/pages/AskPage.tsx"
+            for violation in review["review_summary"]["scope_check"]["boundary_violations"]
+        )
+        assert "frontend/src/pages/AskPage.tsx" in review["review_summary"]["scope_check"]["out_of_scope_touches"]
+        assert review["packet"]["meta"]["state"] == "reviewed"
+
+
 def test_handoff_packet_patch_cannot_mark_reviewed_without_review_summary():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
