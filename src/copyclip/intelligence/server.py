@@ -18,6 +18,7 @@ from .context_bundle_builder import build_context_bundle
 from .ask_project import build_ask_response
 from .handoff import (
     build_handoff_packet,
+    build_handoff_review_summary,
     get_handoff_packet,
     get_handoff_review_summary,
     list_handoff_packets,
@@ -1801,21 +1802,34 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 length = int(self.headers.get("Content-Length", "0"))
                 raw = self.rfile.read(length) if length else b"{}"
                 data = json.loads(raw.decode("utf-8"))
-                review_summary = {
-                    "meta": {
-                        "review_id": f"review_{packet_id}",
-                        "packet_id": packet_id,
-                        "review_state": str(data.get("review_state") or "generated"),
-                        "generated_at": str(data.get("generated_at") or datetime.now(timezone.utc).isoformat()),
-                    },
-                    "result": data.get("result") or {},
-                    "scope_check": data.get("scope_check") or {},
-                    "decision_conflicts": data.get("decision_conflicts") or [],
-                    "blast_radius": data.get("blast_radius") or {},
-                    "dark_zone_entry": data.get("dark_zone_entry") or [],
-                    "unresolved_questions": data.get("unresolved_questions") or [],
-                    "review_evidence": data.get("review_evidence") or [],
-                }
+                generated_at = str(data.get("generated_at") or datetime.now(timezone.utc).isoformat())
+                proposed_changes = data.get("proposed_changes")
+                if isinstance(proposed_changes, dict):
+                    review_summary = build_handoff_review_summary(
+                        conn,
+                        pid,
+                        packet,
+                        proposed_changes=proposed_changes,
+                        generated_at=generated_at,
+                    )
+                    if data.get("review_state"):
+                        review_summary["meta"]["review_state"] = str(data.get("review_state"))
+                else:
+                    review_summary = {
+                        "meta": {
+                            "review_id": f"review_{packet_id}",
+                            "packet_id": packet_id,
+                            "review_state": str(data.get("review_state") or "generated"),
+                            "generated_at": generated_at,
+                        },
+                        "result": data.get("result") or {},
+                        "scope_check": data.get("scope_check") or {},
+                        "decision_conflicts": data.get("decision_conflicts") or [],
+                        "blast_radius": data.get("blast_radius") or {},
+                        "dark_zone_entry": data.get("dark_zone_entry") or [],
+                        "unresolved_questions": data.get("unresolved_questions") or [],
+                        "review_evidence": data.get("review_evidence") or [],
+                    }
                 try:
                     conn.execute("BEGIN")
                     save_handoff_review_summary(conn, pid, packet_id, review_summary, commit=False)

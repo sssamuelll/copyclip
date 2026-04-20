@@ -1,4 +1,4 @@
-import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, AgentResponse, AskResponse, RiskTrends, AlertRule, AlertsResponse, WeeklyExport, SchedulerState, AnalyzeJob, ArchaeologyResponse, StoryTimelineResponse, AdvisorCheckResponse, IdentityDriftResponse, DecisionLinkItem, CognitiveLoadResponse, ModuleSourceResponse, ModuleSymbolsResponse, TreeNode, ReacquaintanceResponse, HandoffPacket, HandoffPacketListResponse, HandoffPacketState } from '../types/api'
+import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, AgentResponse, AskResponse, RiskTrends, AlertRule, AlertsResponse, WeeklyExport, SchedulerState, AnalyzeJob, ArchaeologyResponse, StoryTimelineResponse, AdvisorCheckResponse, IdentityDriftResponse, DecisionLinkItem, CognitiveLoadResponse, ModuleSourceResponse, ModuleSymbolsResponse, TreeNode, ReacquaintanceResponse, HandoffPacket, HandoffPacketListResponse, HandoffPacketState, HandoffReviewSummary } from '../types/api'
 
 // --- Debugging Suite Helpers ---
 const logAPI = (method: string, url: string, start: number, payload?: any, response?: any, error?: any) => {
@@ -172,6 +172,15 @@ export const api = {
     packetId: string,
     patch: Partial<{ state: HandoffPacketState; approved_by: string; delegation_target: string; notes: string[] }>,
   ) => patchJSON<{ packet: HandoffPacket }>(`/api/handoff-packets/${encodeURIComponent(packetId)}`, patch),
+  handoffReviewSummary: (packetId: string) =>
+    getJSON<{ review_summary: HandoffReviewSummary }>(`/api/handoff-packets/${encodeURIComponent(packetId)}/review-summary`),
+  generateHandoffReviewSummary: (
+    packetId: string,
+    proposed_changes: { touched_files: string[]; notes?: string[] },
+  ) => postJSON<{ review_summary: HandoffReviewSummary; packet: HandoffPacket }>(
+    `/api/handoff-packets/${encodeURIComponent(packetId)}/review-summary`,
+    { proposed_changes },
+  ),
   decisionAdvisorCheck: (intent: string, files: string[] = []) => postJSON<AdvisorCheckResponse>('/api/decision-advisor/check', { intent, files }),
   assembleContext: (p: ContextPayload) => postJSON<{ context: string; warnings: string[] }>('/api/assemble-context', p),
   moduleSource: (module: string) => getJSON<ModuleSourceResponse>(`/api/module/source?module=${encodeURIComponent(module)}`),

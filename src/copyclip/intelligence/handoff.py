@@ -504,6 +504,266 @@ def update_handoff_packet(conn, project_id: int, packet_id: str, updates: dict[s
     return save_handoff_packet(conn, project_id, packet, commit=False)
 
 
+def _module_for_file(conn, project_id: int, path: str) -> str | None:
+    row = conn.execute(
+        "SELECT module FROM analysis_file_insights WHERE project_id=? AND path=?",
+        (project_id, path),
+    ).fetchone()
+    if row and row[0]:
+        return str(row[0])
+    row = conn.execute(
+        "SELECT module FROM symbols WHERE project_id=? AND file_path=? AND module IS NOT NULL LIMIT 1",
+        (project_id, path),
+    ).fetchone()
+    return str(row[0]) if row and row[0] else None
+
+
+def _decisions_touching_files(conn, project_id: int, files: list[str]) -> list[tuple[int, str, str, str]]:
+    if not files:
+        return []
+    placeholders = ",".join("?" * len(files))
+    rows = conn.execute(
+        f"""
+        SELECT DISTINCT d.id, d.title, d.status, dr.ref_value
+        FROM decisions d
+        JOIN decision_refs dr ON dr.decision_id = d.id AND dr.ref_type='file'
+        WHERE d.project_id=? AND dr.ref_value IN ({placeholders})
+        ORDER BY d.id ASC
+        """,
+        (project_id, *files),
+    ).fetchall()
+    return [(int(r[0]), str(r[1] or ""), str(r[2] or "proposed"), str(r[3])) for r in rows]
+
+
+def _file_risk_signals(conn, project_id: int, path: str) -> dict[str, Any] | None:
+    risk_row = conn.execute(
+        "SELECT id, severity, kind, rationale, score FROM risks WHERE project_id=? AND area=? ORDER BY score DESC, id DESC LIMIT 1",
+        (project_id, path),
+    ).fetchone()
+    debt_row = conn.execute(
+        "SELECT cognitive_debt FROM analysis_file_insights WHERE project_id=? AND path=?",
+        (project_id, path),
+    ).fetchone()
+    debt = float(debt_row[0]) if debt_row and debt_row[0] is not None else 0.0
+    has_risk = risk_row is not None
+    if not has_risk and debt < 70:
+        return None
+    return {
+        "risk_id": int(risk_row[0]) if has_risk else None,
+        "severity": str(risk_row[1]) if has_risk else ("high" if debt >= 80 else "medium"),
+        "kind": str(risk_row[2]) if has_risk else "cognitive_debt",
+        "rationale": str(risk_row[3]) if has_risk and risk_row[3] else None,
+        "risk_score": int(risk_row[4] or 0) if has_risk else None,
+        "cognitive_debt": round(debt, 2) if debt else None,
+    }
+
+
+def _estimate_size(touched_count: int) -> str:
+    if touched_count <= 2:
+        return "small"
+    if touched_count <= 6:
+        return "medium"
+    return "large"
+
+
+def _stable_review_id(packet_id: str, touched_files: list[str], generated_at: str) -> str:
+    payload = json.dumps({"packet_id": packet_id, "touched_files": sorted(touched_files), "generated_at": generated_at}, sort_keys=True)
+    digest = hashlib.sha1(payload.encode("utf-8")).hexdigest()[:10]
+    return f"review_{packet_id}_{digest}"
+
+
+def build_handoff_review_summary(
+    conn,
+    project_id: int,
+    packet: dict[str, Any],
+    proposed_changes: dict[str, Any],
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    meta = packet.get("meta") or {}
+    packet_id = str(meta.get("packet_id") or "")
+    if not packet_id:
+        raise ValueError("packet_id_required")
+
+    declared_scope = list(dict.fromkeys((packet.get("scope") or {}).get("declared_files") or []))
+    declared_scope_set = set(declared_scope)
+    do_not_touch = list((packet.get("do_not_touch") or []))
+    boundary_targets = {str(item.get("target")): item for item in do_not_touch if item.get("target")}
+    acknowledged_dark_areas = {
+        str(item.get("area"))
+        for item in (packet.get("risk_dark_zones") or [])
+        if item.get("area")
+    }
+
+    touched_files = list(dict.fromkeys([str(f) for f in (proposed_changes.get("touched_files") or []) if f]))
+    generated_at = generated_at or _now_iso()
+
+    review_evidence: list[dict[str, Any]] = []
+    for item in (packet.get("evidence_index") or []):
+        _append_evidence(review_evidence, item)
+
+    # scope_check
+    out_of_scope = [f for f in touched_files if f not in declared_scope]
+    boundary_violations = []
+    for touched in touched_files:
+        for target, boundary in boundary_targets.items():
+            if touched == target or touched.startswith(target.rstrip("/") + "/"):
+                boundary_violations.append({
+                    "target": target,
+                    "touched_file": touched,
+                    "reason": boundary.get("reason") or "Hard boundary touched.",
+                    "severity": boundary.get("severity") or "hard_boundary",
+                })
+                _append_evidence(review_evidence, _evidence_item(f"boundary:{target}", "boundary", target, target))
+                _append_evidence(review_evidence, _evidence_item(f"file:{touched}", "file", touched, touched))
+                break
+
+    if not touched_files:
+        scope_summary = "No proposed changes were supplied; nothing to compare against declared scope."
+    elif out_of_scope:
+        scope_summary = (
+            f"{len(out_of_scope)} of {len(touched_files)} touched file(s) are out of declared scope."
+        )
+    else:
+        scope_summary = f"All {len(touched_files)} touched file(s) stayed within declared scope."
+
+    scope_check = {
+        "declared_scope": declared_scope,
+        "touched_files": touched_files,
+        "out_of_scope_touches": out_of_scope,
+        "boundary_violations": boundary_violations,
+        "summary": scope_summary,
+    }
+
+    # decision_conflicts: a decision's linked file was touched but that file is not in the declared write scope
+    decision_conflicts: list[dict[str, Any]] = []
+    seen_conflict_ids: set[int] = set()
+    for decision_id, title, status, ref_value in _decisions_touching_files(conn, project_id, touched_files):
+        if ref_value in declared_scope_set:
+            continue
+        is_hard_target = ref_value in boundary_targets
+        severity = "high" if status in {"accepted", "resolved"} else "medium"
+        if decision_id in seen_conflict_ids:
+            conflict = next(item for item in decision_conflicts if item["decision_id"] == decision_id)
+            if ref_value not in conflict["touched_targets"]:
+                conflict["touched_targets"].append(ref_value)
+            ev_id = f"file:{ref_value}"
+            if ev_id not in conflict["evidence"]:
+                conflict["evidence"].append(ev_id)
+            _append_evidence(review_evidence, _evidence_item(ev_id, "file", ref_value, ref_value))
+            continue
+        seen_conflict_ids.add(decision_id)
+        decision_conflicts.append({
+            "decision_id": decision_id,
+            "title": title,
+            "status": status,
+            "severity": severity,
+            "summary": (
+                f"Touched file '{ref_value}' is linked to accepted decision '{title}' that was not declared as in scope for this packet."
+                if status in {"accepted", "resolved"}
+                else f"Touched file '{ref_value}' is linked to decision '{title}' (status: {status})."
+            ),
+            "touched_targets": [ref_value],
+            "evidence": [f"decision:{decision_id}", f"file:{ref_value}"],
+        })
+        _append_evidence(review_evidence, _evidence_item(f"decision:{decision_id}", "decision", title, decision_id))
+        _append_evidence(review_evidence, _evidence_item(f"file:{ref_value}", "file", ref_value, ref_value))
+
+    # blast_radius
+    impacted_modules: list[str] = []
+    for touched in touched_files:
+        module = _module_for_file(conn, project_id, touched)
+        if module and module not in impacted_modules:
+            impacted_modules.append(module)
+    blast_radius = {
+        "impacted_modules": impacted_modules,
+        "touched_file_count": len(touched_files),
+        "estimated_size": _estimate_size(len(touched_files)),
+        "impact_summary": (
+            f"Touched {len(touched_files)} file(s) across {len(impacted_modules)} module(s)."
+            if touched_files
+            else "No changes proposed."
+        ),
+    }
+
+    # dark_zone_entry
+    dark_zone_entry: list[dict[str, Any]] = []
+    for touched in touched_files:
+        signals = _file_risk_signals(conn, project_id, touched)
+        if signals is None:
+            continue
+        expected = touched in acknowledged_dark_areas
+        reason_parts = []
+        if signals.get("kind"):
+            reason_parts.append(f"kind={signals['kind']}")
+        if signals.get("severity"):
+            reason_parts.append(f"severity={signals['severity']}")
+        if signals.get("cognitive_debt") is not None:
+            reason_parts.append(f"cognitive_debt={signals['cognitive_debt']}")
+        reason_prefix = "Acknowledged dark zone touched" if expected else "Unexpected dark zone entry"
+        dark_zone_entry.append({
+            "area": touched,
+            "expected": expected,
+            "reason": f"{reason_prefix} ({', '.join(reason_parts) or 'risk signal present'}).",
+            "evidence": [f"file:{touched}"] + ([f"risk:{signals['risk_id']}"] if signals.get("risk_id") is not None else []),
+        })
+        _append_evidence(review_evidence, _evidence_item(f"file:{touched}", "file", touched, touched))
+        if signals.get("risk_id") is not None:
+            _append_evidence(review_evidence, _evidence_item(f"risk:{signals['risk_id']}", "risk", f"{signals['kind']} in {touched}", signals["risk_id"]))
+
+    # unresolved_questions: carry over blocking/unresolved from packet
+    unresolved_questions: list[dict[str, Any]] = []
+    for question in (packet.get("questions_to_clarify") or []):
+        if question.get("resolution") is None:
+            unresolved_questions.append({
+                "question": question.get("question"),
+                "priority": question.get("priority") or "medium",
+                "blocking": bool(question.get("blocking")),
+                "derived_from": question.get("derived_from") or [],
+            })
+
+    # verdict
+    hard_violations = (
+        bool(out_of_scope)
+        or bool(boundary_violations)
+        or any(c["severity"] == "high" for c in decision_conflicts)
+        or any(not entry.get("expected") for entry in dark_zone_entry)
+    )
+    soft_signals = any(c["severity"] == "medium" for c in decision_conflicts) or any(q.get("blocking") for q in unresolved_questions)
+
+    if hard_violations:
+        verdict = "changes_requested"
+        confidence = "high"
+        result_summary = "Proposed change violated declared scope, hard boundaries, or entered unexpected dark zones."
+    elif unresolved_questions or soft_signals:
+        verdict = "needs_human_review"
+        confidence = "medium"
+        result_summary = "Proposed change stayed in scope but exposes acknowledged risks or leaves blocking questions open."
+    else:
+        verdict = "accepted"
+        confidence = "high" if touched_files else "medium"
+        result_summary = "Proposed change stayed within declared scope with no detected violations."
+
+    return {
+        "meta": {
+            "review_id": _stable_review_id(packet_id, touched_files, generated_at),
+            "packet_id": packet_id,
+            "review_state": "generated",
+            "generated_at": generated_at,
+        },
+        "result": {
+            "summary": result_summary,
+            "verdict": verdict,
+            "confidence": confidence,
+        },
+        "scope_check": scope_check,
+        "decision_conflicts": decision_conflicts,
+        "blast_radius": blast_radius,
+        "dark_zone_entry": dark_zone_entry,
+        "unresolved_questions": unresolved_questions,
+        "review_evidence": review_evidence,
+    }
+
+
 def save_handoff_review_summary(
     conn,
     project_id: int,
