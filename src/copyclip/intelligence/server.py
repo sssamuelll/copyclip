@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, urlparse
 from .context_bundle_builder import build_context_bundle
 from .ask_project import build_ask_response
 from .cognitive_debt import build_debt_breakdown
+from .debt_remediation import build_remediation_plan
 from .handoff import (
     build_handoff_packet,
     build_handoff_review_summary,
@@ -474,6 +475,32 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     self._json({"error": msg}, 400)
                     return
                 self._json(with_meta({"breakdown": breakdown}))
+                return
+
+            if parsed.path == "/api/cognitive-debt/remediation":
+                if not pid:
+                    self._json({"error": "project_not_indexed"}, 404)
+                    return
+                q = parse_qs(parsed.query or "")
+                scope_kind = (q.get("scope", ["file"])[0] or "file").strip()
+                scope_id = (q.get("id", [""])[0] or "").strip()
+                if scope_kind not in {"file", "module", "project"}:
+                    self._json({"error": "invalid_scope_kind"}, 400)
+                    return
+                if scope_kind in {"file", "module"} and not scope_id:
+                    self._json({"error": "scope_id_required"}, 400)
+                    return
+                try:
+                    breakdown = build_debt_breakdown(conn, pid, scope_kind, scope_id)
+                except ValueError as e:
+                    msg = str(e)
+                    if msg.startswith("module_not_found:"):
+                        self._json({"error": "module_not_found", "module": msg.split(":", 1)[1]}, 404)
+                        return
+                    self._json({"error": msg}, 400)
+                    return
+                plan = build_remediation_plan(conn, pid, breakdown)
+                self._json(with_meta({"breakdown": breakdown, "plan": plan}))
                 return
 
             if parsed.path == "/api/cognitive-load":
