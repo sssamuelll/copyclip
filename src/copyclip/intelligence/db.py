@@ -275,6 +275,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
             imports_json TEXT,
             complexity INTEGER DEFAULT 0,
             cognitive_debt REAL DEFAULT 0,
+            agent_line_ratio REAL,
+            last_human_ts REAL,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(project_id, path)
         );
@@ -356,6 +358,10 @@ def init_schema(conn: sqlite3.Connection) -> None:
         afi_cols = {row[1] for row in conn.execute("PRAGMA table_info(analysis_file_insights)").fetchall()}
         if afi_cols and "cognitive_debt" not in afi_cols:
             conn.execute("ALTER TABLE analysis_file_insights ADD COLUMN cognitive_debt REAL DEFAULT 0")
+        if afi_cols and "agent_line_ratio" not in afi_cols:
+            conn.execute("ALTER TABLE analysis_file_insights ADD COLUMN agent_line_ratio REAL")
+        if afi_cols and "last_human_ts" not in afi_cols:
+            conn.execute("ALTER TABLE analysis_file_insights ADD COLUMN last_human_ts REAL")
     except Exception:
         pass
 

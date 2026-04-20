@@ -843,6 +843,8 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
 
         if total_lines <= 0:
             score = 0.0
+            ins["agent_line_ratio"] = None
+            ins["last_human_ts"] = None
         else:
             ratio = agent_lines / float(total_lines)
             if last_human_ts > 0:
@@ -852,6 +854,8 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
                 days_since_human = 120.0
             time_factor = 1.0 + min(1.5, days_since_human / 30.0)
             score = min(100.0, (ratio * 100.0) * time_factor)
+            ins["agent_line_ratio"] = round(float(ratio), 4)
+            ins["last_human_ts"] = float(last_human_ts) if last_human_ts > 0 else None
 
         ins["cognitive_debt"] = round(float(score), 2)
         debt_values.append(ins["cognitive_debt"])
@@ -997,7 +1001,7 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
     conn.execute("DELETE FROM analysis_file_insights WHERE project_id=?", (project_id,))
     for rel, ins in next_insights.items():
         conn.execute(
-            "INSERT INTO analysis_file_insights(project_id,path,module,imports_json,complexity,cognitive_debt,updated_at) VALUES(?,?,?,?,?,?,CURRENT_TIMESTAMP)",
+            "INSERT INTO analysis_file_insights(project_id,path,module,imports_json,complexity,cognitive_debt,agent_line_ratio,last_human_ts,updated_at) VALUES(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)",
             (
                 project_id,
                 rel,
@@ -1005,6 +1009,8 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
                 json.dumps(ins.get("imports") or []),
                 int(ins.get("complexity") or 0),
                 float(ins.get("cognitive_debt") or 0),
+                ins.get("agent_line_ratio"),
+                ins.get("last_human_ts"),
             ),
         )
 
