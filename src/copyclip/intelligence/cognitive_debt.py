@@ -595,6 +595,33 @@ def build_debt_breakdown(
     return breakdown
 
 
+def quick_debt_signal(conn, project_id: int, path: str) -> dict[str, Any] | None:
+    """Return a cheap debt summary for ``path`` without running the full breakdown.
+
+    Suitable for integration callers (Reacquaintance, Ask Project) that only need
+    to know "is this file dark, and roughly why" to adjust prioritization.
+    """
+    row = conn.execute(
+        "SELECT cognitive_debt, agent_line_ratio, last_human_ts FROM analysis_file_insights WHERE project_id=? AND path=?",
+        (project_id, path),
+    ).fetchone()
+    if not row:
+        return None
+    value = float(row[0] or 0.0)
+    agent_ratio = row[1]
+    last_human_ts = row[2]
+    primary_signal: str | None = None
+    if agent_ratio is not None and float(agent_ratio) >= 0.5:
+        primary_signal = "agent_authored_ratio"
+    elif last_human_ts is None and value >= 40:
+        primary_signal = "review_staleness"
+    return {
+        "value": round(value, 2),
+        "severity": _severity_for(value),
+        "primary_signal": primary_signal,
+    }
+
+
 def breakdown_fingerprint(breakdown: dict[str, Any]) -> str:
     """Deterministic fingerprint across scope + factor contributions (useful for caching / diffing)."""
     meta = breakdown.get("meta") or {}

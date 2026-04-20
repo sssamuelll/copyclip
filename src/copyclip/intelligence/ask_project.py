@@ -2,6 +2,7 @@ import re
 from typing import Any
 
 from .context_bundle_builder import build_context_bundle
+from .cognitive_debt import quick_debt_signal
 
 
 STOP_WORDS = {
@@ -58,6 +59,7 @@ def _insufficient_evidence_response(bundle_manifest: list[dict[str, Any]], quest
         ],
         "next_drill_down": {"type": "none", "target": None},
         "bundle_manifest": bundle_manifest,
+        "debt_hints": [],
     }
 
 
@@ -67,6 +69,7 @@ def _contradiction_response(
     evidence_groups: dict[str, list[dict[str, Any]]],
     answer_evidence_ids: list[str],
     next_drill_down: dict[str, Any],
+    debt_hints: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
         "answer": "Indexed project evidence is pulling in conflicting directions, so I can’t give a confident grounded answer yet.",
@@ -90,6 +93,7 @@ def _contradiction_response(
         ],
         "next_drill_down": next_drill_down,
         "bundle_manifest": bundle_manifest,
+        "debt_hints": list(debt_hints or []),
     }
 
 
@@ -436,8 +440,36 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
     if evidence_groups["symbols"]:
         rationale.append("Included symbol-level evidence because the question referenced named code entities or modules.")
 
+    debt_hints: list[dict[str, Any]] = []
+    seen_debt_paths: set[str] = set()
+    for file_item in evidence_groups["files"]:
+        path = str(file_item.get("id") or "")
+        if not path or path in seen_debt_paths:
+            continue
+        signal = quick_debt_signal(conn, project_id, path)
+        if not signal or signal["severity"] == "low":
+            continue
+        seen_debt_paths.add(path)
+        debt_hints.append({
+            "target_type": "file",
+            "target": path,
+            "debt_value": signal["value"],
+            "severity": signal["severity"],
+            "primary_signal": signal.get("primary_signal"),
+        })
+    debt_hints.sort(key=lambda x: x["debt_value"], reverse=True)
+    debt_hints = debt_hints[:3]
+    critical_debt_file = next(
+        (hint["target"] for hint in debt_hints if hint["severity"] in {"critical", "high"}),
+        None,
+    )
+    if critical_debt_file:
+        rationale.append("Biased next_drill_down toward a high cognitive debt file so the reader re-anchors before editing.")
+
     next_drill_down = {"type": "none", "target": None}
-    if evidence_groups["decisions"]:
+    if critical_debt_file:
+        next_drill_down = {"type": "file", "target": critical_debt_file}
+    elif evidence_groups["decisions"]:
         next_drill_down = {"type": "decision", "target": evidence_groups["decisions"][0]["id"]}
     elif evidence_groups["risks"]:
         next_drill_down = {"type": "risk", "target": evidence_groups["risks"][0]["id"]}
@@ -474,6 +506,7 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
             evidence_groups,
             answer_evidence_ids,
             next_drill_down,
+            debt_hints=debt_hints,
         )
 
     answer = "Based on indexed project evidence, here are the strongest signals:\n- " + "\n- ".join(lines)
@@ -496,4 +529,5 @@ def build_ask_response(conn, project_id: int, question: str) -> dict[str, Any]:
         ],
         "next_drill_down": next_drill_down,
         "bundle_manifest": bundle.get("manifest", []),
+        "debt_hints": debt_hints,
     }
