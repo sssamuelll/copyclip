@@ -599,6 +599,37 @@ Rules:
 
 The full object may contain richer evidence, but the delivered agent packet should only include compact summaries plus stable references.
 
+## MCP delivery
+
+Bounded packets are exposed to external agents through CopyClip's MCP server (`copyclip.mcp_server`). Three tools compose the bounded delegation flow:
+
+### `list_handoff_packets`
+- filters default to `consumable` (`approved_for_handoff` + `delegated`); pass `state: "all"` or an explicit lifecycle state to broaden
+- returns compact rows with `packet_id`, `state`, `updated_at`, and `objective_summary`
+- never returns packet bodies, evidence, or bundle manifests
+
+### `get_handoff_packet`
+- returns the bounded projection produced by `format_handoff_packet_for_mcp`
+- the projection exposes only:
+  - minimal `meta`: `packet_id`, `state`, `packet_version`, `updated_at`, `delegation_target`
+  - `agent_ready` boolean plus `warnings` (e.g. `not_ready_for_consumption`, `unresolved_blocking_questions`)
+  - `objective` and `agent_consumable_packet` verbatim
+  - flat `constraints_summary`, `risk_summary`, `questions_to_clarify`, `acceptance_criteria`
+- the projection intentionally hides `evidence_index`, `bundle_manifest`, `notes`, `approved_by`, full `relevant_decisions`, and `review_contract` so agents cannot bypass declared scope by mining reviewer-only context
+- agents should refuse to proceed when `agent_ready` is `false`
+
+### `submit_handoff_review`
+- takes `packet_id` and `touched_files`; requires the packet to be in `change_received` or `reviewed` state
+- calls `build_handoff_review_summary` to derive scope violations, decision conflicts, blast radius, dark zone entry, and unresolved questions, persists the summary, and transitions the packet to `reviewed`
+- returns the compact review result (verdict, confidence, summary) plus the structured sections humans use for the review surface
+
+### Delivery contract
+
+- delivered content is a projection, never a source of truth
+- lifecycle states outside `approved_for_handoff`/`delegated` are exposed as non-consumable with a `warnings` signal
+- unresolved `blocking` questions mark the packet as non-consumable even if the state looks ready
+- the packet's human-review data stays in the dashboard and `/api/handoff-packets/{id}` — MCP callers are the bounded-consumer surface
+
 ## Persistence expectations for later issues
 
 This issue defines the contract only. Later issues may persist it across:

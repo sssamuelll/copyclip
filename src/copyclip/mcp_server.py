@@ -8,6 +8,14 @@ from mcp.server.stdio import stdio_server
 import mcp.types as types
 
 from copyclip.intelligence.db import connect, init_schema
+from copyclip.intelligence.handoff import (
+    build_handoff_review_summary,
+    format_handoff_packet_for_mcp,
+    get_handoff_packet,
+    list_mcp_handoff_packets,
+    save_handoff_review_summary,
+    update_handoff_packet,
+)
 from copyclip.reader import read_files_concurrently
 from copyclip.minimizer import minimize_content
 
@@ -79,6 +87,47 @@ async def handle_list_tools() -> List[types.Tool]:
                 "required": ["path"],
             },
         ),
+        types.Tool(
+            name="list_handoff_packets",
+            description="List handoff packets available for agent consumption. By default only returns packets in 'approved_for_handoff' or 'delegated' states.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to the project root"},
+                    "state": {
+                        "type": "string",
+                        "description": "Filter: 'consumable' (default; approved_for_handoff + delegated), 'all', or a specific packet state",
+                    },
+                    "limit": {"type": "integer", "description": "Maximum number of packets to return (default 20)"},
+                },
+                "required": ["path"],
+            },
+        ),
+        types.Tool(
+            name="get_handoff_packet",
+            description="Retrieve a bounded handoff packet projection for agent consumption. The result intentionally hides evidence_index, bundle_manifest, and reviewer-only metadata so agents cannot bypass the declared scope.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to the project root"},
+                    "packet_id": {"type": "string", "description": "The handoff packet id"},
+                },
+                "required": ["path", "packet_id"],
+            },
+        ),
+        types.Tool(
+            name="submit_handoff_review",
+            description="Submit the list of files an agent touched to generate a post-change review summary (scope violations, decision conflicts, blast radius, dark zone entry). Persists the review and transitions the packet to 'reviewed'.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to the project root"},
+                    "packet_id": {"type": "string", "description": "The handoff packet id"},
+                    "touched_files": {"type": "array", "items": {"type": "string"}, "description": "Relative file paths the agent modified"},
+                },
+                "required": ["path", "packet_id", "touched_files"],
+            },
+        ),
     ]
 
 @server.call_tool()
@@ -110,6 +159,23 @@ async def handle_call_tool(
     if name == "get_cognitive_load":
         path = os.path.abspath(arguments.get("path", "."))
         return await _get_cognitive_load(path)
+
+    if name == "list_handoff_packets":
+        path = os.path.abspath(arguments.get("path", "."))
+        state_arg = str(arguments.get("state") or "consumable")
+        limit = int(arguments.get("limit") or 20)
+        return await _list_handoff_packets(path, state_arg, limit)
+
+    if name == "get_handoff_packet":
+        path = os.path.abspath(arguments.get("path", "."))
+        packet_id = str(arguments.get("packet_id") or "")
+        return await _get_handoff_packet_bounded(path, packet_id)
+
+    if name == "submit_handoff_review":
+        path = os.path.abspath(arguments.get("path", "."))
+        packet_id = str(arguments.get("packet_id") or "")
+        touched_files = [str(f) for f in (arguments.get("touched_files") or [])]
+        return await _submit_handoff_review(path, packet_id, touched_files)
 
     raise ValueError(f"Unknown tool: {name}")
 
@@ -302,6 +368,111 @@ async def _get_cognitive_load(root: str) -> List[types.TextContent]:
         return [types.TextContent(type="text", text="\n".join(output))]
     except Exception as e:
         return [types.TextContent(type="text", text=f"Error reading cognitive map: {str(e)}")]
+
+def _project_id_for_root(conn, root: str) -> int | None:
+    row = conn.execute("SELECT id FROM projects WHERE root_path=?", (root,)).fetchone()
+    return int(row[0]) if row else None
+
+
+async def _list_handoff_packets(root: str, state_arg: str, limit: int) -> List[types.TextContent]:
+    try:
+        conn = connect(root)
+        init_schema(conn)
+        pid = _project_id_for_root(conn, root)
+        if pid is None:
+            conn.close()
+            return [types.TextContent(type="text", text="Error: Project not indexed. Run 'copyclip analyze' first.")]
+
+        if state_arg == "consumable":
+            states = {"approved_for_handoff", "delegated"}
+        elif state_arg == "all":
+            states = None
+        else:
+            states = {state_arg}
+
+        items = list_mcp_handoff_packets(conn, pid, states=states, limit=limit)
+        conn.close()
+
+        output = ["# HANDOFF PACKETS"]
+        output.append(f"filter: {state_arg} | count: {len(items)}")
+        if not items:
+            output.append("- no packets match this filter")
+        else:
+            for item in items:
+                output.append(f"- {item['packet_id']}  · state: {item['state']}  · updated: {item['updated_at']}")
+                if item.get("objective_summary"):
+                    output.append(f"    objective: {item['objective_summary']}")
+        return [types.TextContent(type="text", text="\n".join(output))]
+    except Exception as e:
+        return [types.TextContent(type="text", text=f"Error listing handoff packets: {str(e)}")]
+
+
+async def _get_handoff_packet_bounded(root: str, packet_id: str) -> List[types.TextContent]:
+    if not packet_id:
+        return [types.TextContent(type="text", text="Error: packet_id is required.")]
+    try:
+        conn = connect(root)
+        init_schema(conn)
+        pid = _project_id_for_root(conn, root)
+        if pid is None:
+            conn.close()
+            return [types.TextContent(type="text", text="Error: Project not indexed. Run 'copyclip analyze' first.")]
+        packet = get_handoff_packet(conn, pid, packet_id)
+        conn.close()
+        if not packet:
+            return [types.TextContent(type="text", text=f"Error: handoff packet '{packet_id}' not found.")]
+        bounded = format_handoff_packet_for_mcp(packet)
+        return [types.TextContent(type="text", text=json.dumps(bounded, indent=2))]
+    except Exception as e:
+        return [types.TextContent(type="text", text=f"Error retrieving handoff packet: {str(e)}")]
+
+
+async def _submit_handoff_review(root: str, packet_id: str, touched_files: List[str]) -> List[types.TextContent]:
+    if not packet_id:
+        return [types.TextContent(type="text", text="Error: packet_id is required.")]
+    try:
+        conn = connect(root)
+        init_schema(conn)
+        pid = _project_id_for_root(conn, root)
+        if pid is None:
+            conn.close()
+            return [types.TextContent(type="text", text="Error: Project not indexed. Run 'copyclip analyze' first.")]
+        packet = get_handoff_packet(conn, pid, packet_id)
+        if not packet:
+            conn.close()
+            return [types.TextContent(type="text", text=f"Error: handoff packet '{packet_id}' not found.")]
+        packet_state = str((packet.get("meta") or {}).get("state") or "draft")
+        if packet_state not in {"change_received", "reviewed"}:
+            conn.close()
+            return [types.TextContent(type="text", text=f"Error: packet state '{packet_state}' is not eligible for review submission. Expected 'change_received' or 'reviewed'.")]
+
+        review = build_handoff_review_summary(conn, pid, packet, proposed_changes={"touched_files": touched_files})
+        try:
+            conn.execute("BEGIN")
+            save_handoff_review_summary(conn, pid, packet_id, review, commit=False)
+            update_handoff_packet(conn, pid, packet_id, {"state": "reviewed"})
+            conn.commit()
+        except ValueError:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+        return [types.TextContent(type="text", text=json.dumps({
+            "packet_id": packet_id,
+            "review_id": review["meta"]["review_id"],
+            "verdict": review["result"]["verdict"],
+            "confidence": review["result"]["confidence"],
+            "summary": review["result"]["summary"],
+            "scope_check": review["scope_check"],
+            "decision_conflicts": review["decision_conflicts"],
+            "blast_radius": review["blast_radius"],
+            "dark_zone_entry": review["dark_zone_entry"],
+            "unresolved_questions": review["unresolved_questions"],
+        }, indent=2))]
+    except Exception as e:
+        return [types.TextContent(type="text", text=f"Error submitting handoff review: {str(e)}")]
+
 
 async def main():
     """Run the MCP server over STDIO."""
