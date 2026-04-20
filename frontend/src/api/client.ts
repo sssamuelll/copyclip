@@ -1,4 +1,4 @@
-import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, AgentResponse, AskResponse, RiskTrends, AlertRule, AlertsResponse, WeeklyExport, SchedulerState, AnalyzeJob, ArchaeologyResponse, StoryTimelineResponse, AdvisorCheckResponse, IdentityDriftResponse, DecisionLinkItem, CognitiveLoadResponse, ModuleSourceResponse, ModuleSymbolsResponse, TreeNode, ReacquaintanceResponse, HandoffPacket, HandoffPacketListResponse, HandoffPacketState, HandoffReviewSummary } from '../types/api'
+import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, AgentResponse, AskResponse, RiskTrends, AlertRule, AlertsResponse, WeeklyExport, SchedulerState, AnalyzeJob, ArchaeologyResponse, StoryTimelineResponse, AdvisorCheckResponse, IdentityDriftResponse, DecisionLinkItem, CognitiveLoadResponse, ModuleSourceResponse, ModuleSymbolsResponse, TreeNode, ReacquaintanceResponse, HandoffPacket, HandoffPacketListResponse, HandoffPacketState, HandoffReviewSummary, DebtBreakdown, RemediationPlan, DebtScopeKind } from '../types/api'
 
 // --- Debugging Suite Helpers ---
 const logAPI = (method: string, url: string, start: number, payload?: any, response?: any, error?: any) => {
@@ -174,6 +174,10 @@ export const api = {
   ) => patchJSON<{ packet: HandoffPacket }>(`/api/handoff-packets/${encodeURIComponent(packetId)}`, patch),
   handoffReviewSummary: (packetId: string) =>
     getJSON<{ review_summary: HandoffReviewSummary }>(`/api/handoff-packets/${encodeURIComponent(packetId)}/review-summary`),
+  debtBreakdown: (scope: DebtScopeKind, id: string) =>
+    getJSON<{ breakdown: DebtBreakdown }>(`/api/cognitive-debt/breakdown?scope=${encodeURIComponent(scope)}&id=${encodeURIComponent(id)}`),
+  debtRemediation: (scope: DebtScopeKind, id: string) =>
+    getJSON<{ breakdown: DebtBreakdown; plan: RemediationPlan }>(`/api/cognitive-debt/remediation?scope=${encodeURIComponent(scope)}&id=${encodeURIComponent(id)}`),
   generateHandoffReviewSummary: (
     packetId: string,
     proposed_changes: { touched_files: string[]; notes?: string[] },

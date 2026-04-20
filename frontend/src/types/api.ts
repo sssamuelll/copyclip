@@ -649,3 +649,78 @@ export type HandoffReviewSummary = {
   unresolved_questions: HandoffReviewUnresolvedQuestion[]
   review_evidence: HandoffEvidenceItem[]
 }
+
+export type DebtSeverity = 'low' | 'medium' | 'high' | 'critical'
+export type DebtConfidence = 'low' | 'medium' | 'high'
+export type DebtScopeKind = 'file' | 'module' | 'project'
+
+export type DebtFactor = {
+  factor_id: string
+  label: string
+  weight: number
+  raw_signal: Record<string, unknown> | null
+  normalized_contribution: number | null
+  weighted_contribution: number
+  signal_available: boolean
+  rationale: string
+  evidence: string[]
+}
+
+export type DebtScore = {
+  value: number
+  severity: DebtSeverity | string
+  confidence: DebtConfidence | string
+  signal_coverage: number
+}
+
+export type DebtBreakdown = {
+  meta: {
+    project: string
+    generated_at: string
+    contract_version: string
+    scope_kind: DebtScopeKind | string
+    scope_id: string
+  }
+  score: DebtScore
+  factor_breakdown: DebtFactor[]
+  evidence_index: Array<{ id: string; type: string; label: string; ref: unknown }>
+  notes: Array<Record<string, unknown>>
+}
+
+export type RemediationCandidate = {
+  id: string
+  action_type: string
+  label: string
+  target: { kind: string; id?: string; module?: string }
+  reduces_factors: string[]
+  expected_impact: { score_delta: number; confidence: DebtConfidence | string }
+  rationale: string
+  evidence: string[]
+}
+
+export type RemediationReadFirstItem = {
+  id: string
+  kind: string
+  sha?: string
+  decision_id?: number
+  author_kind?: string
+  reason: string
+}
+
+export type RemediationPlan = {
+  meta: {
+    project?: string
+    generated_at?: string
+    contract_version?: string
+    scope_kind: DebtScopeKind | string
+    scope_id: string
+    score?: number
+    severity?: DebtSeverity | string
+  }
+  top_factors: string[]
+  remediation_candidates: RemediationCandidate[]
+  read_first: RemediationReadFirstItem[]
+  expected_total_impact: { score_delta: number; confidence: DebtConfidence | string }
+  notes: Array<Record<string, unknown>>
+}
+
