@@ -801,6 +801,74 @@ def save_handoff_review_summary(
     return review_summary
 
 
+MCP_CONSUMABLE_STATES = {"approved_for_handoff", "delegated"}
+
+
+def format_handoff_packet_for_mcp(packet: dict[str, Any]) -> dict[str, Any]:
+    meta = packet.get("meta") or {}
+    state = str(meta.get("state") or "draft")
+    constraints = packet.get("constraints") or []
+    risks = packet.get("risk_dark_zones") or []
+    questions = packet.get("questions_to_clarify") or []
+    acceptance = packet.get("acceptance_criteria") or []
+    agent_consumable = packet.get("agent_consumable_packet") or {}
+
+    warnings: list[str] = []
+    agent_ready = state in MCP_CONSUMABLE_STATES
+    if not agent_ready:
+        warnings.append("not_ready_for_consumption")
+    if any(q.get("blocking") and q.get("resolution") is None for q in questions):
+        warnings.append("unresolved_blocking_questions")
+
+    return {
+        "meta": {
+            "packet_id": meta.get("packet_id"),
+            "state": state,
+            "packet_version": meta.get("packet_version"),
+            "updated_at": meta.get("updated_at"),
+            "delegation_target": meta.get("delegation_target"),
+        },
+        "agent_ready": agent_ready,
+        "warnings": warnings,
+        "objective": packet.get("objective") or {},
+        "agent_consumable_packet": agent_consumable,
+        "constraints_summary": [str(item.get("summary")) for item in constraints if item.get("summary")],
+        "risk_summary": [
+            f"{item.get('kind')} in {item.get('area')}: {item.get('why_it_matters')}"
+            for item in risks
+            if item.get("area")
+        ],
+        "questions_to_clarify": [
+            {
+                "question": q.get("question"),
+                "priority": q.get("priority") or "medium",
+                "blocking": bool(q.get("blocking")),
+            }
+            for q in questions
+        ],
+        "acceptance_criteria": [item.get("summary") if isinstance(item, dict) else str(item) for item in acceptance],
+    }
+
+
+def list_mcp_handoff_packets(conn, project_id: int, states: set[str] | None = None, limit: int = 20) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT packet_id, state, objective_summary, updated_at FROM handoff_packets WHERE project_id=? ORDER BY updated_at DESC, id DESC LIMIT ?",
+        (project_id, max(1, min(limit, 200))),
+    ).fetchall()
+    items = [
+        {
+            "packet_id": row[0],
+            "state": row[1],
+            "objective_summary": row[2],
+            "updated_at": row[3],
+        }
+        for row in rows
+    ]
+    if states:
+        items = [item for item in items if item["state"] in states]
+    return items
+
+
 def get_handoff_review_summary(conn, project_id: int, packet_id: str) -> dict[str, Any] | None:
     row = conn.execute(
         "SELECT review_json FROM handoff_review_summaries WHERE project_id=? AND packet_id=?",
