@@ -13,6 +13,7 @@ from .db import (
     record_project_visit,
     create_reentry_checkpoint,
 )
+from .cognitive_debt import quick_debt_signal
 
 
 def _safe_json(value: str | None, default: Any):
@@ -65,15 +66,16 @@ def _score_change(commit_dt, baseline_dt, churn, risk_score, decision_links):
     )
 
 
-def _score_read_first(change_score, risk_score, decision_score, target: str):
-    payoff = min(100, max(change_score, risk_score, decision_score))
+def _score_read_first(change_score, risk_score, decision_score, target: str, debt_score: float = 0.0):
+    payoff = min(100, max(change_score, risk_score, decision_score, debt_score))
     brevity = 85 if Path(target).suffix in {".md", ".toml", ".py", ".ts", ".tsx", ".js"} else 60
     return round(
-        0.25 * change_score
-        + 0.25 * payoff
+        0.20 * change_score
+        + 0.20 * payoff
         + 0.20 * risk_score
         + 0.15 * decision_score
-        + 0.15 * brevity,
+        + 0.15 * debt_score
+        + 0.10 * brevity,
         2,
     )
 
@@ -324,7 +326,9 @@ def build_reacquaintance_briefing(
         decision_score = min(100, len(decision_links_by_target.get(target, [])) * 30)
         matching_change = next((c for c in top_changes if c["primary_area"] == target), None)
         change_score = matching_change["importance"] if matching_change else min(100, churn * 20)
-        score = _score_read_first(change_score, risk_score, decision_score, target)
+        debt_signal = quick_debt_signal(conn, pid, target)
+        debt_score = float(debt_signal["value"]) if debt_signal else 0.0
+        score = _score_read_first(change_score, risk_score, decision_score, target, debt_score=debt_score)
         evidence = [f"file:{target}"]
         _append_evidence(evidence_index, _evidence_item(f"file:{target}", "file", target, target))
         if risk_score:
@@ -337,15 +341,19 @@ def build_reacquaintance_briefing(
                 did = f"decision:{d['id']}"
                 _append_evidence(evidence_index, _evidence_item(did, "decision", d["title"], str(d["id"])))
                 evidence.append(did)
+        reason = "High recent signal for re-entry based on churn, risk, and decision overlap."
+        if debt_signal and debt_signal["severity"] in {"high", "critical"}:
+            reason = f"Dark zone ({debt_signal['severity']} cognitive debt) with recent signal; re-anchor before making changes."
         read_first.append({
             "rank": 0,
             "target_type": "file",
             "target": target,
             "score": score,
-            "reason": "High recent signal for re-entry based on churn, risk, and decision overlap.",
+            "reason": reason,
             "expected_payoff": "Should quickly restore context for the current area of change.",
             "estimated_minutes": _estimate_minutes(target),
             "evidence": evidence,
+            "debt_signal": debt_signal,
         })
     read_first.sort(key=lambda x: x["score"], reverse=True)
     read_first = read_first[:3]
