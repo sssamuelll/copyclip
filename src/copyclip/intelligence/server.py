@@ -30,6 +30,10 @@ from .handoff import (
 )
 from .db import connect, init_schema
 from .reacquaintance import build_reacquaintance_briefing, record_reacquaintance_visit
+from .server_context import ServerContext
+from .server_events import handle_events_get, publish_event as publish_event_impl
+from .server_helpers import json_response, pagination, parse_dt, project_id, read_json_body, with_meta as add_meta
+from .server_routes_core import handle_health_get, handle_settings_get, handle_settings_post
 from .phases import (
     PHASE_COMPLETED,
     PHASE_DISCOVERY,
@@ -52,9 +56,9 @@ def _load_ui_html() -> str:
 _HTML = _load_ui_html()
 
 
+# Back-compat shim for existing tests and callers that import the old helper.
 def _project_id(conn: sqlite3.Connection, root: str):
-    row = conn.execute("SELECT id FROM projects WHERE root_path=?", (root,)).fetchone()
-    return row[0] if row else None
+    return project_id(conn, root)
 
 
 def run_server(project_root: str, port: int = 4310) -> None:
@@ -73,6 +77,24 @@ def run_server(project_root: str, port: int = 4310) -> None:
     analysis_lock = threading.Lock()
     cancel_lock = threading.Lock()
     cancel_events = {}
+
+    ctx = ServerContext(
+        root=root,
+        html=_HTML,
+        events=events,
+        events_lock=events_lock,
+        next_event_id=next_event_id,
+        scheduler_state=scheduler_state,
+        analysis_lock=analysis_lock,
+        cancel_lock=cancel_lock,
+        cancel_events=cancel_events,
+    )
+
+    def with_meta(payload: dict):
+        return add_meta(root, payload)
+
+    def publish_event(kind: str, data: dict):
+        return publish_event_impl(ctx, kind, data)
 
     def _count_project_files(base_root: str) -> int:
         ignored_dirs = {".git", ".venv", "node_modules", ".copyclip", "dist", "build", "__pycache__"}
@@ -115,51 +137,6 @@ def run_server(project_root: str, port: int = 4310) -> None:
         conn_p.commit()
         conn_p.close()
 
-    def publish_event(kind: str, data: dict):
-        with events_lock:
-            ev = {
-                "id": next_event_id["value"],
-                "kind": kind,
-                "data": data,
-                "ts": datetime.now(timezone.utc).isoformat(),
-            }
-            next_event_id["value"] += 1
-            events.append(ev)
-            if len(events) > 500:
-                del events[: len(events) - 500]
-            events_lock.notify_all()
-
-    def with_meta(payload: dict):
-        payload.setdefault("meta", {})
-        payload["meta"]["project"] = os.path.basename(root)
-        payload["meta"]["generated_at"] = datetime.now(timezone.utc).isoformat()
-        return payload
-
-    def _pagination(parsed):
-        q = parse_qs(parsed.query or "")
-        try:
-            limit = max(1, min(int(q.get("limit", ["100"])[0]), 500))
-        except Exception:
-            limit = 100
-        try:
-            offset = max(0, int(q.get("offset", ["0"])[0]))
-        except Exception:
-            offset = 0
-        return limit, offset
-
-    def _parse_dt(value: str | None):
-        if not value:
-            return None
-        try:
-            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
-        except Exception:
-            try:
-                dt = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
-                return dt.replace(tzinfo=timezone.utc)
-            except Exception:
-                return None
-
     def _job_payload(row):
         # row: id,status,phase,processed,total,message,checkpoint_cursor,checkpoint_every,started_at,finished_at
         processed = int(row[3] or 0)
@@ -169,7 +146,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
         throughput = None
         eta_sec = None
         if started_at:
-            st = _parse_dt(started_at)
+            st = parse_dt(started_at)
             if st:
                 elapsed = max(0.0, (datetime.now(timezone.utc) - st).total_seconds())
                 if elapsed > 0:
@@ -219,7 +196,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
             if not candidates:
                 continue
 
-            last_dt = _parse_dt(last_t)
+            last_dt = parse_dt(last_t)
             if last_dt is not None and (now - last_dt).total_seconds() < int(cooldown_min or 0) * 60:
                 continue
 
@@ -249,14 +226,14 @@ def run_server(project_root: str, port: int = 4310) -> None:
 
             last_run = scheduler_state.get("last_run_at")
             if last_run:
-                last_dt = _parse_dt(last_run)
+                last_dt = parse_dt(last_run)
                 if last_dt and (datetime.now(timezone.utc) - last_dt).total_seconds() < int(scheduler_state["interval_sec"]):
                     continue
 
             try:
                 conn_s = connect(root)
                 init_schema(conn_s)
-                pid_s = _project_id(conn_s, root)
+                pid_s = project_id(conn_s, root)
                 if pid_s:
                     fired = _evaluate_alerts(conn_s, pid_s)
                     scheduler_state["last_run_at"] = datetime.now(timezone.utc).isoformat()
@@ -367,21 +344,16 @@ def run_server(project_root: str, port: int = 4310) -> None:
         return job_id
     class Handler(BaseHTTPRequestHandler):
         def _json(self, payload, code=200):
-            body = json.dumps(payload).encode("utf-8")
-            self.send_response(code)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            json_response(self, payload, code=code)
 
         def do_GET(self):
             parsed = urlparse(self.path)
             conn = connect(root)
             init_schema(conn)
-            pid = _project_id(conn, root)
+            pid = project_id(conn, root)
 
             if parsed.path == "/":
-                body = _HTML.encode("utf-8")
+                body = ctx.html.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
@@ -390,56 +362,11 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 return
 
             if parsed.path == "/api/events":
-                q = parse_qs(parsed.query or "")
-                try:
-                    cursor = int(q.get("cursor", ["0"])[0])
-                except Exception:
-                    cursor = 0
-
-                self.send_response(200)
-                self.send_header("Content-Type", "text/event-stream")
-                self.send_header("Cache-Control", "no-cache")
-                self.send_header("Connection", "keep-alive")
-                self.end_headers()
-
-                def write_event(ev):
-                    payload = json.dumps(ev)
-                    self.wfile.write(f"id: {ev['id']}\nevent: {ev['kind']}\ndata: {payload}\n\n".encode("utf-8"))
-                    self.wfile.flush()
-
-                # Initial hello event + backlog since cursor
-                write_event({
-                    "id": cursor,
-                    "kind": "connected",
-                    "data": {"cursor": cursor},
-                    "ts": datetime.now(timezone.utc).isoformat(),
-                })
-
-                with events_lock:
-                    backlog = [e for e in events if e["id"] > cursor]
-                for ev in backlog:
-                    write_event(ev)
-                    cursor = ev["id"]
-
-                # Stream updates for up to 30s per request
-                deadline = time.time() + 30
-                while time.time() < deadline:
-                    with events_lock:
-                        updates = [e for e in events if e["id"] > cursor]
-                        if not updates:
-                            events_lock.wait(timeout=2)
-                            updates = [e for e in events if e["id"] > cursor]
-                    for ev in updates:
-                        write_event(ev)
-                        cursor = ev["id"]
+                handle_events_get(self, ctx, parsed)
                 return
 
             if parsed.path == "/api/health":
-                self._json(with_meta({
-                    "ok": True,
-                    "service": "copyclip-intelligence",
-                    "version": os.getenv("COPYCLIP_VERSION", "dev"),
-                }))
+                handle_health_get(self, ctx)
                 return
 
             if parsed.path == "/api/reacquaintance":
@@ -750,7 +677,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 if not pid:
                     self._json(with_meta({"items": [], "total": 0, "limit": 0, "offset": 0}))
                     return
-                limit, offset = _pagination(parsed)
+                limit, offset = pagination(parsed)
                 total = conn.execute("SELECT COUNT(*) FROM files WHERE project_id=?", (pid,)).fetchone()[0]
                 rows = conn.execute(
                     "SELECT path, size_bytes, language FROM files WHERE project_id=? ORDER BY path LIMIT ? OFFSET ?",
@@ -904,7 +831,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 if not pid:
                     self._json(with_meta({"items": [], "total": 0, "limit": 0, "offset": 0}))
                     return
-                limit, offset = _pagination(parsed)
+                limit, offset = pagination(parsed)
                 total = conn.execute("SELECT COUNT(*) FROM commits WHERE project_id=?", (pid,)).fetchone()[0]
                 rows = conn.execute(
                     "SELECT sha, author, message, date FROM commits WHERE project_id=? ORDER BY date DESC LIMIT ? OFFSET ?",
@@ -1009,7 +936,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 if not pid:
                     self._json(with_meta({"items": [], "total": 0, "limit": 0, "offset": 0}))
                     return
-                limit, offset = _pagination(parsed)
+                limit, offset = pagination(parsed)
                 self._json(with_meta(list_handoff_packets(conn, pid, limit=limit, offset=offset)))
                 return
 
@@ -1041,7 +968,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 if not pid:
                     self._json(with_meta({"items": [], "total": 0, "limit": 0, "offset": 0}))
                     return
-                limit, offset = _pagination(parsed)
+                limit, offset = pagination(parsed)
                 total = conn.execute("SELECT COUNT(*) FROM decisions WHERE project_id=?", (pid,)).fetchone()[0]
                 rows = conn.execute(
                     "SELECT id,title,summary,status,source_type,created_at FROM decisions WHERE project_id=? ORDER BY id DESC LIMIT ? OFFSET ?",
@@ -1243,7 +1170,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 except Exception:
                     self._json({"error": "invalid_decision_id"}, 400)
                     return
-                limit, offset = _pagination(parsed)
+                limit, offset = pagination(parsed)
                 total = conn.execute("SELECT COUNT(*) FROM decision_history WHERE decision_id=?", (decision_id,)).fetchone()[0]
                 rows = conn.execute(
                     "SELECT id,action,from_status,to_status,note,created_at FROM decision_history WHERE decision_id=? ORDER BY id DESC LIMIT ? OFFSET ?",
@@ -1371,7 +1298,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 if not pid:
                     self._json(with_meta({"items": [], "total": 0, "limit": 0, "offset": 0}))
                     return
-                limit, offset = _pagination(parsed)
+                limit, offset = pagination(parsed)
                 total = conn.execute("SELECT COUNT(*) FROM risks WHERE project_id=?", (pid,)).fetchone()[0]
                 rows = conn.execute(
                     "SELECT area,severity,kind,rationale,score,created_at FROM risks WHERE project_id=? ORDER BY score DESC, id DESC LIMIT ? OFFSET ?",
@@ -1401,7 +1328,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 if not pid:
                     self._json(with_meta({"items": [], "total": 0, "limit": 0, "offset": 0}))
                     return
-                limit, offset = _pagination(parsed)
+                limit, offset = pagination(parsed)
                 total = conn.execute("SELECT COUNT(*) FROM issues WHERE project_id=?", (pid,)).fetchone()[0]
                 rows = conn.execute(
                     "SELECT external_id,title,status,labels,author,url,source,created_at,updated_at FROM issues WHERE project_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?",
@@ -1434,7 +1361,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 if not pid:
                     self._json(with_meta({"items": [], "total": 0, "limit": 0, "offset": 0}))
                     return
-                limit, offset = _pagination(parsed)
+                limit, offset = pagination(parsed)
                 total = conn.execute("SELECT COUNT(*) FROM pulls WHERE project_id=?", (pid,)).fetchone()[0]
                 rows = conn.execute(
                     "SELECT external_id,title,status,merged,labels,author,url,source,created_at,updated_at FROM pulls WHERE project_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?",
@@ -1489,7 +1416,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     self._json(with_meta({"fired": [], "events": []}))
                     return
                 fired = _evaluate_alerts(conn, pid)
-                limit, offset = _pagination(parsed)
+                limit, offset = pagination(parsed)
                 total = conn.execute("SELECT COUNT(*) FROM alert_events WHERE project_id=?", (pid,)).fetchone()[0]
                 rows = conn.execute(
                     "SELECT id,rule_id,title,detail,created_at FROM alert_events WHERE project_id=? ORDER BY id DESC LIMIT ? OFFSET ?",
@@ -1656,8 +1583,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 return
 
             if parsed.path in {"/api/config", "/api/settings"}:
-                rows = conn.execute("SELECT key,value FROM config ORDER BY key").fetchall()
-                self._json({r[0]: r[1] for r in rows})
+                handle_settings_get(self, ctx, conn)
                 return
 
             self._json({"error": "not_found"}, 404)
@@ -1666,7 +1592,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
             parsed = urlparse(self.path)
             conn = connect(root)
             init_schema(conn)
-            pid = _project_id(conn, root)
+            pid = project_id(conn, root)
             if not pid:
                 self._json({"error": "run_analyze_first"}, 400)
                 return
@@ -1792,7 +1718,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
             parsed = urlparse(self.path)
             conn = connect(root)
             init_schema(conn)
-            pid = _project_id(conn, root)
+            pid = project_id(conn, root)
             if not pid:
                 self._json({"error": "run_analyze_first"}, 400)
                 return
@@ -1814,7 +1740,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
             parsed = urlparse(self.path)
             conn = connect(root)
             init_schema(conn)
-            pid = _project_id(conn, root)
+            pid = project_id(conn, root)
             if not pid:
                 self._json({"error": "run_analyze_first"}, 400)
                 return
@@ -2293,13 +2219,7 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 return
 
             if parsed.path in {"/api/config", "/api/settings"}:
-                length = int(self.headers.get("Content-Length", "0"))
-                raw = self.rfile.read(length) if length else b"{}"
-                data = json.loads(raw.decode("utf-8"))
-                for k, v in data.items():
-                    conn.execute("INSERT INTO config(key, value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (k, str(v)))
-                conn.commit()
-                self._json({"status": "ok"})
+                handle_settings_post(self, ctx, conn)
                 return
 
             if parsed.path == "/api/decisions":
@@ -2419,7 +2339,8 @@ def run_server(project_root: str, port: int = 4310) -> None:
         return f"\033]8;;{url}\a{label}\033]8;;\a"
 
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    dash_url = f"http://127.0.0.1:{port}"
+    actual_port = int(server.server_address[1])
+    dash_url = f"http://127.0.0.1:{actual_port}"
     print(f"{_c('INFO', '36')} CopyClip Intelligence running at {_link(dash_url)}")
     print(f"{_c('INFO', '36')} Press Ctrl+C to stop")
     try:
