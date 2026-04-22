@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib import request
 from urllib.error import HTTPError
 
+
 from copyclip.intelligence.db import connect, init_schema
 from copyclip.intelligence.server import run_server
 
@@ -33,6 +34,38 @@ def _wait_port(port: int, timeout_s: float = 3.0):
 def _get_json(url: str):
     with request.urlopen(url, timeout=3) as r:
         return json.loads(r.read().decode("utf-8"))
+
+
+def _get_text(url: str, timeout: float = 3.0, max_bytes: int | None = None):
+    with request.urlopen(url, timeout=timeout) as r:
+        data = r.read() if max_bytes is None else r.read(max_bytes)
+        return data.decode("utf-8")
+
+
+def _get_stream_prefix(host: str, port: int, path: str, max_bytes: int = 512, timeout: float = 3.0):
+    with socket.create_connection((host, port), timeout=timeout) as sock:
+        sock.settimeout(timeout)
+        req = (
+            f"GET {path} HTTP/1.1\r\n"
+            f"Host: {host}:{port}\r\n"
+            "Accept: text/event-stream\r\n"
+            "Connection: close\r\n\r\n"
+        )
+        sock.sendall(req.encode("utf-8"))
+        chunks = []
+        deadline = time.time() + timeout
+        while time.time() < deadline and sum(len(c) for c in chunks) < max_bytes:
+            try:
+                data = sock.recv(max_bytes)
+            except TimeoutError:
+                break
+            if not data:
+                break
+            chunks.append(data)
+            combined = b"".join(chunks)
+            if b"event: connected" in combined:
+                break
+        return b"".join(chunks).decode("utf-8", errors="replace")
 
 
 def _patch_json(url: str, payload: dict):
@@ -117,6 +150,46 @@ def test_decision_history_endpoint():
         hist = _get_json(f"http://127.0.0.1:{port}/api/decisions/{decision_id}/history")
         assert hist["total"] >= 1
         assert any(item["action"] == "status_change" for item in hist["items"])
+
+
+def test_events_endpoint_starts_with_connected_event():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        root_path = str(root.absolute())
+        conn = connect(root_path)
+        init_schema(conn)
+        conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root_path, "tmp"))
+        conn.commit()
+
+        port = _free_port()
+        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
+        th.start()
+        _wait_port(port)
+
+        body = _get_stream_prefix("127.0.0.1", port, "/api/events?cursor=0")
+        assert "event: connected" in body
+        assert '"kind": "connected"' in body
+
+
+def test_health_endpoint_contract():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        root_path = str(root.absolute())
+        conn = connect(root_path)
+        init_schema(conn)
+        conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root_path, "tmp"))
+        conn.commit()
+
+        port = _free_port()
+        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
+        th.start()
+        _wait_port(port)
+
+        res = _get_json(f"http://127.0.0.1:{port}/api/health")
+        assert res["ok"] is True
+        assert res["service"] == "copyclip-intelligence"
+        assert res["meta"]["project"] == root.name
+        assert res["meta"]["generated_at"]
 
 
 def test_ask_endpoint_returns_evidence_first_contract():
@@ -606,6 +679,10 @@ def test_settings_alias_get_and_post():
         _post_json(f"http://127.0.0.1:{port}/api/settings", {"COPYCLIP_LLM_PROVIDER": "gemini"})
         res = _get_json(f"http://127.0.0.1:{port}/api/settings")
         assert res.get("COPYCLIP_LLM_PROVIDER") == "gemini"
+
+        _post_json(f"http://127.0.0.1:{port}/api/config", {"COPYCLIP_THEME": "midnight"})
+        res2 = _get_json(f"http://127.0.0.1:{port}/api/config")
+        assert res2.get("COPYCLIP_THEME") == "midnight"
 
 
 def test_alert_rule_patch_and_delete():

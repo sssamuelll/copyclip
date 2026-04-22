@@ -7,6 +7,9 @@ cd "$ROOT_DIR"
 echo "[copyclip] backend editable install"
 python3 -m pip install -e '.[dev]'
 
+echo "[copyclip] runtime smoke suite"
+python3 -m pytest tests/test_smoke_cli_runtime.py -q
+
 echo "[copyclip] backend test suite"
 python3 -m pytest -q
 

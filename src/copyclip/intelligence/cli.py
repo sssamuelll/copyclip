@@ -117,6 +117,10 @@ def _looks_like_project_folder(root: str) -> bool:
     return any(os.path.exists(os.path.join(root, m)) for m in markers)
 
 def _pick_open_port(base_port: int, max_scan: int = 50) -> int:
+    if base_port <= 0:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            return int(s.getsockname()[1])
     for port in range(base_port, base_port + max_scan + 1):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             if s.connect_ex(("127.0.0.1", port)) != 0:
