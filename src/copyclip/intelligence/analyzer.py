@@ -679,36 +679,32 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
 
         # Build import map for cross-file call resolution
         # Maps (file_path, imported_name) -> source_module
-        import_map = {}
+        import_map: Dict[Tuple[str, str], str] = {}
         for rel, (mod, extraction) in file_extractions.items():
             for imp in extraction.imports:
                 import_map[(rel, imp.target)] = imp.target
 
+        # Reverse index for the global-name fallback. setdefault preserves
+        # "first match wins" semantics of the legacy linear scan over
+        # global_symbols.items().
+        name_to_sid: Dict[str, int] = {}
+        for (_module, name), sid in global_symbols.items():
+            name_to_sid.setdefault(name, sid)
+
         # Resolve calls
         for rel, (mod, extraction) in file_extractions.items():
             for call in extraction.calls:
-                # Try to find the callee symbol
-                callee_base = call.callee.split(".")[0]  # handle obj.method -> obj
+                callee_base = call.callee.split(".")[0]
                 callee_name = call.callee.split(".")[-1] if "." in call.callee else call.callee
 
-                # Look in same file first
                 callee_id = symbol_id_map.get((rel, callee_name, "function")) or \
                             symbol_id_map.get((rel, callee_name, "method"))
 
-                # Look in imported modules
-                if not callee_id:
-                    for (r, imp_name), src_mod in import_map.items():
-                        if r == rel and imp_name == callee_base:
-                            callee_id = global_symbols.get((src_mod, callee_name))
-                            if callee_id:
-                                break
+                if not callee_id and (rel, callee_base) in import_map:
+                    callee_id = global_symbols.get((callee_base, callee_name))
 
-                # Look globally as fallback
                 if not callee_id:
-                    for (m, n), sid in global_symbols.items():
-                        if n == callee_name:
-                            callee_id = sid
-                            break
+                    callee_id = name_to_sid.get(callee_name)
 
                 if callee_id:
                     caller_id = symbol_id_map.get((rel, call.caller, "function")) or \
@@ -724,17 +720,11 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
             for inh in extraction.inheritance:
                 child_id = symbol_id_map.get((rel, inh.child, "class")) or \
                            symbol_id_map.get((rel, inh.child, "struct"))
-                parent_id = None
-                # Look in same file
                 parent_id = symbol_id_map.get((rel, inh.parent, "class")) or \
                             symbol_id_map.get((rel, inh.parent, "trait")) or \
                             symbol_id_map.get((rel, inh.parent, "interface"))
-                # Look globally
                 if not parent_id:
-                    for (m, n), sid in global_symbols.items():
-                        if n == inh.parent:
-                            parent_id = sid
-                            break
+                    parent_id = name_to_sid.get(inh.parent)
                 if child_id and parent_id:
                     conn.execute(
                         "INSERT OR IGNORE INTO symbol_edges(project_id,from_symbol_id,to_symbol_id,edge_type) VALUES(?,?,?,?)",
