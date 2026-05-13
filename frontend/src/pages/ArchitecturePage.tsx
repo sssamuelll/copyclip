@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 import type { ArchEdge, ArchNode, CognitiveLoadItem } from '../types/api'
+import { fogBorder, fogFill } from '../utils/debt'
 
 export function ArchitecturePage({ nodes, edges }: { nodes: ArchNode[]; edges: ArchEdge[] }) {
   const [selected, setSelected] = useState<string | null>(null)
@@ -69,13 +70,8 @@ export function ArchitecturePage({ nodes, edges }: { nodes: ArchNode[]; edges: A
             {nodes.map((n) => {
               const s = stats[n.name] || { inbound: 0, outbound: 0 }
               const fog = fogMap[n.name]
-              const fogLevel = fog?.fog_level || 'low'
-              const fogStyle = showFog
-                ? fogLevel === 'high'
-                  ? { borderColor: 'var(--accent-red)', background: 'rgba(239,68,68,.17)' }
-                  : fogLevel === 'med'
-                    ? { borderColor: 'var(--accent-amber)', background: 'rgba(245,158,11,.16)' }
-                    : { borderColor: 'var(--accent-green)', background: 'rgba(16,185,129,.12)' }
+              const fogStyle = showFog && fog
+                ? { borderColor: fogBorder(fog), background: fogFill(fog) }
                 : undefined
 
               return (
@@ -109,7 +105,7 @@ export function ArchitecturePage({ nodes, edges }: { nodes: ArchNode[]; edges: A
               <div>outbound deps: <strong>{current?.outbound ?? 0}</strong></div>
               <div>total edges: <strong>{(current?.inbound ?? 0) + (current?.outbound ?? 0)}</strong></div>
               <div>cognitive debt: <strong>{currentFog ? currentFog.cognitive_debt_score.toFixed(1) : 'n/a'}</strong></div>
-              <div>fog level: <strong>{currentFog?.fog_level || 'n/a'}</strong></div>
+              <div>fog level: <strong>{currentFog?.severity ?? currentFog?.fog_level ?? 'n/a'}</strong></div>
             </div>
           </div>
 

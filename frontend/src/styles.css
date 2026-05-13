@@ -14,6 +14,7 @@
   --accent-green: #10b981;
   --accent-amber: #f59e0b;
   --accent-cyan: #06b6d4;
+  --accent-cyan-soft: color-mix(in srgb, var(--accent-cyan) 8%, transparent);
   --accent-red: #ef4444;
 }
 
@@ -141,6 +142,12 @@ body {
 .badge-med { color: var(--accent-amber); border-color: var(--accent-amber); background: rgba(245,158,11,.12); }
 .badge-low { color: var(--accent-green); border-color: var(--accent-green); background: rgba(16,185,129,.12); }
 .badge-intent { color: #a78bfa; border-color: #a78bfa; background: rgba(167,139,250,.14); }
+
+/* fog intensities for cognitive debt — neutral cyan, not alerts */
+.fog-critical { color: var(--accent-cyan); border-color: var(--accent-cyan); background: color-mix(in srgb, var(--accent-cyan) 22%, transparent); }
+.fog-high { color: var(--accent-cyan); border-color: var(--accent-cyan); background: color-mix(in srgb, var(--accent-cyan) 14%, transparent); }
+.fog-med { color: var(--text-secondary); border-color: color-mix(in srgb, var(--accent-cyan) 50%, var(--text-secondary)); background: color-mix(in srgb, var(--accent-cyan) 7%, transparent); }
+.fog-low { color: var(--text-tertiary); border-color: var(--border); background: transparent; }
 
 .status-badge { font-size: 10px; border: 1px solid; padding: 3px 8px; }
 .status-proposed { color: var(--accent-amber); border-color: var(--accent-amber); background: rgba(245,158,11,.12); }

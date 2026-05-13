@@ -10,6 +10,7 @@ import type {
   RemediationPlan,
   RemediationReadFirstItem,
 } from '../types/api'
+import { fogClass } from '../utils/debt'
 
 type SelectedScope = {
   kind: DebtScopeKind
@@ -86,7 +87,7 @@ export function DebtNavigatorPage({ onNotify }: { onNotify?: (msg: string) => vo
         <div className="section-header">
           <span className="section-title">// fog_of_war</span>
           {breakdown && (
-            <span className={`badge badge-${severityTone(breakdown.score.severity)}`} style={{ marginLeft: 8 }}>
+            <span className={`badge ${fogClass({ severity: breakdown.score.severity })}`} style={{ marginLeft: 8 }}>
               {breakdown.score.severity} · {breakdown.score.value.toFixed(1)}
             </span>
           )}
@@ -117,14 +118,14 @@ export function DebtNavigatorPage({ onNotify }: { onNotify?: (msg: string) => vo
                         margin: 0,
                         border: selected?.kind === 'module' && selected.id === item.module ? '1px solid var(--accent-cyan)' : '1px solid var(--border)',
                         textAlign: 'left',
-                        background: selected?.kind === 'module' && selected.id === item.module ? 'rgba(34,211,238,0.08)' : 'transparent',
+                        background: selected?.kind === 'module' && selected.id === item.module ? 'var(--accent-cyan-soft)' : 'transparent',
                       }}
                       onClick={() => setSelected({ kind: 'module', id: item.module, label: item.module })}
                     >
                       <div style={{ display: 'grid', gap: 4, width: '100%' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                           <strong>{item.module}</strong>
-                          <span className={`badge badge-${fogTone(item.fog_level)}`} style={{ marginLeft: 'auto' }}>{item.fog_level}</span>
+                          <span className={`badge ${fogClass(item)}`} style={{ marginLeft: 'auto' }}>{item.severity ?? item.fog_level}</span>
                         </div>
                         <div className="muted" style={{ fontSize: 11 }}>
                           debt {item.cognitive_debt_score.toFixed(1)} · files {item.files} · churn {item.churn}
@@ -170,24 +171,12 @@ export function DebtNavigatorPage({ onNotify }: { onNotify?: (msg: string) => vo
   )
 }
 
-function severityTone(severity: DebtSeverity | string) {
-  if (severity === 'critical' || severity === 'high') return 'high'
-  if (severity === 'medium') return 'med'
-  return 'low'
-}
-
-function fogTone(level: string) {
-  if (level === 'high') return 'high'
-  if (level === 'med') return 'med'
-  return 'low'
-}
-
 function VerdictCard({ breakdown, scopeLabel }: { breakdown: DebtBreakdown; scopeLabel: string }) {
   return (
     <div className="insight-card" style={{ margin: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <div className="insight-title">// verdict</div>
-        <span className={`badge badge-${severityTone(breakdown.score.severity)}`}>{breakdown.score.severity}</span>
+        <span className={`badge ${fogClass({ severity: breakdown.score.severity })}`}>{breakdown.score.severity}</span>
         <span className="badge" style={{ marginLeft: 'auto' }}>confidence: {breakdown.score.confidence}</span>
       </div>
       <div className="insight-text" style={{ marginTop: 8 }}>
@@ -224,11 +213,11 @@ function FactorRow({ factor }: { factor: DebtFactor }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <strong>{factor.label}</strong>
         <span className="muted" style={{ fontSize: 11 }}>weight {factor.weight.toFixed(2)}</span>
-        <span className={`badge badge-${available ? (normalized >= 60 ? 'high' : normalized >= 30 ? 'med' : 'low') : 'low'}`} style={{ marginLeft: 'auto' }}>
+        <span className={`badge ${available ? (normalized >= 60 ? 'fog-high' : normalized >= 30 ? 'fog-med' : 'fog-low') : 'fog-low'}`} style={{ marginLeft: 'auto' }}>
           {available ? `${normalized.toFixed(0)}` : 'unavailable'}
         </span>
       </div>
-      <div style={{ position: 'relative', height: 4, background: 'rgba(34,211,238,0.08)', marginTop: 6, borderRadius: 2 }}>
+      <div style={{ position: 'relative', height: 4, background: 'var(--accent-cyan-soft)', marginTop: 6, borderRadius: 2 }}>
         <div
           style={{
             position: 'absolute',
@@ -272,7 +261,7 @@ function RemediationPanel({ plan, topCandidates, onOpenFile }: { plan: Remediati
           <div key={c.id} className="row-item" style={{ margin: 0, border: '1px solid var(--border)', flexDirection: 'column', alignItems: 'flex-start', padding: 10 }}>
             <div style={{ display: 'flex', width: '100%', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <strong>{c.label}</strong>
-              <span className={`badge badge-${c.expected_impact.score_delta <= -8 ? 'high' : c.expected_impact.score_delta <= -3 ? 'med' : 'low'}`} style={{ marginLeft: 'auto' }}>
+              <span className={`badge ${c.expected_impact.score_delta <= -8 ? 'fog-high' : c.expected_impact.score_delta <= -3 ? 'fog-med' : 'fog-low'}`} style={{ marginLeft: 'auto' }}>
                 Δ {c.expected_impact.score_delta.toFixed(1)}
               </span>
             </div>
@@ -364,7 +353,7 @@ function ModuleFileList({ breakdown, onPickFile }: { breakdown: DebtBreakdown; o
           >
             <div style={{ display: 'flex', width: '100%', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <strong style={{ fontSize: 12 }}>{row.path}</strong>
-              <span className={`badge badge-${severityTone(row.severity)}`} style={{ marginLeft: 'auto' }}>
+              <span className={`badge ${fogClass({ severity: row.severity })}`} style={{ marginLeft: 'auto' }}>
                 {row.severity} · {row.score.toFixed(1)}
               </span>
             </div>
