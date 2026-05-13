@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .context_bundle_builder import build_context_bundle
 from .ask_project import build_ask_response
-from .cognitive_debt import build_debt_breakdown
+from .cognitive_debt import build_debt_breakdown, severity_to_fog
 from .debt_remediation import build_remediation_plan
 from .handoff import (
     build_handoff_packet,
@@ -432,76 +432,70 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     return
 
                 if parsed.path == "/api/cognitive-load":
+                    # Serves the v1 factor-model score from build_debt_breakdown
+                    # under the legacy field names. fog_level + decision_linked
+                    # are kept for backward-compat; severity is the v1 vocab.
                     if not pid:
-                        self._json(with_meta({"items": [], "total": 0, "generated_at": None}))
+                        self._json(with_meta({"items": [], "total": 0, "last_review_at": None}))
                         return
 
-                    # Last review proxy = last snapshot timestamp.
                     last_snap = conn.execute(
                         "SELECT generated_at FROM snapshots WHERE project_id=? ORDER BY id DESC LIMIT 1",
                         (pid,),
                     ).fetchone()
                     last_review = last_snap[0] if last_snap else None
 
-                    # Module stats from indexed insights + churn proxy from file_changes.
                     rows = conn.execute(
                         """
-                        SELECT i.module, i.path, COALESCE(i.complexity,0) AS complexity,
+                        SELECT i.module, COALESCE(i.complexity,0) AS complexity,
                                COALESCE((SELECT COUNT(*) FROM file_changes fc WHERE fc.project_id=i.project_id AND fc.file_path=i.path),0) AS churn
                         FROM analysis_file_insights i
-                        WHERE i.project_id=?
+                        WHERE i.project_id=? AND i.module IS NOT NULL AND i.module != ''
                         """,
                         (pid,),
                     ).fetchall()
 
-                    module_map = {}
+                    module_stats: dict[str, dict[str, int]] = {}
                     for r in rows:
-                        module = (r[0] or "root")
-                        complexity = int(r[2] or 0)
-                        churn = int(r[3] or 0)
-                        m = module_map.setdefault(module, {"files": 0, "complexity": 0, "churn": 0})
-                        m["files"] += 1
-                        m["complexity"] += complexity
-                        m["churn"] += churn
+                        module = r[0]
+                        agg = module_stats.setdefault(module, {"files": 0, "complexity": 0, "churn": 0})
+                        agg["files"] += 1
+                        agg["complexity"] += int(r[1] or 0)
+                        agg["churn"] += int(r[2] or 0)
 
-                    # Decision-link coverage proxy per module.
-                    lrows = conn.execute(
+                    decision_link_rows = conn.execute(
                         "SELECT link_type, target_pattern FROM decision_links WHERE project_id=?",
                         (pid,),
                     ).fetchall()
 
-                    items = []
-                    for module, agg in module_map.items():
-                        files = max(1, int(agg["files"]))
-                        avg_complexity = agg["complexity"] / files
-                        churn = int(agg["churn"])
-
-                        covered = False
-                        for lr in lrows:
+                    def _module_decision_linked(module: str) -> bool:
+                        for lr in decision_link_rows:
                             ltype = (lr[0] or "").strip()
                             pattern = (lr[1] or "").strip()
                             if ltype == "module" and pattern == module:
-                                covered = True
-                                break
-                            if ltype == "file_glob" and module != "root" and (module in pattern):
-                                covered = True
-                                break
+                                return True
+                            if ltype == "file_glob" and module in pattern:
+                                return True
+                        return False
 
-                        # CognitiveDebt v1 proxy:
-                        # generated_ratio~churn pressure + complexity pressure, amplified when not decision-linked.
-                        generated_ratio = min(1.0, (churn / max(1, files * 12)) + (avg_complexity / 120.0))
-                        time_factor = 1.0  # snapshot cadence not yet per-module; keep neutral for v1
-                        debt = generated_ratio * time_factor * (1.25 if not covered else 1.0)
-                        score = round(min(100.0, debt * 100.0), 2)
-
+                    items = []
+                    for module, agg in module_stats.items():
+                        try:
+                            breakdown = build_debt_breakdown(conn, pid, "module", module)
+                        except ValueError:
+                            # Module visible in insights but no aggregate rows — skip rather than guess.
+                            continue
+                        files = max(1, int(agg["files"]))
+                        severity = breakdown["score"]["severity"]
                         items.append({
                             "module": module,
                             "files": files,
-                            "churn": churn,
-                            "avg_complexity": round(avg_complexity, 2),
-                            "decision_linked": covered,
-                            "cognitive_debt_score": score,
-                            "fog_level": "high" if score >= 70 else ("med" if score >= 40 else "low"),
+                            "churn": int(agg["churn"]),
+                            "avg_complexity": round(agg["complexity"] / files, 2),
+                            "decision_linked": _module_decision_linked(module),
+                            "cognitive_debt_score": breakdown["score"]["value"],
+                            "severity": severity,
+                            "fog_level": severity_to_fog(severity),
                         })
 
                     items.sort(key=lambda x: x["cognitive_debt_score"], reverse=True)

@@ -424,6 +424,7 @@ export type CognitiveLoadItem = {
   decision_linked: boolean
   cognitive_debt_score: number
   fog_level: 'low' | 'med' | 'high'
+  severity?: 'low' | 'medium' | 'high' | 'critical'
 }
 
 export type CognitiveLoadResponse = {
