@@ -57,6 +57,19 @@ def _severity_for(value: float) -> str:
     return "low"
 
 
+_SEVERITY_TO_FOG: dict[str, str] = {
+    "critical": "high",
+    "high": "high",
+    "medium": "med",
+    "low": "low",
+}
+
+
+def severity_to_fog(severity: str) -> str:
+    """Map a v1 severity bucket to the legacy fog_level vocabulary kept on /api/cognitive-load."""
+    return _SEVERITY_TO_FOG.get(severity, "low")
+
+
 def _confidence_for(signal_coverage: float) -> str:
     if signal_coverage >= 0.85:
         return "high"
