@@ -93,15 +93,49 @@ def test_quick_debt_signal_matches_full_breakdown_severity(tmp_path):
     conn = connect(str(tmp_path))
     init_schema(conn)
     pid = seed_mixed_debt_project(conn, str(tmp_path))
-    for path in ["src/copyclip/mcp_server.py", "src/copyclip/ask/answer.py"]:
+    # quick_debt_signal uses datetime.now() internally; share that reference by
+    # also letting full default to datetime.now() so the two calls agree.
+    for path in ["src/copyclip/mcp_server.py", "src/copyclip/ask/answer.py", "src/copyclip/new_module.py"]:
         quick = quick_debt_signal(conn, pid, path)
-        full = build_debt_breakdown(conn, pid, "file", path, now_ts=STABLE_NOW_TS)
-        # severity should be stable: quick uses the stored cognitive_debt column, full recomputes from factors.
-        # Under the v1 contract the two may disagree by at most one bucket; we assert same severity for the
-        # critical-dark file which is the most important case for prioritization.
-        if path == "src/copyclip/mcp_server.py":
-            assert quick["severity"] == "critical"
-            assert full["score"]["severity"] in {"critical", "high"}
+        full = build_debt_breakdown(conn, pid, "file", path)
+        assert quick is not None
+        assert quick["severity"] == full["score"]["severity"]
+        assert quick["value"] == round(float(full["score"]["value"]), 2)
+    conn.close()
+
+
+def test_quick_debt_signal_primary_signal_matches_top_weighted_factor(tmp_path):
+    conn = connect(str(tmp_path))
+    init_schema(conn)
+    pid = seed_mixed_debt_project(conn, str(tmp_path))
+    for path in ["src/copyclip/mcp_server.py", "src/copyclip/ask/answer.py", "src/copyclip/new_module.py"]:
+        quick = quick_debt_signal(conn, pid, path)
+        full = build_debt_breakdown(conn, pid, "file", path)
+        available = [f for f in full["factor_breakdown"] if f["signal_available"]]
+        if not available:
+            assert quick["primary_signal"] is None
+            continue
+        top = max(available, key=lambda f: f["weighted_contribution"])
+        assert quick["primary_signal"] == top["factor_id"]
+    conn.close()
+
+
+def test_quick_debt_signal_for_greenfield_path_avoids_unavailable_blame_factors(tmp_path):
+    conn = connect(str(tmp_path))
+    init_schema(conn)
+    pid = seed_greenfield_project(conn, str(tmp_path))
+    quick = quick_debt_signal(conn, pid, "src/copyclip/new/alpha.py")
+    assert quick is not None
+    # blame-dependent factors are unavailable; primary_signal must not be one of them.
+    assert quick["primary_signal"] not in {"agent_authored_ratio", "review_staleness"}
+    conn.close()
+
+
+def test_quick_debt_signal_returns_none_for_path_missing_from_insights(tmp_path):
+    conn = connect(str(tmp_path))
+    init_schema(conn)
+    pid = seed_mixed_debt_project(conn, str(tmp_path))
+    assert quick_debt_signal(conn, pid, "src/does/not/exist.py") is None
     conn.close()
 
 

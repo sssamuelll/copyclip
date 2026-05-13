@@ -609,29 +609,30 @@ def build_debt_breakdown(
 
 
 def quick_debt_signal(conn, project_id: int, path: str) -> dict[str, Any] | None:
-    """Return a cheap debt summary for ``path`` without running the full breakdown.
+    """Return a cheap debt summary for ``path`` derived from the v1 factor model.
 
-    Suitable for integration callers (Reacquaintance, Ask Project) that only need
-    to know "is this file dark, and roughly why" to adjust prioritization.
+    Delegates to :func:`build_debt_breakdown` so callers (Reacquaintance, Ask Project)
+    see the same value/severity as ``/api/cognitive-load``. ``primary_signal`` is the
+    factor with the largest weighted contribution among the available signals.
     """
     row = conn.execute(
-        "SELECT cognitive_debt, agent_line_ratio, last_human_ts FROM analysis_file_insights WHERE project_id=? AND path=?",
+        "SELECT 1 FROM analysis_file_insights WHERE project_id=? AND path=? LIMIT 1",
         (project_id, path),
     ).fetchone()
     if not row:
         return None
-    value = float(row[0] or 0.0)
-    agent_ratio = row[1]
-    last_human_ts = row[2]
-    primary_signal: str | None = None
-    if agent_ratio is not None and float(agent_ratio) >= 0.5:
-        primary_signal = "agent_authored_ratio"
-    elif last_human_ts is None and value >= 40:
-        primary_signal = "review_staleness"
+
+    try:
+        breakdown = build_debt_breakdown(conn, project_id, "file", path)
+    except ValueError:
+        return None
+
+    available = [f for f in breakdown.get("factor_breakdown") or [] if f.get("signal_available")]
+    primary = max(available, key=lambda f: f.get("weighted_contribution") or 0.0, default=None)
     return {
-        "value": round(value, 2),
-        "severity": _severity_for(value),
-        "primary_signal": primary_signal,
+        "value": round(float(breakdown["score"]["value"] or 0.0), 2),
+        "severity": breakdown["score"]["severity"],
+        "primary_signal": primary["factor_id"] if primary else None,
     }
 
 
