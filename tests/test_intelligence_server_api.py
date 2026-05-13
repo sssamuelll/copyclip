@@ -192,6 +192,33 @@ def test_health_endpoint_contract():
         assert res["meta"]["generated_at"]
 
 
+def test_health_endpoint_survives_sustained_requests():
+    # Each handler invocation opens a SQLite conn; if we leak them, the
+    # server eventually exhausts fds. Documents the intent that every
+    # do_* handler closes its conn on every return path.
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        root_path = str(root.absolute())
+        conn = connect(root_path)
+        init_schema(conn)
+        conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root_path, "tmp"))
+        conn.commit()
+
+        port = _free_port()
+        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
+        th.start()
+        _wait_port(port)
+
+        url = f"http://127.0.0.1:{port}/api/health"
+        last = None
+        for _ in range(50):
+            last = _get_json(url)
+            assert last["ok"] is True
+        assert last is not None
+        assert last["service"] == "copyclip-intelligence"
+        assert last["meta"]["generated_at"]
+
+
 def test_ask_endpoint_returns_evidence_first_contract():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
