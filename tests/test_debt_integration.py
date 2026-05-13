@@ -64,8 +64,11 @@ def test_quick_debt_signal_returns_severity_and_primary_signal(tmp_path):
     conn.close()
 
     assert signal is not None
-    assert signal["value"] >= 75
-    assert signal["severity"] == "critical"
+    # Under the v1 factor model the dark file lands in "high" or "critical"
+    # depending on how aged the seeded blame is at test runtime; the heaviest
+    # weighted factor for this fixture is the agent-authored ratio.
+    assert signal["value"] >= 50
+    assert signal["severity"] in {"high", "critical"}
     assert signal["primary_signal"] == "agent_authored_ratio"
 
 
@@ -147,10 +150,44 @@ def test_ask_response_biases_drill_down_to_critical_debt_file(tmp_path):
 
 
 def test_ask_response_low_debt_file_does_not_appear_in_debt_hints(tmp_path):
+    import time
+
     root = str(tmp_path)
     conn = connect(root)
     init_schema(conn)
-    pid = _seed_debt_project(conn, root, debt_for_server=10.0, debt_for_ask=5.0)
+    pid = get_or_create_project(conn, root, name="copyclip-low-debt")
+    # Engineer a v1-low file: recent human edit, no agent authorship, decision-linked,
+    # tests present in the module → all factors fall well below the medium threshold.
+    recent_human = time.time() - 86_400
+    for path, module in [
+        ("src/copyclip/ask/answer.py", "copyclip.ask"),
+        ("tests/copyclip/ask/test_answer.py", "tests"),
+    ]:
+        conn.execute(
+            "INSERT INTO files(project_id,path,language,size_bytes,mtime,hash) VALUES(?,?,?,?,?,?)",
+            (pid, path, "python", 600, 1.0, f"h-{path}"),
+        )
+        conn.execute(
+            "INSERT INTO analysis_file_insights(project_id,path,module,imports_json,complexity,cognitive_debt,agent_line_ratio,last_human_ts) VALUES(?,?,?,?,?,?,?,?)",
+            (pid, path, module, "[]", 4, 4.0, 0.0, recent_human),
+        )
+    conn.execute(
+        "INSERT INTO commits(project_id,sha,author,date,message) VALUES(?,?,?,?,?)",
+        (pid, "sha-ask-low", "samuel", "2026-05-01T10:00:00+00:00", "ask refactor"),
+    )
+    conn.execute(
+        "INSERT INTO file_changes(project_id,commit_sha,file_path,additions,deletions) VALUES(?,?,?,?,?)",
+        (pid, "sha-ask-low", "src/copyclip/ask/answer.py", 4, 1),
+    )
+    conn.execute(
+        "INSERT INTO decisions(project_id,title,summary,status,source_type) VALUES(?,?,?,?,?)",
+        (pid, "Ask answers are evidence-first", "Grounded.", "accepted", "manual"),
+    )
+    conn.execute(
+        "INSERT INTO decision_refs(decision_id,ref_type,ref_value) VALUES(?,?,?)",
+        (1, "file", "src/copyclip/ask/answer.py"),
+    )
+    conn.commit()
 
     response = build_ask_response(conn, pid, "evidence first ask implementation")
     conn.close()
