@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import type { ChangeItem, CognitiveLoadItem, DecisionItem, IdentityDriftItem, Overview, RiskItem, StoryTimelineItem } from '../types/api'
+import { fogFill } from '../utils/debt'
 
 type Props = {
   overview?: Overview
@@ -126,10 +127,10 @@ export function AtlasPage({ overview, changes, risks, decisions }: Props) {
                   <span style={{ fontSize: 12 }}>{m.module}</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <div style={{ width: 60, height: 4, background: 'rgba(255,255,255,0.1)', borderRadius: 2 }}>
-                      <div style={{ 
-                        width: `${m.cognitive_debt_score}%`, 
-                        height: '100%', 
-                        background: m.fog_level === 'high' ? 'var(--accent-red)' : m.fog_level === 'med' ? 'var(--accent-amber)' : 'var(--accent-green)',
+                      <div style={{
+                        width: `${m.cognitive_debt_score}%`,
+                        height: '100%',
+                        background: fogFill(m),
                         borderRadius: 2
                       }} />
                     </div>

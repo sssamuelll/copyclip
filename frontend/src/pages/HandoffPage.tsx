@@ -293,7 +293,7 @@ export function HandoffPage({ onNotify }: { onNotify?: (msg: string) => void }) 
                           margin: 0,
                           border: selectedPacketId === item.packet_id ? '1px solid var(--accent-cyan)' : '1px solid var(--border)',
                           textAlign: 'left',
-                          background: selectedPacketId === item.packet_id ? 'rgba(34,211,238,0.08)' : 'transparent',
+                          background: selectedPacketId === item.packet_id ? 'var(--accent-cyan-soft)' : 'transparent',
                         }}
                         onClick={() => setSelectedPacketId(item.packet_id)}
                       >
