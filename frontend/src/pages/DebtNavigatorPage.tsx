@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api/client'
 import type {
   CognitiveLoadItem,
@@ -18,6 +18,11 @@ type SelectedScope = {
   label: string
 }
 
+type EmptyKind = 'not_indexed' | 'indexed_no_debt' | 'network_error'
+
+const ANALYZE_POLL_MS = 3000
+const ANALYZE_TIMEOUT_MS = 10 * 60 * 1000
+
 export function DebtNavigatorPage({ onNotify }: { onNotify?: (msg: string) => void }) {
   const [modules, setModules] = useState<CognitiveLoadItem[]>([])
   const [loadingModules, setLoadingModules] = useState(true)
@@ -26,18 +31,43 @@ export function DebtNavigatorPage({ onNotify }: { onNotify?: (msg: string) => vo
   const [plan, setPlan] = useState<RemediationPlan | null>(null)
   const [loadingSelected, setLoadingSelected] = useState(false)
   const [error, setError] = useState('')
+  const [empty, setEmpty] = useState<EmptyKind | null>(null)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [analyzeElapsed, setAnalyzeElapsed] = useState(0)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const analyzeStartRef = useRef(0)
+
+  const stopPolling = () => {
+    if (pollRef.current !== null) {
+      clearInterval(pollRef.current)
+      pollRef.current = null
+    }
+    if (tickRef.current !== null) {
+      clearInterval(tickRef.current)
+      tickRef.current = null
+    }
+    setAnalyzing(false)
+    setAnalyzeElapsed(0)
+  }
 
   const loadModules = async () => {
     setLoadingModules(true)
     try {
-      const response = await api.cognitiveLoad()
-      setModules(response.items)
-      if (!selected && response.items.length) {
-        const top = response.items[0]
-        setSelected({ kind: 'module', id: top.module, label: top.module })
+      const [load, ov] = await Promise.all([api.cognitiveLoad(), api.overview()])
+      setModules(load.items)
+      if (load.items.length === 0) {
+        setEmpty(ov.files === 0 ? 'not_indexed' : 'indexed_no_debt')
+      } else {
+        setEmpty(null)
+        if (!selected) {
+          const top = load.items[0]
+          setSelected({ kind: 'module', id: top.module, label: top.module })
+        }
       }
       setError('')
     } catch (e) {
+      setEmpty('network_error')
       setError(e instanceof Error ? e.message : 'Failed to load cognitive load map')
     } finally {
       setLoadingModules(false)
@@ -54,14 +84,65 @@ export function DebtNavigatorPage({ onNotify }: { onNotify?: (msg: string) => vo
     } catch (e) {
       setBreakdown(null)
       setPlan(null)
-      setError(e instanceof Error ? e.message : 'Failed to load debt breakdown')
+      const msg = e instanceof Error ? e.message : 'failed to load debt breakdown'
+      onNotify?.(`could not load ${scope.label}: ${msg}`)
     } finally {
       setLoadingSelected(false)
     }
   }
 
+  const startPolling = () => {
+    if (pollRef.current !== null) return
+    setAnalyzing(true)
+    analyzeStartRef.current = Date.now()
+    setAnalyzeElapsed(0)
+    tickRef.current = setInterval(() => {
+      setAnalyzeElapsed(Math.floor((Date.now() - analyzeStartRef.current) / 1000))
+    }, 1000)
+    pollRef.current = setInterval(async () => {
+      if (Date.now() - analyzeStartRef.current > ANALYZE_TIMEOUT_MS) {
+        stopPolling()
+        onNotify?.('analyze timeout — check Ops for current status')
+        return
+      }
+      try {
+        const status = await api.analyzeStatus()
+        const latest = status.items[0]
+        if (!latest) return
+        if (latest.status === 'completed') {
+          stopPolling()
+          loadModules()
+        } else if (latest.status === 'failed' || latest.status === 'canceled') {
+          stopPolling()
+          onNotify?.(`analyze ${latest.status} — see Ops for diagnostics`)
+        }
+      } catch {
+        // swallow transient polling errors; timeout catches sustained failures
+      }
+    }, ANALYZE_POLL_MS)
+  }
+
+  const onRunAnalyze = async () => {
+    if (analyzing) return
+    try {
+      const res = await api.startAnalyzeJob()
+      if (res.already_running) {
+        onNotify?.('analyze already running — refresh in a moment')
+      } else {
+        onNotify?.('analyze started — this can take a couple of minutes')
+      }
+      startPolling()
+    } catch {
+      onNotify?.('failed to start analyze — see Ops for diagnostics')
+    }
+  }
+
   useEffect(() => {
     loadModules()
+    return () => {
+      if (pollRef.current !== null) clearInterval(pollRef.current)
+      if (tickRef.current !== null) clearInterval(tickRef.current)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -97,9 +178,19 @@ export function DebtNavigatorPage({ onNotify }: { onNotify?: (msg: string) => vo
           <div className="muted" style={{ maxWidth: 880 }}>
             Inspect dark areas by module, see why they are dark, and jump to the smallest next action that reduces uncertainty.
           </div>
-          {error && <div className="error">{error}</div>}
+          {empty && (
+            <EmptyStatePanel
+              kind={empty}
+              analyzing={analyzing}
+              elapsedSec={analyzeElapsed}
+              loading={loadingModules}
+              onRunAnalyze={onRunAnalyze}
+              onRetry={loadModules}
+            />
+          )}
+          {!empty && error && <div className="error">{error}</div>}
 
-          <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'minmax(280px, 360px) minmax(0, 1fr)' }}>
+          <div style={{ display: empty ? 'none' : 'grid', gap: 12, gridTemplateColumns: 'minmax(280px, 360px) minmax(0, 1fr)' }}>
             <div className="panel" style={{ padding: 12, display: 'grid', gap: 10 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <div className="section-title">// dark_modules</div>
@@ -168,6 +259,77 @@ export function DebtNavigatorPage({ onNotify }: { onNotify?: (msg: string) => vo
         </div>
       </div>
     </section>
+  )
+}
+
+function EmptyStatePanel({
+  kind,
+  analyzing,
+  elapsedSec,
+  loading,
+  onRunAnalyze,
+  onRetry,
+}: {
+  kind: EmptyKind
+  analyzing: boolean
+  elapsedSec: number
+  loading: boolean
+  onRunAnalyze: () => void
+  onRetry: () => void
+}) {
+  type CTA = { label: string; loadingLabel: string; primary: boolean; onClick: () => void }
+  let variant: { title: string; body: string; cta: CTA | null }
+  if (analyzing) {
+    variant = {
+      title: `// analyzing… (${elapsedSec}s)`,
+      body: 'copyclip is computing cognitive debt across the project. Modules will appear here when the job completes.',
+      cta: null,
+    }
+  } else if (kind === 'not_indexed') {
+    variant = {
+      title: '// no_index_yet',
+      body: 'This project has not been indexed. Run analyze to compute cognitive debt across modules.',
+      cta: { label: 'run analyze', loadingLabel: 'loading…', primary: true, onClick: onRunAnalyze },
+    }
+  } else if (kind === 'indexed_no_debt') {
+    variant = {
+      title: '// clean_signal',
+      body: "No cognitive debt detected. Either the analyzer hasn't found any dark zones, or your project is in unusually good shape.",
+      cta: { label: 'refresh', loadingLabel: 'refreshing…', primary: false, onClick: onRetry },
+    }
+  } else {
+    variant = {
+      title: '// load_failed',
+      body: 'Could not reach the intelligence server. Check that copyclip start is running, then retry.',
+      cta: { label: 'retry', loadingLabel: 'retrying…', primary: true, onClick: onRetry },
+    }
+  }
+
+  return (
+    <div
+      className="panel"
+      style={{
+        padding: 24,
+        maxWidth: 520,
+        margin: '0 auto',
+        display: 'grid',
+        gap: 12,
+        justifyItems: 'center',
+        textAlign: 'center',
+      }}
+    >
+      <div className="section-title">{variant.title}</div>
+      <div className="muted" style={{ fontSize: 13, maxWidth: 420 }}>{variant.body}</div>
+      {variant.cta && (
+        <button
+          className={variant.cta.primary ? 'btn primary' : 'btn'}
+          onClick={variant.cta.onClick}
+          disabled={loading}
+        >
+          {loading ? variant.cta.loadingLabel : variant.cta.label}
+        </button>
+      )}
+    </div>
   )
 }
 
