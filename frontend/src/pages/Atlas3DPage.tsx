@@ -92,6 +92,8 @@ type FlowchartCanvasProps = {
 type FlowEdgeInfo = {
   key: string
   type: string
+  sourceId: number
+  targetId: number
   d: string
   mx: number
   my: number
@@ -515,7 +517,7 @@ const FlowchartCanvas = forwardRef<FlowHandle, FlowchartCanvasProps>(function Fl
       const cacheKey = `${link.key}:${sourcePosition.x}:${sourcePosition.y}:${targetPosition.x}:${targetPosition.y}`
       const cached = pathCache.current.get(cacheKey)
       if (cached) {
-        out.push({ key: link.key, type: link.type, ...cached })
+        out.push({ key: link.key, type: link.type, sourceId: link.sourceId, targetId: link.targetId, ...cached })
         return
       }
 
@@ -529,7 +531,7 @@ const FlowchartCanvas = forwardRef<FlowHandle, FlowchartCanvasProps>(function Fl
       const my = (y1 + y2) / 2
       const next = { d, mx, my }
       pathCache.current.set(cacheKey, next)
-      out.push({ key: link.key, type: link.type, ...next })
+      out.push({ key: link.key, type: link.type, sourceId: link.sourceId, targetId: link.targetId, ...next })
     })
     return out
   }, [visibleLinks, positions])
@@ -545,6 +547,17 @@ const FlowchartCanvas = forwardRef<FlowHandle, FlowchartCanvasProps>(function Fl
       }),
     [edges, selectedEdge, hoverEdge],
   )
+
+  const focusId = hoverNode ?? selectedId
+  const connectedIds = useMemo(() => {
+    if (focusId == null) return null
+    const set = new Set<number>([focusId])
+    visibleLinks.forEach((link) => {
+      if (link.sourceId === focusId) set.add(link.targetId)
+      if (link.targetId === focusId) set.add(link.sourceId)
+    })
+    return set
+  }, [focusId, visibleLinks])
 
   const fitView = useCallback(() => {
     if (!visibleIds.size || !positions.size) {
@@ -708,7 +721,8 @@ const FlowchartCanvas = forwardRef<FlowHandle, FlowchartCanvasProps>(function Fl
           const baseColor = edgeColors[edge.type] || '#555'
           const color = selected ? '#fb923c' : hovered ? '#f59e0b' : contains ? (isDark ? '#4a4a5a' : '#9a9aaa') : baseColor
           const strokeWidth = selected ? 3 : hovered ? 2.5 : contains ? 1.6 : 2
-          const opacity = selected ? 1 : hovered ? 0.95 : contains ? 0.7 : 0.85
+          const touchesFocus = connectedIds == null || edge.sourceId === focusId || edge.targetId === focusId
+          const opacity = (selected ? 1 : hovered ? 0.95 : contains ? 0.7 : 0.85) * (touchesFocus ? 1 : 0.2)
 
           return (
             <g key={edge.key}>
@@ -778,6 +792,7 @@ const FlowchartCanvas = forwardRef<FlowHandle, FlowchartCanvasProps>(function Fl
           const children = hasChildren(id)
           const totalChildren = childCount(id)
           const active = selectedId === id
+          const dimmed = connectedIds != null && !connectedIds.has(id)
 
           return (
             <g
@@ -790,7 +805,8 @@ const FlowchartCanvas = forwardRef<FlowHandle, FlowchartCanvasProps>(function Fl
                 event.stopPropagation()
                 onSelectNode(id)
               }}
-              style={{ cursor: dragId === id ? 'grabbing' : 'pointer' }}
+              opacity={dimmed ? 0.15 : 1}
+              style={{ cursor: dragId === id ? 'grabbing' : 'pointer', transition: 'opacity .15s' }}
             >
               {hovered && (
                 <rect
