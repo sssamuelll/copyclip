@@ -240,7 +240,7 @@ export function ContextBuilderPage() {
             </div>
 
             <div>
-              <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>forge_intent (used for oracle conflict checks)</div>
+              <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>forge_intent (used for decision history conflict checks)</div>
               <textarea
                 rows={2}
                 value={advisorIntent}

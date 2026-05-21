@@ -142,7 +142,7 @@ export function DecisionsPage({ items, focusDecisionId }: { items: DecisionItem[
                 </div>
 
                 <div className="panel" style={{ padding: 10 }}>
-                  <div className="section-title" style={{ marginBottom: 6 }}>// intent_links (oracle ↔ system)</div>
+                  <div className="section-title" style={{ marginBottom: 6 }}>// intent_links (decision_history ↔ system)</div>
                   <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                     <select value={linkType} onChange={(e) => setLinkType(e.target.value as any)} style={{ background: 'var(--bg)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}>
                       <option value="file_glob">file_glob</option>
@@ -177,7 +177,7 @@ export function DecisionsPage({ items, focusDecisionId }: { items: DecisionItem[
                         {h.from_status || h.to_status ? ` (${labelForStatus(h.from_status || '-')} → ${labelForStatus(h.to_status || '-')})` : ''}
                         {h.note ? ` — ${h.note}` : ''}
                       </div>
-                    )) : <div className="muted">No oracle events recorded yet.</div>}
+                    )) : <div className="muted">No decision history events recorded yet.</div>}
                   </div>
                 </div>
               </div>

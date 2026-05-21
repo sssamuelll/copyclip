@@ -544,10 +544,10 @@ Replace with:
 
 - [ ] **Step 2: Add navigation hint CSS**
 
-In `frontend/src/styles.css`, find `/* --- Codebase Map Breadcrumb --- */` and add BEFORE it:
+In `frontend/src/styles.css`, find `/* --- Atlas Breadcrumb --- */` and add BEFORE it:
 
 ```css
-/* --- Codebase Map Navigation Hint --- */
+/* --- Atlas Navigation Hint --- */
 .atlas-nav-hint {
   position: absolute;
   bottom: 30px;

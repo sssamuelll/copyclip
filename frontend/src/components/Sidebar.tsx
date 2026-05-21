@@ -32,6 +32,10 @@ const GROUPS = [
   }
 ]
 
+export const PAGE_LABELS: Record<string, string> = Object.fromEntries(
+  GROUPS.flatMap((g) => g.pages.map((p) => [p.id, p.label]))
+)
+
 export function Sidebar({ page, setPage, lastIndexedText }: Props) {
   return (
     <aside className="sidebar">

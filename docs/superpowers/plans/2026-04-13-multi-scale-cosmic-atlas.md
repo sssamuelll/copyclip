@@ -244,10 +244,10 @@ git commit -m "feat(api): add architectureTree client method and TreeNode type"
 
 - [ ] **Step 1: Add breadcrumb styles**
 
-In `frontend/src/styles.css`, find `/* --- Codebase Map Code Viewer --- */` and add BEFORE it:
+In `frontend/src/styles.css`, find `/* --- Atlas Code Viewer --- */` and add BEFORE it:
 
 ```css
-/* --- Codebase Map Breadcrumb --- */
+/* --- Atlas Breadcrumb --- */
 .atlas-breadcrumb {
   position: absolute;
   top: 70px;
@@ -303,7 +303,7 @@ git commit -m "style: add Codebase Map breadcrumb navigation styles"
 
 ### Task 5: Atlas3DPage rewrite — core infrastructure
 
-This is the biggest task. the Codebase Map3DPage.tsx is rewritten with the multi-scale rendering system. Due to the size, this task establishes the core infrastructure: state management, tree loading, level rendering dispatch, and Level 1 (Universe) rendering.
+This is the biggest task. The Atlas3DPage.tsx is rewritten with the multi-scale rendering system. Due to the size, this task establishes the core infrastructure: state management, tree loading, level rendering dispatch, and Level 1 (Universe) rendering.
 
 **Files:**
 - Rewrite: `frontend/src/pages/Atlas3DPage.tsx`

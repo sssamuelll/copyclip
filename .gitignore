@@ -131,6 +131,8 @@ docs/_build/
 .playwright-mcp/
 .superpowers/
 atlas-*.png
+architecture-*.png
+debt-navigator-*.png
 
 # frontend artifacts
 frontend/node_modules/

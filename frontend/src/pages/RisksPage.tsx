@@ -47,7 +47,7 @@ export function RisksPage({ items, focusRiskArea }: { items: RiskItem[]; focusRi
           <div className="insight-title">// suggested_action</div>
           <div className="insight-text">
             Prioritize the top three distortions, then link each one to a mitigation owner or an anchored decision.
-            {intentDriftCount > 0 ? ` ${intentDriftCount} intent-drift signal(s) need immediate oracle review.` : ''}
+            {intentDriftCount > 0 ? ` ${intentDriftCount} intent-drift signal(s) need immediate decision history review.` : ''}
           </div>
         </div>
       </div>

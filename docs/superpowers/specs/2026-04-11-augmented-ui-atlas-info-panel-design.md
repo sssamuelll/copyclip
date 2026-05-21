@@ -6,7 +6,7 @@
 
 ## Summary
 
-Replace the Codebase Map3DPage info panel's standard CSS borders and border-radius with augmented-ui geometry, porting the exact clip/notch/round configuration from the developer's personal landing page (sssamuelll/landing-page). The panel uses a hybrid color scheme: cyan augmented borders during hover (reading state), transitioning to purple/orange gradient borders on click (persistent link established state).
+Replace the Atlas3DPage info panel's standard CSS borders and border-radius with augmented-ui geometry, porting the exact clip/notch/round configuration from the developer's personal landing page (sssamuelll/landing-page). The panel uses a hybrid color scheme: cyan augmented borders during hover (reading state), transitioning to purple/orange gradient borders on click (persistent link established state).
 
 ## What Changes
 

@@ -233,7 +233,7 @@ In `frontend/src/styles.css`, find:
 Insert before it:
 
 ```css
-/* --- Codebase Map Code Viewer --- */
+/* --- Atlas Code Viewer --- */
 .atlas-info-panel--locked {
   width: 380px;
   max-height: 60vh;
@@ -282,7 +282,7 @@ Insert before it:
   font-size: 12px;
 }
 
-/* CodeMirror Codebase Map Cosmic Theme */
+/* CodeMirror Atlas Cosmic Theme */
 .cm-s-atlas-cosmic { background: transparent; color: #b5b4b6; }
 .cm-s-atlas-cosmic .CodeMirror-gutters { background: transparent; border: none; margin-right: 8px; }
 .cm-s-atlas-cosmic .CodeMirror-linenumber { color: rgba(0, 238, 255, 0.2); padding-right: 8px; }
