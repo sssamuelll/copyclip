@@ -7,7 +7,7 @@ CopyClip is evolving from a static context-gathering tool into a **Developer Ope
 ### 1. Project Storyteller (Narrative Documentation)
 **Goal:** Generate a technical "biography" of the project that explains the *what* and *how* without reading all the code.
 *   **Backend:** `/api/story`. Collects `README.md`, modules, main dependencies, and latest decisions. Sends to an LLM to generate a narrative.
-*   **UI:** A "Project Atlas" page showing the AI-generated text, updated after each `analyze`.
+*   **UI:** A "Project Codebase Map" page showing the AI-generated text, updated after each `analyze`.
 *   **Human-in-the-Loop:** Users can refine the story manually, adding context that is persisted in the DB.
 
 ### 2. Impact Simulator (Blast Radius Analysis)
@@ -43,7 +43,7 @@ CopyClip is evolving from a static context-gathering tool into a **Developer Ope
 *   **UI:** Persistent chat widget in the Dashboard.
 
 ## Implementation Iterations
-1. **Iteration 1: UI Revamp.** Update Dashboard layout to support the new toolset (Atlas, Context Cart, Impact).
+1. **Iteration 1: UI Revamp.** Update Dashboard layout to support the new toolset (Codebase Map, Context Cart, Impact).
 2. **Iteration 2: Storyteller & Heatmap.** Visual tools for immediate project comprehension.
 3. **Iteration 3: Context Cart.** Visual prompt assembly and token scrubbing.
 4. **Iteration 4: Simulator & Advisor.** Advanced predictive capabilities and guardrails.

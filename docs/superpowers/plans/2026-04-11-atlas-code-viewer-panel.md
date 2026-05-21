@@ -1,8 +1,8 @@
-# Atlas Code Viewer Panel Implementation Plan
+# Codebase Map Code Viewer Panel Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Expand the Atlas augmented-ui info panel to include a CodeMirror-powered code viewer when a node is selected, fed by a new `/api/module/source` backend endpoint.
+**Goal:** Expand the Codebase Map augmented-ui info panel to include a CodeMirror-powered code viewer when a node is selected, fed by a new `/api/module/source` backend endpoint.
 
 **Architecture:** Backend adds a single GET endpoint that maps module names to file paths (via `analysis_file_insights`) and reads their contents. Frontend expands the existing augmented-ui panel on select to include file tabs and a read-only CodeMirror instance with a custom cosmic theme.
 
@@ -544,7 +544,7 @@ cd frontend && npm run build && cp dist/index.html ../src/copyclip/intelligence/
 
 - [ ] **Step 2: Full manual test**
 
-Run `copyclip start`, open Atlas. Verify:
+Run `copyclip start`, open Codebase Map. Verify:
 
 1. Hovering a node shows the compact info panel (no code section)
 2. Clicking a node expands the panel — info section on top, file tabs + code below
@@ -553,7 +553,7 @@ Run `copyclip start`, open Atlas. Verify:
 5. Scrolling works within the code section
 6. Clicking deep space collapses back to no panel
 7. Hovering again shows compact panel (no code, no leftover state)
-8. All existing Atlas features still work (force graph, node dimming, edges, scaling)
+8. All existing Codebase Map features still work (force graph, node dimming, edges, scaling)
 
 - [ ] **Step 3: Commit bundle**
 

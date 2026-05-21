@@ -2,14 +2,14 @@ type Props = { page: string; setPage: (v: string) => void; lastIndexedText?: str
 
 const GROUPS = [
   {
-    label: 'Consciousness',
+    label: 'Project Memory',
     pages: [
       { id: 'reacquaintance', label: 'catch me up' },
-      { id: 'ask', label: 'ask the consciousness' },
+      { id: 'ask', label: 'ask project' },
       { id: 'handoff', label: 'safe handoff' },
       { id: 'debt-navigator', label: 'debt navigator' },
-      { id: 'atlas-3d', label: 'atlas' },
-      { id: 'timeline', label: 'chronicle' },
+      { id: 'atlas-3d', label: 'codebase map' },
+      { id: 'timeline', label: 'project timeline' },
       { id: 'planning', label: 'intent field' },
     ]
   },
@@ -26,11 +26,15 @@ const GROUPS = [
     label: 'Bridges',
     pages: [
       { id: 'context-builder', label: 'context forge' },
-      { id: 'decisions', label: 'oracle of intent' },
+      { id: 'decisions', label: 'decision history' },
       { id: 'settings', label: 'nexus' },
     ]
   }
 ]
+
+export const PAGE_LABELS: Record<string, string> = Object.fromEntries(
+  GROUPS.flatMap((g) => g.pages.map((p) => [p.id, p.label]))
+)
 
 export function Sidebar({ page, setPage, lastIndexedText }: Props) {
   return (
@@ -67,7 +71,7 @@ export function Sidebar({ page, setPage, lastIndexedText }: Props) {
           / v0.4.0_stable
         </div>
         <div style={{ fontSize: 10, color: 'var(--text-tertiary)', paddingLeft: '10px' }}>
-          {lastIndexedText || 'consciousness active'}
+          {lastIndexedText || 'project memory active'}
         </div>
       </div>
     </aside>

@@ -1,8 +1,8 @@
-# Atlas: Interactive Focus Sets & Graph-Aware Scaling
+# Codebase Map: Interactive Focus Sets & Graph-Aware Scaling
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Port CodeGraphContext's interactive focus set dimming and logarithmic graph-aware node scaling to the CopyClip Atlas, closing issues #5 and #8.
+**Goal:** Port CodeGraphContext's interactive focus set dimming and logarithmic graph-aware node scaling to the CopyClip Codebase Map, closing issues #5 and #8.
 
 **Architecture:** Two independent improvements to Atlas3DPage.tsx — (1) dim unconnected nodes to 0.05 opacity when a node is hovered/selected, (2) replace the linear `sqrt(connections) * 3` sizing with logarithmic graph-aware scaling that adapts to total graph size.
 
@@ -147,7 +147,7 @@ Expected: Clean build, no errors.
 cp frontend/dist/index.html src/copyclip/intelligence/ui/index.html
 ```
 
-Manual test: run `copyclip start`, open Atlas, hover a node. Unconnected nodes should fade to near-invisible. Connected neighbors stay bright. Release hover — all nodes restore.
+Manual test: run `copyclip start`, open Codebase Map, hover a node. Unconnected nodes should fade to near-invisible. Connected neighbors stay bright. Release hover — all nodes restore.
 
 - [ ] **Step 6: Commit**
 
@@ -229,7 +229,7 @@ Expected: Clean build, no errors.
 cp frontend/dist/index.html src/copyclip/intelligence/ui/index.html
 ```
 
-Manual test: run `copyclip start`, open Atlas. Nodes should be proportionally sized — high-connection nodes visibly larger than low-connection ones, but the scale should feel balanced regardless of total graph size.
+Manual test: run `copyclip start`, open Codebase Map. Nodes should be proportionally sized — high-connection nodes visibly larger than low-connection ones, but the scale should feel balanced regardless of total graph size.
 
 - [ ] **Step 5: Commit**
 
@@ -250,7 +250,7 @@ cd frontend && npm run build && cp dist/index.html ../src/copyclip/intelligence/
 
 - [ ] **Step 2: Full manual test**
 
-Run `copyclip start`, open Atlas. Verify:
+Run `copyclip start`, open Codebase Map. Verify:
 1. Nodes are logarithmically scaled by connection count
 2. Hovering a node dims all unconnected nodes + their labels to near-invisible
 3. Connected neighbors stay bright with slight emissive boost

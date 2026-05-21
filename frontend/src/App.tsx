@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from './api/client'
-import { Sidebar } from './components/Sidebar'
+import { Sidebar, PAGE_LABELS } from './components/Sidebar'
 import { ReacquaintancePage } from './pages/ReacquaintancePage'
 import { AskPage } from './pages/AskPage'
 import { ArchitecturePage } from './pages/ArchitecturePage'
@@ -96,8 +96,8 @@ export function App() {
         
         {/* Top Indicator Persistent */}
         <div style={{ position: 'absolute', top: 12, right: 24, zIndex: 10, display: 'flex', gap: 12 }}>
-           {error && <span className="badge badge-high">CONSCIOUSNESS OFFLINE</span>}
-           <span className="badge badge-low">{page.replace('-', ' ')} field</span>
+           {error && <span className="badge badge-high">PROJECT MEMORY OFFLINE</span>}
+           <span className="badge badge-low">{PAGE_LABELS[page] ?? page.replace('-', ' ')} field</span>
         </div>
 
         <div style={{ padding: '24px', flex: 1 }}>

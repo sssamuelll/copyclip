@@ -1,8 +1,8 @@
-# Multi-Scale Cosmic Atlas Implementation Plan
+# Multi-Scale Codebase Map Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the flat single-node Atlas with a 4-level zoomable cosmic universe where each click explodes a node into its internals, with distinct shapes per level, HUD labels, scroll-wheel navigation, and a breadcrumb bar.
+**Goal:** Replace the flat single-node Codebase Map with a 4-level zoomable cosmic universe where each click explodes a node into its internals, with distinct shapes per level, HUD labels, scroll-wheel navigation, and a breadcrumb bar.
 
 **Architecture:** Backend provides a nested folder tree via `/api/architecture/tree`. Frontend Atlas3DPage is rewritten with a level-based rendering system — each zoom level has its own render function, geometry types, and transition animations. OrbitControls handles rotation/pan, scroll wheel handles zoom-level changes.
 
@@ -296,7 +296,7 @@ cd /Users/samueldarioballesterosgarcia/projects/05_tools/copyclip/frontend && np
 
 ```bash
 git add frontend/src/styles.css
-git commit -m "style: add Atlas breadcrumb navigation styles"
+git commit -m "style: add Codebase Map breadcrumb navigation styles"
 ```
 
 ---
@@ -420,7 +420,7 @@ This repopulates modules with folder-path-based names and rebuilds the dependenc
 
 - [ ] **Step 3: Full manual test**
 
-Run `copyclip start`, open Atlas. Verify:
+Run `copyclip start`, open Codebase Map. Verify:
 
 1. **Level 1 (Universe):** Multiple diamonds visible (one per top-level folder: src, tests, frontend, docs, etc.). Not a single "root" blob.
 2. **Scroll in** on a diamond: it expands to show files as spheres (Level 2).

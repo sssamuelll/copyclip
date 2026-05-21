@@ -6,17 +6,17 @@
 
 ## Summary
 
-Replace the regex-based parser in `analyzer.py` with Tree-sitter (Python bindings) for 6 languages: Python, JavaScript, TypeScript, CSS, C++, and Rust. Extract functions, classes, interfaces, traits, enums, imports, call sites, and inheritance relationships. Store in new `symbols` and `symbol_edges` database tables. Module-level graph edges become more accurate (derived from actual symbol calls). Atlas stays module-level; the info panel gains a symbols section via a new `/api/module/symbols` endpoint. Other languages fall back to existing regex-based import extraction.
+Replace the regex-based parser in `analyzer.py` with Tree-sitter (Python bindings) for 6 languages: Python, JavaScript, TypeScript, CSS, C++, and Rust. Extract functions, classes, interfaces, traits, enums, imports, call sites, and inheritance relationships. Store in new `symbols` and `symbol_edges` database tables. Module-level graph edges become more accurate (derived from actual symbol calls). Codebase Map stays module-level; the info panel gains a symbols section via a new `/api/module/symbols` endpoint. Other languages fall back to existing regex-based import extraction.
 
 ## Decisions Made
 
 | Question | Choice | Rationale |
 |----------|--------|-----------|
 | Languages | Python, JS, TS, CSS, C++, Rust (6) | Covers current 3 + 3 commonly requested. Document limitation. |
-| Extraction level | Full: definitions, imports, calls, inheritance | Maximum graph richness for consciousness signal |
+| Extraction level | Full: definitions, imports, calls, inheritance | Maximum graph richness for project memory signal |
 | Runtime | Backend only (sub-project A) | Browser WASM deferred to sub-project B |
 | Database | New `symbols` + `symbol_edges` tables | Clean separation from module-level data |
-| Atlas visualization | Module-level default, symbols in info panel on select | Keeps 3D view clean, leverages existing code viewer panel |
+| Codebase Map visualization | Module-level default, symbols in info panel on select | Keeps 3D view clean, leverages existing code viewer panel |
 | API | Enrich existing + new `/api/module/symbols` | Lean graph endpoint, focused symbols endpoint |
 
 ## Database Schema
@@ -333,7 +333,7 @@ Tree-sitter extraction supports: Python, JavaScript, TypeScript, CSS, C++, and R
 
 ## What Stays the Same
 
-- Atlas 3D graph rendering (module-level nodes, force-directed layout, node dimming, scaling)
+- Codebase Map 3D graph rendering (module-level nodes, force-directed layout, node dimming, scaling)
 - Augmented-ui panel geometry and existing code viewer
 - Module-level cognitive debt calculations
 - All other pages and endpoints

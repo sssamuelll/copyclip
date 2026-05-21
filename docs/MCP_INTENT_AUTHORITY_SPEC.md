@@ -17,7 +17,7 @@ The CopyClip MCP Server will expose the following tools to external agents:
 ### Tool 1: `get_intent_manifesto`
 - **Purpose:** The first tool an agent must call when starting a session.
 - **Action:** Returns a summary of the project's soul, all `accepted`/`resolved` decisions, and high-level architectural rules.
-- **Agent Prompt Mapping:** *"Before writing code, get the project's intent manifesto to ensure alignment."*
+- **Agent Prompt Mapping:** *"Before writing code, get the project's architectural decisions to ensure alignment."*
 
 ### Tool 2: `get_context_bundle`
 - **Arguments:** `paths` (list of globs), `minimize_level` (basic/contextual).
@@ -30,12 +30,12 @@ The CopyClip MCP Server will expose the following tools to external agents:
 ### Tool 3: `audit_proposal`
 - **Arguments:** `proposed_diff` (string).
 - **Purpose:** Allows agents to **self-audit**.
-- **Workflow:** Before an agent executes a file write or presents a PR, it sends the diff to this tool. CopyClip uses its Semantic Drift Auditor to check the diff against the Intent Manifesto.
+- **Workflow:** Before an agent executes a file write or presents a PR, it sends the diff to this tool. CopyClip uses its Semantic Drift Auditor to check the diff against the Architectural Decisions.
 - **Response:** `{"status": "approved"}` or `{"status": "rejected", "reason": "Violates Decision #12..."}`.
 
 ### Tool 4: `log_decision_proposal`
 - **Arguments:** `title`, `summary`.
-- **Purpose:** If an agent realizes it needs to make an architectural choice that isn't covered by the manifesto, it can propose a decision via MCP. The human can later approve it in the CopyClip Dashboard.
+- **Purpose:** If an agent realizes it needs to make an architectural choice that isn't covered by the architectural decisions, it can propose a decision via MCP. The human can later approve it in the CopyClip Dashboard.
 
 ## 4. Implementation Strategy
 
@@ -51,7 +51,7 @@ The CopyClip MCP Server will expose the following tools to external agents:
 
 ### Phase 3: Agent Bi-directionality
 - Implement `log_decision_proposal`.
-- Allow agents to read the "Fog of War" map to prioritize refactoring dark areas of the codebase.
+- Allow agents to read the "Unfamiliar Code" map to prioritize refactoring dark areas of the codebase.
 
 ## 5. Value Proposition
 By placing CopyClip at the center of the MCP ecosystem, the developer only needs to maintain their intent in ONE place (the CopyClip Dashboard). Every agent, regardless of its provider, becomes strictly bound to the developer's original vision.

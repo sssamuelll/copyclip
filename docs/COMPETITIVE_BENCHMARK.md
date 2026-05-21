@@ -12,7 +12,7 @@
 | **Impact simulation** | Yes (blast radius) | No | Hotspot coupling | No | Impact analysis | No |
 | **AI agent context (MCP)** | 5 MCP tools + intent-aware bundling | MCP server (2026) | No | MCP server | 14 MCP tools | No |
 | **Decision-aware context** | Yes (constraints prepended) | No | No | No | ADR-linked | No |
-| **Visualization** | 3D Atlas + dashboard | Code nav UI | Hotspot heatmaps | 2D/3D graph | No | Web dashboard |
+| **Visualization** | 3D Codebase Map + dashboard | Code nav UI | Hotspot heatmaps | 2D/3D graph | No | Web dashboard |
 | **Self-audit for agents** | Yes (audit_proposal) | No | No | No | No | No |
 | **Open source** | Yes | Partially | No | Yes | Yes | Community Ed. |
 
@@ -22,7 +22,7 @@
 No other tool lets agents self-audit proposals against human-defined architectural decisions before committing. The `audit_proposal` MCP tool accepts a git diff, identifies affected files, retrieves linked decisions, and returns APPROVED/REJECTED with a score and explanation. This is CopyClip's core differentiator.
 
 ### 2. Cognitive Debt via Agent Detection
-CopyClip is the only tool that measures "Fog of War" by analyzing git blame for AI-generated code ratios with time decay. It detects agent signatures in commit authors (cursor, windsurf, github-actions, bot) and computes: `(agent_lines / total_lines) * time_factor`. CodeScene measures complexity; SonarQube measures code smells. Neither tracks *who wrote the code (human vs agent)*.
+CopyClip is the only tool that measures "Unfamiliar Code" by analyzing git blame for AI-generated code ratios with time decay. It detects agent signatures in commit authors (cursor, windsurf, github-actions, bot) and computes: `(agent_lines / total_lines) * time_factor`. CodeScene measures complexity; SonarQube measures code smells. Neither tracks *who wrote the code (human vs agent)*.
 
 ### 3. Decision-to-Code Bidirectional Linking
 Decisions link to file patterns via `decision_links`, and context bundles prepend relevant decision constraints. No RAG tool (Cursor, Continue, Aider) does this — they auto-retrieve context without intent constraints. CopyClip ensures AI agents see the architectural rules before they write code.
@@ -93,7 +93,7 @@ The Context Forge with minimization levels (basic/aggressive/structural) and liv
 
 ### Double Down (Unique Strengths)
 - **Intent Authority** — the audit_proposal + decision lifecycle is unmatched. Market this as the core value proposition.
-- **Cognitive debt / Fog of War** — agent-vs-human code ownership tracking is a novel metric no one else has. As AI generates more code, this becomes critical.
+- **Cognitive debt / Unfamiliar Code** — agent-vs-human code ownership tracking is a novel metric no one else has. As AI generates more code, this becomes critical.
 - **Identity drift** — decision alignment scoring is unique. Package this for engineering leadership as a governance tool.
 
 ### Close Gaps (High ROI)

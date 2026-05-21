@@ -119,7 +119,7 @@ export function ImpactSimulatorPage() {
                   <div style={{ color: 'var(--accent-amber)', fontSize: 12, marginBottom: 6 }}>oracle_note</div>
                   <div style={{ fontSize: 13 }}>
                     {blastCount >= 6
-                      ? 'High propagation. Gate merge with targeted regression tests and an oracle review of intent alignment.'
+                      ? 'High propagation. Gate merge with targeted regression tests and a decision history review of intent alignment.'
                       : blastCount >= 3
                         ? 'Moderate propagation. Validate connected interfaces before the change lands.'
                         : 'Low propagation. Validate local behavior and proceed with normal checks.'}

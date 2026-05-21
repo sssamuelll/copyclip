@@ -166,7 +166,7 @@ export function DebtNavigatorPage({ onNotify }: { onNotify?: (msg: string) => vo
 
       <div className="section-panel">
         <div className="section-header">
-          <span className="section-title">// fog_of_war</span>
+          <span className="section-title">// unfamiliar_code</span>
           {breakdown && (
             <span className={`badge ${fogClass({ severity: breakdown.score.severity })}`} style={{ marginLeft: 8 }}>
               {breakdown.score.severity} · {breakdown.score.value.toFixed(1)}

@@ -55,12 +55,12 @@ export function ArchitecturePage({ nodes, edges }: { nodes: ArchNode[]; edges: A
         <h2 className="page-title">Structure Graph</h2>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
           <input type="checkbox" checked={showFog} onChange={(e) => setShowFog(e.target.checked)} />
-          reveal fog of war
+          reveal unfamiliar code
         </label>
       </div>
 
       <div className="muted" style={{ fontSize: 13, maxWidth: 860 }}>
-        Inspect the connective skeleton beneath the Atlas. The Structure Graph reveals module relationships, edge density, and the places where cognitive fog is thickening.
+        Inspect the connective skeleton beneath the Codebase Map. The Structure Graph reveals module relationships, edge density, and the places where unfamiliar code is thickening.
       </div>
 
       <div className="arch-body">

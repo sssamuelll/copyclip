@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace regex-based code parsing with Tree-sitter for 6 languages, extracting function/class-level symbols with calls and inheritance, stored in new database tables and exposed via API for the Atlas info panel.
+**Goal:** Replace regex-based code parsing with Tree-sitter for 6 languages, extracting function/class-level symbols with calls and inheritance, stored in new database tables and exposed via API for the Codebase Map info panel.
 
-**Architecture:** New `tree_sitter_parser.py` module handles language-specific AST traversal. Analyzer calls it instead of regex helpers. Results stored in `symbols` + `symbol_edges` tables. New `/api/module/symbols` endpoint serves symbol data. Atlas info panel gains a symbols section.
+**Architecture:** New `tree_sitter_parser.py` module handles language-specific AST traversal. Analyzer calls it instead of regex helpers. Results stored in `symbols` + `symbol_edges` tables. New `/api/module/symbols` endpoint serves symbol data. Codebase Map info panel gains a symbols section.
 
 **Tech Stack:** tree-sitter (Python bindings), tree-sitter-{python,javascript,typescript,css,cpp,rust}
 
@@ -1281,7 +1281,7 @@ git commit -m "feat(api): add moduleSymbols client method and types (#3)"
 
 ---
 
-### Task 7: Atlas info panel symbols section
+### Task 7: Codebase Map info panel symbols section
 
 **Files:**
 - Modify: `frontend/src/pages/Atlas3DPage.tsx`

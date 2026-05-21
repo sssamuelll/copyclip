@@ -1,4 +1,4 @@
-# Obsidian-Style Force-Directed 3D Graph Atlas
+# Obsidian-Style Force-Directed 3D Graph Codebase Map
 
 **Date:** 2026-04-11
 **Scope:** Atlas3DPage — replace planet-scatter with force-directed graph
@@ -15,7 +15,7 @@ Replace the current Atlas3DPage planet-scatter visualization with an Obsidian-st
 | Graph engine | Force-directed 3D (Three.js + d3-force-3d) | Reuses existing Three.js setup, keeps cosmic aesthetic |
 | Edge style | Straight lines, opacity-based | Obsidian-faithful, clean, simple to render |
 | Node sizing | By connection count | Communicates structural importance |
-| Node color | By cognitive debt level | Core consciousness signal — at-a-glance health |
+| Node color | By cognitive debt level | Core project memory signal — at-a-glance health |
 | Labels | Always visible, distance-opacity fade | Obsidian-faithful, billboarded sprites |
 | Info panel | Detailed with neighbor list | Shows imports/dependents with debt-colored names |
 

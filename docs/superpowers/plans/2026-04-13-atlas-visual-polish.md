@@ -1,8 +1,8 @@
-# Atlas Visual Polish Implementation Plan
+# Codebase Map Visual Polish Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Transform the Atlas from flat cyan diamonds into a living cosmic universe with color variety, glow effects, vast scale, visible connections, and intuitive navigation.
+**Goal:** Transform the Codebase Map from flat cyan diamonds into a living cosmic universe with color variety, glow effects, vast scale, visible connections, and intuitive navigation.
 
 **Architecture:** All changes are in `Atlas3DPage.tsx` — modifying helper functions, render functions, interaction handlers, and the animation loop. No backend changes. One CSS addition for a hint overlay.
 

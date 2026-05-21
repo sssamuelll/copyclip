@@ -1,4 +1,4 @@
-# Multi-Scale Cosmic Atlas with Progressive Disclosure
+# Multi-Scale Codebase Map with Progressive Disclosure
 
 **Date:** 2026-04-13
 **Scope:** Backend tree endpoint + module resolution fix + Atlas3DPage complete rewrite
@@ -6,7 +6,7 @@
 
 ## Summary
 
-Replace the flat module-level Atlas with a 4-level zoomable cosmic universe. Each click explodes a node into its internals with cinematic animations. Distinct abstract geometric shapes per level (diamonds, spheres, triangles, squares). HUD labels for at-a-glance awareness. Augmented-ui detail panel on click for inspection. Scroll wheel navigation for spaceship feel. Breadcrumb bar for orientation.
+Replace the flat module-level Codebase Map with a 4-level zoomable cosmic universe. Each click explodes a node into its internals with cinematic animations. Distinct abstract geometric shapes per level (diamonds, spheres, triangles, squares). HUD labels for at-a-glance awareness. Augmented-ui detail panel on click for inspection. Scroll wheel navigation for spaceship feel. Breadcrumb bar for orientation.
 
 This solves the core problem: projects with flat structure collapsing into a single "root" node with an unreadable info dump.
 
@@ -80,7 +80,7 @@ This solves the core problem: projects with flat structure collapsing into a sin
 
 ### Breadcrumb Bar
 
-- Position: top of the Atlas container, below the "// cosmic_project_atlas" header
+- Position: top of the Codebase Map container, below the "// cosmic_project_atlas" header
 - Format: `project > src > copyclip > intelligence > server.py`
 - Each segment is clickable — jumps directly to that level with a transition animation
 - Current level is highlighted in cyan

@@ -79,11 +79,11 @@ export function DecisionsPage({ items, focusDecisionId }: { items: DecisionItem[
   return (
     <section style={{ display: 'grid', gap: 12 }}>
       <div className="page-header">
-        <h2 className="page-title">Oracle of Intent</h2>
+        <h2 className="page-title">Decision History</h2>
       </div>
 
       <div className="muted" style={{ fontSize: 13, maxWidth: 860 }}>
-        Inspect the project’s governing memory. The Oracle holds decisions, constraints, unresolved tensions, and the normative shape of the system.
+        Inspect the project’s governing memory. Decision History holds decisions, constraints, unresolved tensions, and the normative shape of the system.
       </div>
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -124,7 +124,7 @@ export function DecisionsPage({ items, focusDecisionId }: { items: DecisionItem[
               <div className="detail-body">
                 <div>
                   <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>summary</div>
-                  <div style={{ fontSize: 13 }}>{selected.summary || 'No summary yet. The Oracle has no explicit note for this decision.'}</div>
+                  <div style={{ fontSize: 13 }}>{selected.summary || 'No summary yet. Decision History has no explicit note for this decision.'}</div>
                 </div>
 
                 <textarea
@@ -142,7 +142,7 @@ export function DecisionsPage({ items, focusDecisionId }: { items: DecisionItem[
                 </div>
 
                 <div className="panel" style={{ padding: 10 }}>
-                  <div className="section-title" style={{ marginBottom: 6 }}>// intent_links (oracle ↔ system)</div>
+                  <div className="section-title" style={{ marginBottom: 6 }}>// intent_links (decision_history ↔ system)</div>
                   <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                     <select value={linkType} onChange={(e) => setLinkType(e.target.value as any)} style={{ background: 'var(--bg)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}>
                       <option value="file_glob">file_glob</option>
@@ -162,14 +162,14 @@ export function DecisionsPage({ items, focusDecisionId }: { items: DecisionItem[
                         <span style={{ fontSize: 12 }}>{l.link_type}: {l.target_pattern}</span>
                         <span className="muted" style={{ fontSize: 11 }}>{l.created_at?.slice(0, 19) || 'n/a'}</span>
                       </div>
-                    )) : <div className="muted">The Oracle has no explicit links to code yet.</div>}
+                    )) : <div className="muted">Decision History has no explicit links to code yet.</div>}
                   </div>
                 </div>
 
                 {error && <div className="error">{error}</div>}
 
                 <div>
-                  <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>chronicle</div>
+                  <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>project timeline</div>
                   <div style={{ display: 'grid', gap: 8 }}>
                     {history.length ? history.map((h) => (
                       <div key={h.id} className="panel" style={{ padding: 8, fontSize: 12 }}>
@@ -177,13 +177,13 @@ export function DecisionsPage({ items, focusDecisionId }: { items: DecisionItem[
                         {h.from_status || h.to_status ? ` (${labelForStatus(h.from_status || '-')} → ${labelForStatus(h.to_status || '-')})` : ''}
                         {h.note ? ` — ${h.note}` : ''}
                       </div>
-                    )) : <div className="muted">No oracle events recorded yet.</div>}
+                    )) : <div className="muted">No decision history events recorded yet.</div>}
                   </div>
                 </div>
               </div>
             </>
           ) : (
-            <div className="detail-body muted">The Oracle is silent. No decisions have been anchored yet.</div>
+            <div className="detail-body muted">Decision History is silent. No decisions have been anchored yet.</div>
           )}
         </div>
       </div>
