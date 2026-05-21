@@ -948,7 +948,7 @@ export function Atlas3DPage() {
         setError('')
       } catch (nextError) {
         if (cancelled) return
-        setError(nextError instanceof Error ? nextError.message : 'Failed to load atlas graph')
+        setError(nextError instanceof Error ? nextError.message : 'Failed to load codebase map')
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -1006,7 +1006,7 @@ export function Atlas3DPage() {
       <div className="atlas-flow-topbar">
         <div className="atlas-flow-brand">
           <div className="atlas-flow-brand-kicker">{overview?.meta?.project || 'copyclip'}</div>
-          <div className="atlas-flow-brand-title">Atlas Flowchart</div>
+          <div className="atlas-flow-brand-title">Codebase Map</div>
         </div>
 
         <div className="atlas-flow-toolbar">

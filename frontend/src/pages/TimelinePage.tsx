@@ -74,10 +74,10 @@ export function TimelinePage() {
     <div className="page-container" style={{ paddingBottom: 60 }}>
       <header style={{ marginBottom: 32, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
         <div>
-          <div className="muted" style={{ fontSize: 10, letterSpacing: 2 }}>// project_chronicle</div>
-          <h1 style={{ margin: '8px 0 0 0' }}>The Chronicle</h1>
+          <div className="muted" style={{ fontSize: 10, letterSpacing: 2 }}>// project_timeline</div>
+          <h1 style={{ margin: '8px 0 0 0' }}>Project Timeline</h1>
           <div className="muted" style={{ marginTop: 8, maxWidth: 720, fontSize: 13 }}>
-            Read the temporal memory of the project. The Chronicle tracks not only what changed, but how the system’s narrative, focus, and tensions evolve over time.
+            Read the temporal memory of the project. The Project Timeline tracks not only what changed, but how the system’s narrative, focus, and tensions evolve over time.
           </div>
         </div>
         
@@ -89,7 +89,7 @@ export function TimelinePage() {
       </header>
 
       {loading ? (
-        <div className="muted">Opening the Chronicle…</div>
+        <div className="muted">Opening the Project Timeline…</div>
       ) : (
         <div className="timeline-trail" style={{ position: 'relative', paddingLeft: 24 }}>
           <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 1, background: 'linear-gradient(to bottom, var(--accent-cyan), transparent)', opacity: 0.3 }} />

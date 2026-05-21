@@ -58,7 +58,7 @@ export function AtlasPage({ overview, changes, risks, decisions }: Props) {
           {/* 2. THE MANIFESTO (ACTIVE DECISIONS) */}
           <div className="section-panel" style={{ background: 'transparent', border: 'none', padding: 0 }}>
             <div className="section-header" style={{ marginBottom: 16 }}>
-              <span className="section-title" style={{ fontSize: 14 }}>// active_intent_manifesto</span>
+              <span className="section-title" style={{ fontSize: 14 }}>// active_architectural_decisions</span>
               <span className="muted" style={{ fontSize: 11 }}>the laws governing this codebase</span>
             </div>
             <div style={{ display: 'grid', gap: 12 }}>
@@ -118,7 +118,7 @@ export function AtlasPage({ overview, changes, risks, decisions }: Props) {
           {/* 4. FOG OF WAR (COGNITIVE DEBT) */}
           <div className="section-panel" style={{ height: 'fit-content' }}>
             <div className="section-header">
-              <span className="section-title">// fog_of_war</span>
+              <span className="section-title">// unfamiliar_code</span>
               <span className="muted" style={{ fontSize: 11 }}>understanding debt</span>
             </div>
             <div style={{ padding: 12, display: 'grid', gap: 10 }}>

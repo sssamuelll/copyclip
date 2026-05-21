@@ -96,7 +96,7 @@ export function App() {
         
         {/* Top Indicator Persistent */}
         <div style={{ position: 'absolute', top: 12, right: 24, zIndex: 10, display: 'flex', gap: 12 }}>
-           {error && <span className="badge badge-high">CONSCIOUSNESS OFFLINE</span>}
+           {error && <span className="badge badge-high">PROJECT MEMORY OFFLINE</span>}
            <span className="badge badge-low">{page.replace('-', ' ')} field</span>
         </div>
 

@@ -269,9 +269,9 @@ export function ContextBuilderPage() {
 
             {advisorConflicts.length > 0 && (
               <div className="panel" style={{ border: '1px solid #7f1d1d', background: 'rgba(127, 29, 29, 0.18)', padding: '10px', fontSize: '0.8rem' }}>
-                <div style={{ color: '#fca5a5', fontWeight: 'bold', marginBottom: '6px' }}>Oracle conflicts detected ({advisorConflicts.length})</div>
+                <div style={{ color: '#fca5a5', fontWeight: 'bold', marginBottom: '6px' }}>Decision History conflicts detected ({advisorConflicts.length})</div>
                 <div className="muted" style={{ marginBottom: 6 }}>
-                  {advisorOverride ? 'Proceed is unlocked. Review the tension and forge again to copy context.' : 'The Oracle has paused the Forge. Review the tension before proceeding.'}
+                  {advisorOverride ? 'Proceed is unlocked. Review the tension and forge again to copy context.' : 'Decision History has paused the Forge. Review the tension before proceeding.'}
                 </div>
                 {advisorConflicts.map((c) => (
                   <div key={`ctx-adv-${c.decision_id}`} style={{ marginBottom: 6, borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 6 }}>
@@ -297,8 +297,8 @@ export function ContextBuilderPage() {
 
             {warnings.length > 0 && (
               <div className="panel" style={{ border: '1px solid #92400e', background: 'rgba(146, 64, 14, 0.2)', padding: '10px', fontSize: '0.8rem' }}>
-                <div style={{ color: '#fbbf24', fontWeight: 'bold', marginBottom: '6px' }}>Oracle warning</div>
-                <div className="muted" style={{ marginBottom: 6 }}>The payload was forged, but the Oracle detected possible tension with prior architectural decisions.</div>
+                <div style={{ color: '#fbbf24', fontWeight: 'bold', marginBottom: '6px' }}>Decision History warning</div>
+                <div className="muted" style={{ marginBottom: 6 }}>The payload was forged, but Decision History detected possible tension with prior architectural decisions.</div>
                 {warnings.map((w, idx) => <div key={idx} style={{ marginBottom: 4 }}>• {w}</div>)}
               </div>
             )}

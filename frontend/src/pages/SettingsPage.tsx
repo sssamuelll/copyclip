@@ -30,7 +30,7 @@ export function SettingsPage({ onNotify }: { onNotify?: (msg: string) => void })
   return (
     <section className="page">
       <h2>Configuration Nexus</h2>
-      <p className="muted">Configure how the consciousness sees, interprets, and speaks. Settings are stored locally inside .copyclip/.</p>
+      <p className="muted">Configure how Project Memory sees, interprets, and speaks. Settings are stored locally inside .copyclip/.</p>
 
       <div className="panel" style={{ marginTop: '2rem', maxWidth: '600px' }}>
         <h3>Interpretive Providers</h3>
