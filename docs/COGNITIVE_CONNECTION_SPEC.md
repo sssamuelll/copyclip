@@ -17,7 +17,7 @@ CopyClip must evolve from a "Context Compiler" into an **Intent Anchor**.
 - **Implementation:** Link `copyclip decision` entries to specific AST nodes or file patterns.
 - **Validation:** The `analyzer.py` should flag code changes that contradict existing decisions (e.g., "Agent introduced a Singleton, but Decision #12 says 'No Singletons'").
 
-### B. Cognitive Load Scoring (The "Fog of War" Metric)
+### B. Cognitive Load Scoring (The "Unfamiliar Code" Metric)
 - **Concept:** Quantify how much of the project is "dark" to the developer.
 - **Metric:** `CognitiveDebt = (GeneratedCode / TotalCode) * TimeSinceLastHumanReview`.
 - **UI:** A heatmap in the dashboard showing which modules are becoming "alien" to the developer.
@@ -28,7 +28,7 @@ CopyClip must evolve from a "Context Compiler" into an **Intent Anchor**.
 - **Format:** "To support X, the agent refactored Y, which now affects the Z flow."
 
 ### D. Intent-Aware Handoff
-- **Concept:** When copying context for an agent, include the "Intent Manifesto" (Current Decisions + Constraints).
+- **Concept:** When copying context for an agent, include the "Architectural Decisions" (Current Decisions + Constraints).
 - **Implementation:** Automatically prepend active decisions to the context bundle.
 
 ---

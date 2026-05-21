@@ -23,7 +23,7 @@
 
 ---
 
-## 🛠 Módulo 2: Cognitive Load & "Fog of War"
+## 🛠 Módulo 2: Cognitive Load & "Unfamiliar Code"
 **Contexto:** El desarrollador se desconecta cuando no sabe qué partes del código son suyas y cuáles del agente.
 
 ### Tareas:
@@ -60,7 +60,7 @@
 - [ ] Modificar `frontend/src/pages/NarrativePage.tsx`:
     - Cambiar el prompt de generación de historia para que compare el snapshot actual con el anterior.
     - Enfoque: *"Explica qué cambió en la intención, no solo en los archivos."*
-- [ ] **Validación:** Ver el mapa de calor de "Fog of War" en el dashboard.
+- [ ] **Validación:** Ver el mapa de calor de "Unfamiliar Code" en el dashboard.
 
 ---
 

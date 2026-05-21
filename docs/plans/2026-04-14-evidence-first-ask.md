@@ -29,7 +29,7 @@ Backend today
 Frontend today
 - `frontend/src/pages/AskPage.tsx`
 - Uses `api.agentChat('scout', ...)`, not `api.ask(...)`
-- Still behaves like “project consciousness chat”, not an evidence-first investigation UI.
+- Still behaves like “project project memory chat”, not an evidence-first investigation UI.
 
 Existing tests
 - `tests/test_intelligence_server_api.py::test_ask_endpoint_returns_grounded_answer_with_citations`

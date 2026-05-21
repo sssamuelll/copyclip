@@ -1,4 +1,4 @@
-# Augmented UI Atlas Info Panel
+# Augmented UI Codebase Map Info Panel
 
 **Date:** 2026-04-11
 **Scope:** Atlas3DPage info panel only (top-right detail panel)
@@ -6,7 +6,7 @@
 
 ## Summary
 
-Replace the Atlas3DPage info panel's standard CSS borders and border-radius with augmented-ui geometry, porting the exact clip/notch/round configuration from the developer's personal landing page (sssamuelll/landing-page). The panel uses a hybrid color scheme: cyan augmented borders during hover (reading state), transitioning to purple/orange gradient borders on click (persistent link established state).
+Replace the Codebase Map3DPage info panel's standard CSS borders and border-radius with augmented-ui geometry, porting the exact clip/notch/round configuration from the developer's personal landing page (sssamuelll/landing-page). The panel uses a hybrid color scheme: cyan augmented borders during hover (reading state), transitioning to purple/orange gradient borders on click (persistent link established state).
 
 ## What Changes
 
@@ -84,7 +84,7 @@ Ported directly from the landing page's `.augs` class:
 - Panel position (`absolute`, top-right), width (320px), backdrop-filter blur
 - Panel content layout (label, node name, cognitive debt sub-panel, release-focus hint)
 - All Three.js code, hover/click logic, raycaster, OrbitControls
-- All other Atlas UI elements (title overlay, loading state)
+- All other Codebase Map UI elements (title overlay, loading state)
 - All other pages and components across the dashboard
 
 ## Implementation Notes

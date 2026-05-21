@@ -1,4 +1,4 @@
-# Atlas Code Viewer Panel
+# Codebase Map Code Viewer Panel
 
 **Date:** 2026-04-11
 **Scope:** Atlas3DPage info panel expansion + new backend endpoint
@@ -6,7 +6,7 @@
 
 ## Summary
 
-Expand the augmented-ui info panel in Atlas3DPage to include a code viewer section when a node is selected (persistent link). Uses CodeMirror 5.x for syntax-highlighted, read-only code display with a custom cosmic theme adapted to the Atlas palette. A new `/api/module/source` backend endpoint provides the source files for a given module.
+Expand the augmented-ui info panel in Atlas3DPage to include a code viewer section when a node is selected (persistent link). Uses CodeMirror 5.x for syntax-highlighted, read-only code display with a custom cosmic theme adapted to the Codebase Map palette. A new `/api/module/source` backend endpoint provides the source files for a given module.
 
 ## Decisions Made
 
@@ -15,7 +15,7 @@ Expand the augmented-ui info panel in Atlas3DPage to include a code viewer secti
 | Panel layout | Toggleable split (expand existing panel) | One unified augmented-ui frame, no extra panels |
 | Source endpoint | New `/api/module/source` | Purpose-built, one call with module name |
 | Syntax highlighting | CodeMirror 5.x | Already used on landing page, proven aesthetic |
-| Theme | Custom cosmic (adapted highcontrast-dark) | Matches Atlas cyan/amber palette |
+| Theme | Custom cosmic (adapted highcontrast-dark) | Matches Codebase Map cyan/amber palette |
 | Multi-file handling | File tabs | Focused view per file, easy switching |
 
 ## Backend: `/api/module/source` Endpoint
@@ -134,7 +134,7 @@ CodeMirror(container, {
 
 ### Custom Cosmic Theme (`atlas-cosmic`)
 
-Adapted from highcontrast-dark to match Atlas palette:
+Adapted from highcontrast-dark to match Codebase Map palette:
 
 ```css
 .cm-s-atlas-cosmic { background: transparent; color: #b5b4b6; }
