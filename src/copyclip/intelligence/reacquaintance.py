@@ -14,6 +14,25 @@ from .db import (
     create_reentry_checkpoint,
 )
 from .cognitive_debt import quick_debt_signal
+from .history_briefing import build_mempalace_recap
+
+
+def _get_last_intelligence_visit_iso(conn, project_id: int) -> str | None:
+    """Return the ISO timestamp of the most recent visit to Project Intelligence.
+
+    Any visit_kind counts (dashboard_open, reacquaintance_*, etc.). The recap
+    in the briefing is anchored to "since the last time the user touched
+    intelligence", not just the last Reacquaintance call specifically.
+    """
+    row = conn.execute(
+        """
+        SELECT visited_at FROM project_visits
+        WHERE project_id=?
+        ORDER BY visited_at DESC LIMIT 1
+        """,
+        (project_id,),
+    ).fetchone()
+    return row[0] if row else None
 
 
 def _safe_json(value: str | None, default: Any):
@@ -141,9 +160,10 @@ def build_reacquaintance_briefing(
 
     if not row:
         conn.close()
+        empty_project_name = Path(root).name
         return {
             "meta": {
-                "project": Path(root).name,
+                "project": empty_project_name,
                 "generated_at": _iso_now(),
                 "briefing_version": "v1",
                 "baseline_mode": baseline_mode,
@@ -159,6 +179,11 @@ def build_reacquaintance_briefing(
             "top_risk": None,
             "open_questions": [],
             "evidence_index": [],
+            "external_memory_recap": build_mempalace_recap(
+                project_root=root,
+                project_name=empty_project_name,
+                since_iso=None,
+            ),
             "fallback_notes": ["No project record found yet. Run copyclip analyze first."],
         }
 
@@ -432,6 +457,13 @@ def build_reacquaintance_briefing(
     if not row[2] and not top_changes:
         confidence = "low"
 
+    last_visit_iso = _get_last_intelligence_visit_iso(conn, pid)
+    external_memory_recap = build_mempalace_recap(
+        project_root=root,
+        project_name=project_name,
+        since_iso=last_visit_iso,
+    )
+
     briefing = {
         "meta": {
             "project": project_name,
@@ -450,6 +482,7 @@ def build_reacquaintance_briefing(
         "top_risk": top_risk,
         "open_questions": open_questions,
         "evidence_index": list(evidence_index.values()),
+        "external_memory_recap": external_memory_recap,
         "fallback_notes": fallback_notes,
     }
     conn.close()
