@@ -62,9 +62,30 @@ If `last_seen` is unavailable, fallback order is:
   "top_risk": null,
   "open_questions": [],
   "evidence_index": [],
+  "external_memory_recap": {
+    "available": true,
+    "source_tool": "mempalace",
+    "source_version": "3.3.4",
+    "wing": "copyclip",
+    "since": "2026-04-10T09:12:00Z",
+    "items": [],
+    "notes": []
+  },
   "fallback_notes": []
 }
 ```
+
+### Note on `external_memory_recap`
+
+`external_memory_recap` is an optional, additive field on the v1 contract. It surfaces narrative context that lives outside the repo — decisions, agent sessions, diary entries — sourced from the user's local MemPalace via the `mempalace wake-up --wing <project>` CLI.
+
+The recap is scoped to **what has happened since the last intelligence visit** (any `project_visits` row, not just reacquaintance-specific kinds) so that returning from a context switch surfaces only the unseen material.
+
+Consumers MUST treat the field as optional:
+- `available: false` indicates MemPalace is not installed, returned no data, or errored. Items are empty in that case.
+- `items[*].occurred_at` is best-effort (parsed from refs/body); items without a parseable date are kept rather than filtered, to err toward inclusion.
+- `notes[]` carries human-readable annotations about filtering and source state.
+
 
 ## Section contracts
 

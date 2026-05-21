@@ -1,5 +1,6 @@
 import json
 
+from copyclip.intelligence import history_briefing
 from copyclip.intelligence.db import (
     connect,
     init_schema,
@@ -8,6 +9,37 @@ from copyclip.intelligence.db import (
     create_reentry_checkpoint,
 )
 from copyclip.intelligence.reacquaintance import build_reacquaintance_briefing
+
+
+_SAMPLE_WAKE_UP = """Wake-up text (~120 tokens):
+==================================================
+## L0 — IDENTITY
+No identity configured.
+
+## L1 — ESSENTIAL STORY
+
+[decisions]
+  - Recent decision after baseline  body here  (session-2026-04-14-issue-99)
+  - Older decision before baseline  body here  (session-2026-04-10-issue-50)
+"""
+
+
+def _stub_mempalace_available(monkeypatch, *, stdout: str = _SAMPLE_WAKE_UP, returncode: int = 0):
+    """Force the history_briefing helpers to return a deterministic stdout."""
+    monkeypatch.setattr(history_briefing.shutil, "which", lambda _name: "/usr/local/bin/mempalace")
+
+    class _Completed:
+        def __init__(self, out: str, code: int) -> None:
+            self.stdout = out
+            self.stderr = ""
+            self.returncode = code
+
+    def _runner(cmd, **_kwargs):
+        if "wake-up" in cmd:
+            return _Completed(stdout, returncode)
+        return _Completed("MemPalace 3.3.4", 0)
+
+    monkeypatch.setattr(history_briefing.subprocess, "run", _runner)
 
 
 def _seed_reacquaintance_project(conn, root: str) -> int:
@@ -349,3 +381,48 @@ def test_realistic_context_switch_open_questions_derive_from_unresolved_decision
     for q in questions:
         assert q["derived_from"]
         assert q["next_step"]
+
+
+def test_briefing_includes_external_memory_recap_when_mempalace_available(tmp_path, monkeypatch):
+    _stub_mempalace_available(monkeypatch)
+    root = str(tmp_path)
+    conn = connect(root)
+    init_schema(conn)
+    pid = _seed_reacquaintance_project(conn, root)
+    record_project_visit(conn, pid, visited_at="2026-04-12T12:00:00Z")
+    conn.close()
+
+    briefing = build_reacquaintance_briefing(root, baseline_mode="last_seen")
+    recap = briefing["external_memory_recap"]
+
+    assert recap["available"] is True
+    assert recap["source_tool"] == "mempalace"
+    titles = {item["title"] for item in recap["items"]}
+    assert "Recent decision after baseline" in titles
+    # Item older than the recorded visit (2026-04-12) should be filtered out
+    assert "Older decision before baseline" not in titles
+
+
+def test_briefing_recap_is_unavailable_when_mempalace_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(history_briefing.shutil, "which", lambda _name: None)
+    root = str(tmp_path)
+    conn = connect(root)
+    init_schema(conn)
+    pid = _seed_reacquaintance_project(conn, root)
+    conn.close()
+
+    briefing = build_reacquaintance_briefing(root, baseline_mode="last_seen")
+    recap = briefing["external_memory_recap"]
+
+    assert recap["available"] is False
+    assert recap["items"] == []
+    assert recap["source_tool"] == "mempalace"
+
+
+def test_empty_project_briefing_still_emits_recap_field(tmp_path, monkeypatch):
+    monkeypatch.setattr(history_briefing.shutil, "which", lambda _name: None)
+    # tmp_path has no project row in the DB
+    briefing = build_reacquaintance_briefing(str(tmp_path), baseline_mode="last_seen")
+
+    assert "external_memory_recap" in briefing
+    assert briefing["external_memory_recap"]["available"] is False
