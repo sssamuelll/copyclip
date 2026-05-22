@@ -605,3 +605,212 @@ def test_status_endpoint_returns_runner_status_missing():
     status, body = _get_json(f"http://127.0.0.1:{port}/api/playground/unknown/status")
     assert status == 200
     assert body["status"] == "missing"
+
+
+# ---------------------------------------------------------------------------
+# Security & robustness regression tests
+# (post-review additions; see PR #98 review for context)
+# ---------------------------------------------------------------------------
+
+
+def test_function_ref_rejects_non_identifier_name():
+    with pytest.raises(InvalidFunctionRefError):
+        FunctionRef.from_dict({"file": "src/foo.py", "name": "bar; import os"})
+
+
+def test_function_ref_rejects_qualname_injection():
+    """qualname='x;import os;y.real_method' would otherwise inject `import os`
+    into the generated `from {mod} import x;import os;y` statement."""
+    with pytest.raises(InvalidFunctionRefError):
+        FunctionRef.from_dict(
+            {
+                "file": "src/foo.py",
+                "name": "real_method",
+                "qualname": "x;import os;y.real_method",
+            }
+        )
+
+
+def test_function_ref_rejects_nested_qualname():
+    with pytest.raises(InvalidFunctionRefError):
+        FunctionRef.from_dict(
+            {
+                "file": "src/foo.py",
+                "name": "method_name",
+                "qualname": "Outer.Inner.method_name",
+            }
+        )
+
+
+def test_function_ref_rejects_path_traversal():
+    with pytest.raises(InvalidFunctionRefError):
+        FunctionRef.from_dict({"file": "../../../etc/passwd.py", "name": "bar"})
+
+
+def test_function_ref_rejects_path_traversal_windows_separators():
+    with pytest.raises(InvalidFunctionRefError):
+        FunctionRef.from_dict({"file": "src\\..\\..\\etc.py", "name": "bar"})
+
+
+def test_generate_notebook_sanitizes_newline_in_breadcrumb(tmp_path):
+    """A breadcrumb with a newline must not escape the comment line and run
+    as code on subprocess spawn."""
+    req = PlaygroundLaunchRequest(
+        source="atlas",
+        function_ref=FunctionRef(file="src/copyclip/foo.py", name="bar"),
+        suggested_inputs=[1],
+        breadcrumb="atlas\n    import os; os.system('pwn')",
+    )
+    nb = generate_marimo_notebook(req, str(tmp_path), _make_resolved(), temp_dir=str(tmp_path))
+    content = Path(nb).read_text(encoding="utf-8")
+    ast.parse(content)
+    # The whole payload must collapse to a single `# Breadcrumb:` comment line,
+    # and `os.system` must NOT appear on any non-comment line.
+    breadcrumb_lines = [
+        ln for ln in content.splitlines() if ln.lstrip().startswith("# Breadcrumb:")
+    ]
+    assert len(breadcrumb_lines) == 1
+    assert "os.system" in breadcrumb_lines[0]
+    for line in content.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
+            continue
+        assert "os.system" not in stripped, f"os.system leaked into runnable line: {line!r}"
+
+
+def test_generate_notebook_sanitizes_unicode_line_separator(tmp_path):
+    """U+2028 (line separator) is also a line terminator in some contexts."""
+    req = PlaygroundLaunchRequest(
+        source="atlas",
+        function_ref=FunctionRef(file="src/copyclip/foo.py", name="bar"),
+        suggested_inputs=[1],
+        breadcrumb="atlas import os",
+    )
+    nb = generate_marimo_notebook(req, str(tmp_path), _make_resolved(), temp_dir=str(tmp_path))
+    content = Path(nb).read_text(encoding="utf-8")
+    ast.parse(content)
+    assert " " not in content
+
+
+def test_generate_notebook_truncates_excessive_breadcrumb(tmp_path):
+    req = PlaygroundLaunchRequest(
+        source="atlas",
+        function_ref=FunctionRef(file="src/copyclip/foo.py", name="bar"),
+        suggested_inputs=[1],
+        breadcrumb="x" * 2000,
+    )
+    nb = generate_marimo_notebook(req, str(tmp_path), _make_resolved(), temp_dir=str(tmp_path))
+    content = Path(nb).read_text(encoding="utf-8")
+    ast.parse(content)
+    # Long enough to verify the sanitiser engaged without hard-coding the cap.
+    assert content.count("x") < 1000
+    assert "..." in content
+
+
+def test_resolve_function_ref_rejects_non_importable_module():
+    """Files like 2legit.py or foo-bar.py would otherwise produce an import
+    statement that fails at runtime with a confusing marimo_spawn_failed."""
+    conn = sqlite3.connect(":memory:")
+    init_schema(conn)
+    pid = _seed_project(conn)
+    _seed_symbol(
+        conn, pid, name="bar", kind="function", file_path="src/foo-bar.py", module=None
+    )
+    with pytest.raises(FunctionNotFoundError) as exc:
+        resolve_function_ref(conn, pid, FunctionRef(file="src/foo-bar.py", name="bar"))
+    assert "importable" in str(exc.value).lower()
+
+
+def test_resolve_function_ref_uses_db_file_for_module_fallback():
+    """When the symbols.module column is NULL, the resolver derives the module
+    from the analyzer's canonical file path, not the user-supplied path."""
+    conn = sqlite3.connect(":memory:")
+    init_schema(conn)
+    pid = _seed_project(conn)
+    _seed_symbol(
+        conn, pid, name="bar", kind="function", file_path="src/copyclip/foo.py", module=None
+    )
+    resolved = resolve_function_ref(
+        conn, pid, FunctionRef(file="src/copyclip/foo.py", name="bar")
+    )
+    assert resolved.module == "copyclip.foo"
+
+
+def test_launch_playground_cleans_temp_dir_on_runner_failure(tmp_path):
+    """Failed runner.launch must not leak per-request temp dirs."""
+    conn = sqlite3.connect(":memory:")
+    init_schema(conn)
+    pid = _seed_project(conn)
+    _seed_symbol(conn, pid, name="bar", kind="function", file_path="src/foo.py", module="foo")
+
+    mock_runner = Mock()
+    mock_runner.launch.side_effect = MarimoSpawnError("boom")
+
+    req = PlaygroundLaunchRequest(
+        source="atlas",
+        function_ref=FunctionRef(file="src/foo.py", name="bar"),
+        suggested_inputs=[1],
+        breadcrumb="test",
+    )
+    with pytest.raises(MarimoSpawnError):
+        launch_playground(req, str(tmp_path), conn, pid, mock_runner)
+
+    notebook_path = mock_runner.launch.call_args[0][0]
+    assert not Path(notebook_path).exists(), "temp notebook should be cleaned up"
+    assert not Path(notebook_path).parent.exists(), "temp dir should be cleaned up"
+
+
+def test_launch_endpoint_rejects_malformed_json():
+    """A POST with a non-JSON body must surface as 400 invalid_request, not
+    bubble up as an HTTP 500."""
+    _, port = _start_server_with_runner(Mock())
+
+    body = b"not json at all {{{{"
+    req = request.Request(
+        f"http://127.0.0.1:{port}/api/playground/launch",
+        method="POST",
+        data=body,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with request.urlopen(req, timeout=3) as r:
+            status, payload = r.status, json.loads(r.read().decode("utf-8"))
+    except HTTPError as exc:
+        body_text = exc.read().decode("utf-8")
+        status, payload = exc.code, json.loads(body_text) if body_text else {}
+    assert status == 400
+    assert payload["error"] == "invalid_request"
+
+
+def test_launch_endpoint_rejects_qualname_injection():
+    _, port = _start_server_with_runner(Mock())
+
+    status, body = _post_json(
+        f"http://127.0.0.1:{port}/api/playground/launch",
+        {
+            "source": "atlas",
+            "function_ref": {
+                "file": "src/copyclip/intelligence/reacquaintance.py",
+                "name": "build_reacquaintance_briefing",
+                "qualname": "x;import os;y.build_reacquaintance_briefing",
+            },
+            "breadcrumb": "test",
+        },
+    )
+    assert status == 400
+    assert body["error"] == "invalid_function_ref"
+
+
+def test_launch_endpoint_rejects_path_traversal():
+    _, port = _start_server_with_runner(Mock())
+
+    status, body = _post_json(
+        f"http://127.0.0.1:{port}/api/playground/launch",
+        {
+            "source": "atlas",
+            "function_ref": {"file": "../../../etc/passwd.py", "name": "bar"},
+            "breadcrumb": "test",
+        },
+    )
+    assert status == 400
+    assert body["error"] == "invalid_function_ref"

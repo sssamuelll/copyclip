@@ -104,15 +104,21 @@ def run_server(
 
     # Playground subprocess runner. Tests inject a Mock via the keyword arg.
     # Real implementation lands in src/copyclip/intelligence/marimo_runner.py
-    # (issue #88); until that merges we fall back to a stub that surfaces a
-    # stable JSON error so the endpoint contract and the frontend (#89) stay
-    # exercisable end-to-end.
+    # (issue #88). Contract: that module MUST expose either a class named
+    # `MarimoRunner` instantiable with no args, OR a factory `create_runner()
+    # -> MarimoRunner`. Update this block accordingly when #88 merges. The
+    # StubMarimoRunner is the safety net so endpoint shape and the frontend
+    # (#89) stay exercisable end-to-end until then.
     if playground_runner is None:
         try:
-            from .marimo_runner import MarimoRunner as _RealMarimoRunner  # type: ignore[attr-defined]
-            playground_runner = _RealMarimoRunner()
+            from .marimo_runner import create_runner as _create_runner  # type: ignore[attr-defined]
+            playground_runner = _create_runner()
         except ImportError:
-            playground_runner = StubMarimoRunner()
+            try:
+                from .marimo_runner import MarimoRunner as _RealMarimoRunner  # type: ignore[attr-defined]
+                playground_runner = _RealMarimoRunner()
+            except ImportError:
+                playground_runner = StubMarimoRunner()
 
     def with_meta(payload: dict):
         return add_meta(root, payload)
@@ -1809,6 +1815,13 @@ def run_server(
                 if parsed.path == "/api/playground/launch":
                     try:
                         data = read_json_body(self)
+                    except (json.JSONDecodeError, ValueError) as e:
+                        self._json(
+                            {"error": "invalid_request", "message": f"malformed JSON body: {e}"},
+                            400,
+                        )
+                        return
+                    try:
                         req = PlaygroundLaunchRequest.from_dict(data)
                         response = launch_playground(req, root, conn, pid, playground_runner)
                         self._json(response.to_dict())

@@ -13,11 +13,13 @@ tested in isolation with a mock.
 from __future__ import annotations
 
 import os
+import re
+import shutil
 import sqlite3
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 
 PLAYGROUND_SOURCES = frozenset(
@@ -33,6 +35,36 @@ PLAYGROUND_SOURCES = frozenset(
 )
 
 LAUNCHABLE_SYMBOL_KINDS = frozenset({"function", "method", "class"})
+
+# User-supplied symbol fragments (name, qualname parts, parent class) are
+# substituted directly into the generated Marimo file as Python identifiers.
+# Without validation, `qualname="x;import os;y.method"` would slip into
+# `from {mod} import x;import os;y` and execute on spawn.
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# Cap to keep pathological breadcrumbs from blowing up the template / log files.
+_BREADCRUMB_MAX_LEN = 500
+
+
+def _is_identifier(value: str) -> bool:
+    return bool(_IDENTIFIER_RE.match(value))
+
+
+def _sanitize_for_comment(value: str) -> str:
+    """Make a string safe to embed in a single-line Python ``#`` comment.
+
+    Replaces any non-printable character (including line terminators ``\\n``,
+    ``\\r``, ``U+2028``, ``U+2029``) with a space, and truncates to
+    ``_BREADCRUMB_MAX_LEN``. Without this a breadcrumb of
+    ``"atlas\\n    import os; os.system('pwn')"`` would escape the comment
+    and execute on subprocess spawn.
+    """
+    if not value:
+        return ""
+    cleaned = "".join(c if (c == " " or c.isprintable()) else " " for c in value)
+    if len(cleaned) > _BREADCRUMB_MAX_LEN:
+        cleaned = cleaned[: _BREADCRUMB_MAX_LEN - 3] + "..."
+    return cleaned
 
 
 # ---------------------------------------------------------------------------
@@ -57,19 +89,37 @@ class FunctionRef:
             raise InvalidFunctionRefError("function_ref.file is required")
         if not isinstance(name, str) or not name:
             raise InvalidFunctionRefError("function_ref.name is required")
+        if not _is_identifier(name):
+            raise InvalidFunctionRefError(
+                f"function_ref.name must be a Python identifier, got {name!r}"
+            )
         line = data.get("line")
         if line is not None and not isinstance(line, int):
             raise InvalidFunctionRefError(
                 "function_ref.line must be int when provided"
             )
         qualname = data.get("qualname")
-        if qualname is not None and not isinstance(qualname, str):
-            raise InvalidFunctionRefError(
-                "function_ref.qualname must be str when provided"
-            )
+        if qualname is not None:
+            if not isinstance(qualname, str):
+                raise InvalidFunctionRefError(
+                    "function_ref.qualname must be str when provided"
+                )
+            qparts = qualname.split(".")
+            if len(qparts) > 2:
+                raise InvalidFunctionRefError(
+                    "nested class qualnames (e.g. Outer.Inner.method) are not supported in v1"
+                )
+            if not all(_is_identifier(p) for p in qparts):
+                raise InvalidFunctionRefError(
+                    f"function_ref.qualname segments must be Python identifiers, got {qualname!r}"
+                )
         if _looks_absolute(file) or os.path.isabs(file):
             raise InvalidFunctionRefError(
                 f"function_ref.file must be project-relative, got absolute path: {file!r}"
+            )
+        if ".." in file.replace("\\", "/").split("/"):
+            raise InvalidFunctionRefError(
+                f"function_ref.file must not contain '..' segments, got {file!r}"
             )
         return cls(file=file, name=name, line=line, qualname=qualname)
 
@@ -137,7 +187,9 @@ class MarimoRunner(Protocol):
     def kill(self, playground_id: str) -> bool:
         ...
 
-    def status(self, playground_id: str) -> str:
+    def status(
+        self, playground_id: str
+    ) -> Literal["running", "exited", "missing"]:
         ...
 
 
@@ -248,7 +300,18 @@ def resolve_function_ref(
     db_kind = row[1]
     db_file = row[2]
     db_line = row[3]
-    db_module = row[4] or _module_from_file(ref.file)
+    # Use db_file (canonical from analyzer) for the module fallback so a
+    # mis-cased input path can't poison the import statement.
+    db_module = row[4] or _module_from_file(db_file)
+
+    # The module string is embedded directly in `from {mod} import ...`.
+    # Reject anything that isn't a dotted sequence of identifiers — protects
+    # against files like `2legit.py` or `foo-bar.py` reaching the generator.
+    if not db_module or not all(_is_identifier(seg) for seg in db_module.split(".")):
+        raise FunctionNotFoundError(
+            f"file {ref.file!r} does not map to an importable Python module "
+            f"(derived module: {db_module!r})"
+        )
 
     final_qualname = qualname if parent_class else db_name
     return ResolvedFunction(
@@ -315,9 +378,14 @@ def generate_marimo_notebook(
     notebook_path = os.path.join(td, "playground.py")
     imports_block, exported_symbols, call_expr = _build_symbol_resolution(resolved)
     sample_block = _build_sample_block(req.suggested_inputs, call_expr)
+    # source is already validated against the PLAYGROUND_SOURCES whitelist, but
+    # we sanitize both fields anyway as defense in depth — these end up inside
+    # single-line ``#`` comments.
+    safe_source = _sanitize_for_comment(req.source)
+    safe_breadcrumb = _sanitize_for_comment(req.breadcrumb) or "<unspecified>"
     content = _NOTEBOOK_TEMPLATE.format(
-        source=req.source,
-        breadcrumb=req.breadcrumb or "<unspecified>",
+        source=safe_source,
+        breadcrumb=safe_breadcrumb,
         project_root=os.path.abspath(project_root),
         imports_block=imports_block,
         exported_symbols=exported_symbols,
@@ -389,10 +457,20 @@ def launch_playground(
     pid: int,
     runner: MarimoRunner,
 ) -> PlaygroundLaunchResponse:
-    """Resolve, generate, launch. May raise PlaygroundError subclasses."""
+    """Resolve, generate, launch. May raise PlaygroundError subclasses.
+
+    If the runner fails after the notebook has been written, the temp dir is
+    cleaned up best-effort so we don't leak per-request directories in the
+    common error path. Crash-cleanup of orphans across CopyClip restarts is
+    the runner's responsibility on startup (see spec, "Orphan cleanup").
+    """
     resolved = resolve_function_ref(conn, pid, req.function_ref)
     notebook_path = generate_marimo_notebook(req, project_root, resolved)
-    playground_id, iframe_url = runner.launch(notebook_path)
+    try:
+        playground_id, iframe_url = runner.launch(notebook_path)
+    except Exception:
+        shutil.rmtree(os.path.dirname(notebook_path), ignore_errors=True)
+        raise
     return PlaygroundLaunchResponse(
         playground_id=playground_id,
         iframe_url=iframe_url,
@@ -448,5 +526,7 @@ class StubMarimoRunner:
     def kill(self, playground_id: str) -> bool:
         return False
 
-    def status(self, playground_id: str) -> str:
+    def status(
+        self, playground_id: str
+    ) -> Literal["running", "exited", "missing"]:
         return "missing"
