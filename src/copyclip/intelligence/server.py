@@ -2445,4 +2445,17 @@ def run_server(
         except Exception:
             pass
         server.server_close()
+        # Kill any live Marimo playground subprocesses spawned during this
+        # session. Falls through silently for the Stub runner (no method).
+        kill_all = getattr(playground_runner, "kill_all", None)
+        if callable(kill_all):
+            try:
+                kill_all()
+            except Exception as exc:
+                # Don't crash on the way out; do leave a breadcrumb so a
+                # hung subprocess cleanup is debuggable instead of silently
+                # lost.
+                print(
+                    f"{_c('WARN', '33')} playground_runner.kill_all() failed: {exc!r}"
+                )
         print(f"{_c('OK', '32')} Bye.")
