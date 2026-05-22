@@ -2451,6 +2451,11 @@ def run_server(
         if callable(kill_all):
             try:
                 kill_all()
-            except Exception:
-                pass
+            except Exception as exc:
+                # Don't crash on the way out; do leave a breadcrumb so a
+                # hung subprocess cleanup is debuggable instead of silently
+                # lost.
+                print(
+                    f"{_c('WARN', '33')} playground_runner.kill_all() failed: {exc!r}"
+                )
         print(f"{_c('OK', '32')} Bye.")

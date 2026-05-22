@@ -106,6 +106,8 @@ class _RunningInstance:
     port: int
     process: subprocess.Popen
     temp_dir: str
+    # repr-suppressed: the collector owns a thread + deque whose repr is noise
+    # in tracebacks and adds nothing diagnosable about the instance itself.
     stderr_collector: _StderrCollector = field(repr=False)
 
 
@@ -114,6 +116,10 @@ class MarimoRunner:
 
     def __init__(self) -> None:
         self._instances: dict[str, _RunningInstance] = {}
+        # Slot reservations held during the slow spawn+healthcheck window so
+        # parallel launch() calls can't both pass the cap check while neither
+        # has registered yet. See launch() for the swap-under-lock.
+        self._reservations: set[str] = set()
         self._lock = threading.Lock()
         self._sweep_orphans_on_startup()
 
@@ -122,58 +128,81 @@ class MarimoRunner:
     # ------------------------------------------------------------------
 
     def launch(self, notebook_path: str) -> tuple[str, str]:
+        # Reserve a slot under the lock so two concurrent launches can't both
+        # see len == cap-1 and both register (ThreadingHTTPServer dispatches
+        # each request in its own thread, so this race is reachable).
+        slot_id = uuid.uuid4().hex
         with self._lock:
-            if len(self._instances) >= MAX_CONCURRENT_PLAYGROUNDS:
+            if (
+                len(self._instances) + len(self._reservations)
+                >= MAX_CONCURRENT_PLAYGROUNDS
+            ):
                 raise NoFreePortError(
                     f"max {MAX_CONCURRENT_PLAYGROUNDS} playgrounds already running; "
                     "close one before opening another"
                 )
+            self._reservations.add(slot_id)
 
-        port = self._allocate_port()
-        cmd = [
-            sys.executable,
-            "-m",
-            "marimo",
-            "edit",
-            notebook_path,
-            "--host",
-            "127.0.0.1",
-            "--port",
-            str(port),
-            "--headless",
-            "--no-token",
-        ]
         try:
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
+            port = self._allocate_port()
+            cmd = [
+                sys.executable,
+                "-m",
+                "marimo",
+                "edit",
+                notebook_path,
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+                "--headless",
+                "--no-token",
+            ]
+            try:
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                )
+            except FileNotFoundError as exc:
+                # sys.executable went away; treat as marimo-unavailable.
+                raise MarimoNotInstalledError(
+                    f"python interpreter not found at {sys.executable!r}: {exc}"
+                ) from exc
+
+            collector = _StderrCollector(process.stderr)
+            try:
+                self._wait_for_healthy(process, port, collector)
+            except BaseException:
+                # BaseException (not Exception) so Ctrl-C during a slow boot
+                # still kills the spawned subprocess before propagating —
+                # otherwise the marimo child would outlive its parent. The
+                # tempdir holding playground.py is cleaned by the caller
+                # (launch_playground() in playground.py) on any runner.launch
+                # failure, so we don't rmtree here.
+                self._best_effort_kill(process)
+                raise
+
+            playground_id = uuid.uuid4().hex
+            temp_dir = os.path.dirname(os.path.abspath(notebook_path))
+            instance = _RunningInstance(
+                playground_id=playground_id,
+                port=port,
+                process=process,
+                temp_dir=temp_dir,
+                stderr_collector=collector,
             )
-        except FileNotFoundError as exc:
-            # sys.executable went away; treat as marimo-unavailable.
-            raise MarimoNotInstalledError(
-                f"python interpreter not found at {sys.executable!r}: {exc}"
-            ) from exc
-
-        collector = _StderrCollector(process.stderr)
-        try:
-            self._wait_for_healthy(process, port, collector)
+            # Atomic swap: drop reservation and register instance under one
+            # lock, so the cap accounting (instances + reservations) never
+            # drops below the actual subprocess count.
+            with self._lock:
+                self._reservations.discard(slot_id)
+                self._instances[playground_id] = instance
+            return playground_id, f"http://127.0.0.1:{port}/"
         except BaseException:
-            self._best_effort_kill(process)
+            with self._lock:
+                self._reservations.discard(slot_id)
             raise
-
-        playground_id = uuid.uuid4().hex
-        temp_dir = os.path.dirname(os.path.abspath(notebook_path))
-        instance = _RunningInstance(
-            playground_id=playground_id,
-            port=port,
-            process=process,
-            temp_dir=temp_dir,
-            stderr_collector=collector,
-        )
-        with self._lock:
-            self._instances[playground_id] = instance
-        return playground_id, f"http://127.0.0.1:{port}/"
 
     def kill(self, playground_id: str) -> bool:
         with self._lock:
@@ -197,11 +226,19 @@ class MarimoRunner:
         with self._lock:
             instances = list(self._instances.values())
             self._instances.clear()
+            self._reservations.clear()
         for inst in instances:
             try:
                 self._best_effort_kill(inst.process)
-            except Exception:
-                pass
+            except Exception as exc:
+                # Best-effort: keep going so other instances still get cleaned.
+                # Surface the failure to stderr so a hung _best_effort_kill
+                # leaves a trail instead of vanishing silently.
+                print(
+                    f"WARN: kill_all could not terminate playground "
+                    f"{inst.playground_id} (pid {inst.process.pid}): {exc!r}",
+                    file=sys.stderr,
+                )
             shutil.rmtree(inst.temp_dir, ignore_errors=True)
 
     # ------------------------------------------------------------------
@@ -214,10 +251,14 @@ class MarimoRunner:
             return s.getsockname()[1]
 
     def _probe_url(self, url: str) -> bool:
-        """Return True iff the URL responds with any HTTP status.
+        """Return True iff the URL responds with a non-server-error HTTP status.
 
-        Even 4xx counts as healthy — what we care about is that the
-        subprocess bound the port and the HTTP layer is up.
+        Counts 4xx as healthy on purpose: marimo's editor may redirect or
+        gate the root URL depending on version (200 today, 302 → editor
+        path tomorrow, 404 if a flag changes the default route), but any
+        HTTP response under 500 proves the subprocess bound the port and
+        the HTTP stack is up. 5xx implies marimo is alive but broken —
+        treat as not-yet-healthy so the loop keeps polling until timeout.
         """
         try:
             with urllib.request.urlopen(url, timeout=0.5) as r:
@@ -306,7 +347,14 @@ class MarimoRunner:
         because ``open_files`` requires elevated privileges on Windows and
         is slow on Linux. The marimo subprocess is always spawned with the
         notebook path (which lives inside ``path``) in its argv, so a
-        substring match is sufficient and cheap.
+        substring match over each argument is sufficient and cheap.
+
+        Caveat: substring matching can false-positive — an unrelated tool
+        with the orphan's path in its argv (an editor session, a grep, a
+        `ps -ef | grep ...` invocation) would suppress the sweep. The cost
+        is one extra session of leaked disk; the next sweep cleans it. We
+        accept that vs. paying the price of an exact-arg + python+marimo
+        cmdline shape check in v1.
         """
         target = os.path.normcase(path)
         for proc in psutil.process_iter(["pid", "cmdline"]):

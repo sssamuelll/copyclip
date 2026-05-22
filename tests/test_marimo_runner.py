@@ -347,6 +347,74 @@ def test_concurrency_cap_enforced(monkeypatch, tmp_path):
     r.kill_all()
 
 
+def test_concurrency_cap_enforced_under_parallel_launches(monkeypatch, tmp_path):
+    """The reservation-slot pattern must hold the cap when launches race.
+
+    Without it, ``launch()`` released the lock between the cap check and
+    instance registration, so N concurrent launches could all pass the
+    guard while none had registered yet. This test gates ``Popen`` on a
+    barrier so every thread reaches it under the slot reservation, then
+    releases them simultaneously.
+    """
+    import threading as _t
+
+    spawn_gate = _t.Event()
+    procs: list[_FakeProcess] = []
+    procs_lock = _t.Lock()
+
+    def gated_popen(*args, **kwargs):
+        spawn_gate.wait(timeout=5.0)
+        p = _FakeProcess()
+        with procs_lock:
+            procs.append(p)
+        return p
+
+    monkeypatch.setattr(
+        "copyclip.intelligence.marimo_runner.subprocess.Popen", gated_popen
+    )
+    r = MarimoRunner()
+    monkeypatch.setattr(r, "_probe_url", lambda url: True)
+
+    n_threads = MAX_CONCURRENT_PLAYGROUNDS + 2
+    results: list[str] = []
+    results_lock = _t.Lock()
+
+    def attempt(idx: int) -> None:
+        nb = _make_notebook(tmp_path, f"race{idx}")
+        try:
+            r.launch(nb)
+            with results_lock:
+                results.append("ok")
+        except NoFreePortError:
+            with results_lock:
+                results.append("rejected")
+
+    threads = [
+        _t.Thread(target=attempt, args=(i,)) for i in range(n_threads)
+    ]
+    for t in threads:
+        t.start()
+    # Give every thread time to acquire its slot reservation before any
+    # spawn proceeds. Without this beat, the first thread might complete
+    # before later threads run their cap check.
+    time.sleep(0.1)
+    spawn_gate.set()
+    for t in threads:
+        t.join(timeout=10.0)
+        assert not t.is_alive(), "race-test thread did not finish"
+
+    assert results.count("ok") == MAX_CONCURRENT_PLAYGROUNDS, (
+        f"got {results.count('ok')} successful launches; "
+        f"expected exactly {MAX_CONCURRENT_PLAYGROUNDS}"
+    )
+    assert results.count("rejected") == n_threads - MAX_CONCURRENT_PLAYGROUNDS
+    assert len(r._instances) == MAX_CONCURRENT_PLAYGROUNDS
+    # Reservations must drain after the launches settle, so a follow-up
+    # kill+launch can still admit a new slot.
+    assert r._reservations == set()
+    r.kill_all()
+
+
 # ---------------------------------------------------------------------------
 # Unit tests: orphan sweep on startup
 # ---------------------------------------------------------------------------
