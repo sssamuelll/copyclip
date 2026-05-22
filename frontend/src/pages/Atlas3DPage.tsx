@@ -16,6 +16,12 @@ import type { ArchEdge, ArchNode, FunctionRef, Overview, TreeNode } from '../typ
 // is structural and has no callable entry point. The set is intentionally
 // narrow — broaden in a follow-up PR if symbol-level nodes start exposing
 // Trait/Interface/etc. callables.
+//
+// TODO(#104): Atlas3D's buildFlowData currently emits only structural
+// nodes (Repository/Directory/File/Module/Other), so this filter never
+// matches in the live UI and the playground button stays disabled. The
+// connector activates the moment Function/Method/Class nodes reach
+// FlowData — see issue #104 for the data-layer work that unblocks it.
 const LAUNCHABLE_NODE_TYPES: ReadonlySet<string> = new Set(['Function', 'Method', 'Class'])
 
 // FlowNode.path encodes either a project-relative file path
@@ -1018,15 +1024,21 @@ export function Atlas3DPage() {
   )
 
   const playground = usePlayground()
-  const isLaunchable = selectedNode != null && LAUNCHABLE_NODE_TYPES.has(selectedNode.type)
+  // Carry the narrowed node (or null) explicitly so TS sees a non-null
+  // FlowNode in every branch that consumes it — avoids the
+  // `selectedNode!.name` non-null assertions that the previous shape needed.
+  const launchableSelection =
+    selectedNode != null && LAUNCHABLE_NODE_TYPES.has(selectedNode.type)
+      ? selectedNode
+      : null
   const launchPlayground = useCallback(() => {
-    if (!selectedNode || !LAUNCHABLE_NODE_TYPES.has(selectedNode.type)) return
+    if (!launchableSelection) return
     void playground.launch({
       source: 'atlas',
-      function_ref: buildLaunchableRef(selectedNode),
-      breadcrumb: `Atlas → ${selectedNode.path} → ${selectedNode.name}()`,
+      function_ref: buildLaunchableRef(launchableSelection),
+      breadcrumb: `Atlas → ${launchableSelection.path} → ${launchableSelection.name}()`,
     })
-  }, [selectedNode, playground])
+  }, [launchableSelection, playground])
 
   const toggleNodeType = (type: string) => {
     setVisibleNodeTypes((current) => {
@@ -1054,18 +1066,22 @@ export function Atlas3DPage() {
             type="button"
             className="atlas-flow-pill"
             onClick={launchPlayground}
-            disabled={!isLaunchable}
-            aria-label={isLaunchable ? `Open ${selectedNode!.name} in playground` : 'Open in Playground'}
+            disabled={launchableSelection == null}
+            aria-label={
+              launchableSelection
+                ? `Open ${launchableSelection.name} in playground`
+                : 'Open in Playground'
+            }
             title={
-              isLaunchable
-                ? `Run ${selectedNode!.name}() in a Marimo playground`
+              launchableSelection
+                ? `Run ${launchableSelection.name}() in a Marimo playground`
                 : 'Select a function, method, or class to open in the playground'
             }
             style={{
-              borderColor: isLaunchable ? 'var(--accent-cyan)' : undefined,
-              color: isLaunchable ? 'var(--accent-cyan)' : undefined,
-              cursor: isLaunchable ? 'pointer' : 'not-allowed',
-              opacity: isLaunchable ? 1 : 0.55,
+              borderColor: launchableSelection ? 'var(--accent-cyan)' : undefined,
+              color: launchableSelection ? 'var(--accent-cyan)' : undefined,
+              cursor: launchableSelection ? 'pointer' : 'not-allowed',
+              opacity: launchableSelection ? 1 : 0.55,
             }}
           >
             <span aria-hidden="true">▶</span>&nbsp;Playground
