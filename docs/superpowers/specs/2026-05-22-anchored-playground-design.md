@@ -111,7 +111,7 @@ type PlaygroundLaunchRequest = {
     | "timeline"
     | "context_builder";
   function_ref: {
-    file: string;          // absolute or project-relative path
+    file: string;          // project-relative path from the analyzed project root; absolute paths rejected by the bridge with 400 invalid_function_ref
     name: string;          // function or method name
     line?: number;         // optional, for disambiguation
     qualname?: string;     // optional, e.g. "ClassName.method_name"
@@ -123,8 +123,7 @@ type PlaygroundLaunchRequest = {
 
 type PlaygroundLaunchResponse = {
   playground_id: string;   // uuid, used to DELETE on close
-  iframe_url: string;      // http://localhost:{port}/
-  expires_at: string;      // ISO timestamp, soft TTL hint
+  iframe_url: string;      // http://127.0.0.1:{port}/ (loopback only)
 };
 ```
 
@@ -149,9 +148,9 @@ class PlaygroundLaunchRequest:
 
 ### Endpoints
 
-- `POST /api/playground/launch` — body is `PlaygroundLaunchRequest`, returns `PlaygroundLaunchResponse`. Resolves function, generates Marimo file, spawns subprocess, returns iframe URL.
+- `POST /api/playground/launch` — body is `PlaygroundLaunchRequest`, returns `PlaygroundLaunchResponse`. Resolves function, generates Marimo file, spawns subprocess, **blocks until** `GET http://127.0.0.1:{port}/` returns 200 (10s timeout), then returns the iframe URL. On healthcheck timeout returns `500 marimo_spawn_failed` with `stderr_tail`. The frontend never mounts the iframe before this returns 200.
 - `DELETE /api/playground/{playground_id}` — kills subprocess, cleans temp dir.
-- `GET /api/playground/{playground_id}/status` — optional, for frontend reconnect. Returns `running|exited|missing`.
+- `GET /api/playground/{playground_id}/status` — **required for v1**. Returns `running|exited|missing`. Frontend polls every 5s to detect subprocess death; on `exited` shows the reopen state per the error table.
 
 ### Generated Marimo file template
 
@@ -189,6 +188,19 @@ if __name__ == "__main__":
 
 If `suggested_inputs` is empty, the second cell uses `# TODO: supply input` and does not call the function. Generation must always produce a valid runnable file.
 
+### Symbol resolution rules
+
+The file generator maps `function_ref` to the template placeholders as follows:
+
+| `function_ref` shape | `imports_block` | `exported_symbols` | `call_expr` |
+|---|---|---|---|
+| Plain function (`name="bar"`, no `qualname`) | `from {mod} import bar` | `bar` | `bar(sample)` |
+| Method (`qualname="Foo.method_name"`) | `from {mod} import Foo` | `Foo` | `Foo(...).method_name(sample)` — instance args left as `...` TODO |
+| `@staticmethod` / `@classmethod` (detected from analyzer symbol table) | `from {mod} import Foo` | `Foo` | `Foo.method_name(sample)` |
+| Bare callable in `qualname` (no dot) | as plain function | `name` | `name(sample)` |
+
+`{mod}` is derived from `function_ref.file` by stripping the project root and replacing path separators with dots (e.g. `src/copyclip/foo.py` → `copyclip.foo`, assuming `src/` is on `sys.path` via the auto-loaded cell). If the analyzer cannot determine the method kind, the generator defaults to the instance-method shape.
+
 ## Phases
 
 ### v1 — Day 1 ("minimum lovable")
@@ -202,7 +214,7 @@ Goal: one connector working end-to-end, the bridge contract usable by future con
 | Frontend panel | `PlaygroundPanel.tsx` (iframe shell, cyan chrome, breadcrumb header, close lifecycle) + `usePlayground` hook | ~300 | ✓ |
 | Atlas connector | wire node-click in `Atlas3DPage.tsx` to dispatch a `PlaygroundLaunchRequest` (function/method/class nodes only) | ~150 | sequenced after backend + panel |
 
-**Total day 1 budget: ~1100 LOC across 4 issues**, three parallelizable. With dev agents per [[feedback-kickoff-format]] this is one focused day.
+**Total day 1 budget: ~1100 LOC across 4 issues**, three parallelizable. With dev agents per the kickoff format used in PRs #76–#80 this is one focused day.
 
 ### v2 — Follow-up connectors (one issue each)
 
@@ -212,7 +224,7 @@ Once the contract is set, each new connector is a small surface change (~150 LOC
 2. **Debt Navigator** → playground for functions flagged as cognitive debt
 3. **Decision History** → playground for functions mentioned in a decision
 4. **Risks** → playground for risky functions
-5. **Timeline** → playground for functions at a specific commit
+5. **Timeline** → playground for functions at their current workspace version (historical commit loading deferred to v3 — see open questions)
 6. **Context Builder** → playground as preview before bundling for an agent
 
 ### v3 — Stretch (NOT scheduled, NOT promised)
@@ -221,18 +233,25 @@ Once the contract is set, each new connector is a small surface change (~150 LOC
 - AI-suggested inputs derived from test fixtures
 - Multi-language via Jupyter kernels
 - Kernel pool / pre-warm
+- Historical version loading from git for the Timeline connector (load a function at a specific past commit; v2 Timeline uses current workspace version only)
 
 ## Error handling
 
 | Scenario | Behavior |
 |---|---|
-| Marimo not installed | `POST /launch` returns `503 {"error": "marimo_not_installed", "install_hint": "pip install marimo"}`. Frontend shows an onboarding empty state per [[feedback-ux-errors]] — never a raw error. |
+| Marimo not installed | `POST /launch` returns `503 {"error": "marimo_not_installed", "install_hint": "pip install copyclip[playground]"}`. Frontend shows an onboarding empty state — never a raw error. |
 | Function not found | `404 {"error": "function_not_found", "file": ..., "name": ...}`. Frontend shows "this function was renamed or deleted since the Atlas was last analyzed — run analyze again". |
 | Subprocess fails to start | `500 {"error": "marimo_spawn_failed", "stderr_tail": "..."}`. Frontend shows the stderr tail in a copy-able block. |
 | Port exhausted | `503 {"error": "no_free_port"}`. Suggests closing other playgrounds. |
 | Subprocess dies mid-session | Frontend polls `GET /status`, shows "playground exited" state with reopen button. |
 
 All errors are JSON. No HTML error pages.
+
+## Concurrency and lifecycle
+
+- **Concurrency cap**: maximum 5 concurrent playgrounds per CopyClip process (single constant in `marimo_runner.py`). Beyond the cap, `POST /launch` returns `503 no_free_port` with a suggestion to close other playgrounds. Raise the cap only if real usage demands it.
+- **Termination**: `Popen.terminate()` (POSIX `SIGTERM` / Windows `TerminateProcess`), wait up to 2s, then `Popen.kill()` if still alive. Cross-platform process verification via `psutil`.
+- **Orphan cleanup**: on CopyClip startup, `marimo_runner.py` scans `tempfile.gettempdir()` for `copyclip-playground-*` directories with no live owning process and removes them. Handles the case where CopyClip crashed without firing `DELETE`.
 
 ## Security
 
@@ -247,24 +266,29 @@ Explicit constraints:
 ## Acceptance criteria (epic level)
 
 - [ ] From a function/method/class node in Atlas3D, a single click opens the playground panel with that function imported, dependencies resolved, and one runnable cell pre-populated.
-- [ ] Closing the panel kills the Marimo subprocess (verified via `ps`) within 2 seconds.
+- [ ] Closing the panel kills the Marimo subprocess (verified cross-platform via `psutil`) within 2 seconds.
 - [ ] Adding the second connector (Reacquaintance) requires no changes to `playground.py`, `marimo_runner.py`, or `PlaygroundPanel.tsx`. The diff is < 200 LOC + tests.
 - [ ] The contract document (this spec) accurately describes the wire shape that ships.
-- [ ] All errors are JSON with onboarding-friendly frontend states per [[feedback-ux-errors]].
-- [ ] `marimo` is added as a `dependencies` entry in `pyproject.toml`.
+- [ ] All errors are JSON with onboarding-friendly frontend states (no raw stack traces, ever).
+- [ ] `marimo` is added under `[project.optional-dependencies]` as a `playground` extra in `pyproject.toml` (not a hard dependency; the `marimo_not_installed` error path handles missing installs).
 - [ ] `pytest -q` passes. `scripts/dev-smoke.sh` passes.
 
-## References
+## Conventions referenced
 
-- [[feedback-kickoff-format]] — issue structure for dev agents
-- [[feedback-implementation-style]] — start small, iterate, cyan-only
-- [[feedback-ux-errors]] — onboarding empty states, never crash on missing config
-- [[feedback-cyan-only-contextual]] — neutral data is cyan, alerts can be amber/red
-- [[project-venv-setup]] — `.venv` setup for CopyClip dev work
-- [[feedback-codemirror]] — code rendering convention (used only if we ever surface source-code preview inside the panel chrome)
-- PR #81 — Atlas focus/dim pattern; node-click in Atlas3D already has a selection lifecycle we plug into
-- Issue #15 — Epic format reference
-- Issue #84 — Architecture issue format reference
+These are project-wide working norms that sub-issue PRs should follow. They live in CopyClip's recurring practice rather than a separate doc.
+
+- **Kickoff format** (per PRs #76–#80): explicit identity, locked decisions, numbered steps with code sketches, restrictions, grep-able definition of done, diff budget.
+- **Implementation style**: start small, iterate, cyan-only chrome by default.
+- **UX errors**: onboarding empty states, never crash on missing config, JSON-only errors with copy-able stderr where relevant.
+- **Color discipline**: neutral data is cyan; amber/red reserved for alerts.
+- **Project venv setup**: `.venv` lives at the project root; CopyClip dev work assumes editable install inside it.
+- **Code rendering**: any future source-code preview chrome uses the existing CodeMirror convention.
+
+## Related PRs and issues
+
+- PR #81 — Atlas focus/dim pattern; node-click in Atlas3D already has a selection lifecycle we plug into.
+- Issue #15 — Epic format reference.
+- Issue #84 — Architecture issue format reference.
 
 ## Open questions (resolve before v2 starts)
 
