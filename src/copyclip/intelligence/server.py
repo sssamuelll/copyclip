@@ -29,6 +29,13 @@ from .handoff import (
     update_handoff_packet,
 )
 from .db import connect, init_schema
+from .playground import (
+    MarimoNotInstalledError,
+    PlaygroundError,
+    PlaygroundLaunchRequest,
+    StubMarimoRunner,
+    launch_playground,
+)
 from .reacquaintance import build_reacquaintance_briefing, record_reacquaintance_visit
 from .server_context import ServerContext
 from .server_events import handle_events_get, publish_event as publish_event_impl
@@ -61,7 +68,12 @@ def _project_id(conn: sqlite3.Connection, root: str):
     return project_id(conn, root)
 
 
-def run_server(project_root: str, port: int = 4310) -> None:
+def run_server(
+    project_root: str,
+    port: int = 4310,
+    *,
+    playground_runner=None,
+) -> None:
     root = os.path.abspath(project_root)
 
     events = []
@@ -89,6 +101,24 @@ def run_server(project_root: str, port: int = 4310) -> None:
         cancel_lock=cancel_lock,
         cancel_events=cancel_events,
     )
+
+    # Playground subprocess runner. Tests inject a Mock via the keyword arg.
+    # Real implementation lands in src/copyclip/intelligence/marimo_runner.py
+    # (issue #88). Contract: that module MUST expose either a class named
+    # `MarimoRunner` instantiable with no args, OR a factory `create_runner()
+    # -> MarimoRunner`. Update this block accordingly when #88 merges. The
+    # StubMarimoRunner is the safety net so endpoint shape and the frontend
+    # (#89) stay exercisable end-to-end until then.
+    if playground_runner is None:
+        try:
+            from .marimo_runner import create_runner as _create_runner  # type: ignore[attr-defined]
+            playground_runner = _create_runner()
+        except ImportError:
+            try:
+                from .marimo_runner import MarimoRunner as _RealMarimoRunner  # type: ignore[attr-defined]
+                playground_runner = _RealMarimoRunner()
+            except ImportError:
+                playground_runner = StubMarimoRunner()
 
     def with_meta(payload: dict):
         return add_meta(root, payload)
@@ -352,6 +382,18 @@ def run_server(project_root: str, port: int = 4310) -> None:
             try:
                 init_schema(conn)
                 pid = project_id(conn, root)
+
+                if parsed.path.startswith("/api/playground/") and parsed.path.endswith("/status"):
+                    if not pid:
+                        self._json({"error": "run_analyze_first"}, 400)
+                        return
+                    playground_id = parsed.path[len("/api/playground/"):-len("/status")]
+                    if not playground_id or "/" in playground_id:
+                        self._json({"error": "missing_playground_id"}, 400)
+                        return
+                    status = playground_runner.status(playground_id)
+                    self._json({"status": status, "id": playground_id})
+                    return
 
                 if parsed.path == "/":
                     body = ctx.html.encode("utf-8")
@@ -1730,6 +1772,18 @@ def run_server(project_root: str, port: int = 4310) -> None:
                     self._json({"error": "run_analyze_first"}, 400)
                     return
 
+                if parsed.path.startswith("/api/playground/"):
+                    playground_id = parsed.path[len("/api/playground/"):]
+                    if not playground_id or "/" in playground_id:
+                        self._json({"error": "missing_playground_id"}, 400)
+                        return
+                    ok = playground_runner.kill(playground_id)
+                    if ok:
+                        self._json({"ok": True, "id": playground_id})
+                    else:
+                        self._json({"error": "playground_not_found", "id": playground_id}, 404)
+                    return
+
                 if parsed.path.startswith("/api/alerts/rules/"):
                     try:
                         rule_id = int(parsed.path.rsplit("/", 1)[-1])
@@ -1756,6 +1810,26 @@ def run_server(project_root: str, port: int = 4310) -> None:
                 pid = project_id(conn, root)
                 if not pid:
                     self._json({"error": "run_analyze_first"}, 400)
+                    return
+
+                if parsed.path == "/api/playground/launch":
+                    try:
+                        data = read_json_body(self)
+                    except (json.JSONDecodeError, ValueError) as e:
+                        self._json(
+                            {"error": "invalid_request", "message": f"malformed JSON body: {e}"},
+                            400,
+                        )
+                        return
+                    try:
+                        req = PlaygroundLaunchRequest.from_dict(data)
+                        response = launch_playground(req, root, conn, pid, playground_runner)
+                        self._json(response.to_dict())
+                    except PlaygroundError as e:
+                        payload = {"error": e.error_code, "message": str(e)}
+                        if isinstance(e, MarimoNotInstalledError):
+                            payload["install_hint"] = "pip install copyclip[playground]"
+                        self._json(payload, e.http_status)
                     return
 
                 if parsed.path == "/api/handoff-packets":

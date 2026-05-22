@@ -32,6 +32,9 @@ dev = [
   "pytest>=9.0",
   "pytest-asyncio>=1.0",
 ]
+playground = [
+  "marimo>=0.10",
+]
 
 [project.scripts]
 copyclip = "copyclip.__main__:main"
