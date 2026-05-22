@@ -2,7 +2,7 @@
 
 **Date**: 2026-05-22
 **Status**: Approved for implementation
-**Tracking**: Epic issue (TBD on creation)
+**Tracking**: Epic #86 — child issues #87 (backend), #88 (subprocess), #89 (frontend), #90 (Atlas connector), #91-#96 (follow-up connectors)
 
 ## Why
 
