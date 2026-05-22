@@ -85,7 +85,7 @@ These are decided. Sub-issue PRs do not re-open them.
 | Decision | Choice | Why |
 |---|---|---|
 | Notebook engine | **Marimo** (Apache-2.0) | Reactive model = "change input, see dependent cells re-run" matches the "understand behavior" wedge directly. Pure-Python file format = git-friendly. Less code to write than a Jupyter UI. |
-| Embedding | **iframe** | Fastest path to working UI. Custom UI on top of Marimo's backend is v2 if estheticxz conflicts. |
+| Embedding | **iframe** | Fastest path to working UI. Custom UI on top of Marimo's backend is v2 if aesthetics conflict. |
 | Language | **Python only** in v1 | JS/TS support deferred. Multi-language would require a kernel abstraction we don't need yet. |
 | Process model | **Spawn-on-demand**, one subprocess per launch | No kernel pool. Killed when panel closes. Optimize only if it hurts. |
 | Persistence | **None** in v1 | Each launch is fresh. Saved snippets is a v2 feature. |
@@ -152,6 +152,8 @@ class PlaygroundLaunchRequest:
 - `DELETE /api/playground/{playground_id}` — kills subprocess, cleans temp dir.
 - `GET /api/playground/{playground_id}/status` — **required for v1**. Returns `running|exited|missing`. Frontend polls every 5s to detect subprocess death; on `exited` shows the reopen state per the error table.
 
+All three endpoints inherit the existing `run_analyze_first` guard from `server.py`: if no project record exists yet in the analyzer DB (analyze was never run for this root), they return `400 {"error": "run_analyze_first"}` per the existing convention.
+
 ### Generated Marimo file template
 
 ```python
@@ -186,7 +188,7 @@ if __name__ == "__main__":
     app.run()
 ```
 
-If `suggested_inputs` is empty, the second cell uses `# TODO: supply input` and does not call the function. Generation must always produce a valid runnable file.
+If `suggested_inputs` is empty, the second cell uses `# TODO: supply input` and does not call the function. If `suggested_inputs` contains multiple values, v1 uses the **first value only** (single-call semantics); multi-input cells / parametrized runs are out of scope for v1. Generation must always produce a valid runnable file.
 
 ### Symbol resolution rules
 
@@ -260,7 +262,8 @@ The playground executes code from the user's project, in the user's Python env, 
 Explicit constraints:
 - Subprocess binds to `127.0.0.1` only (never `0.0.0.0`).
 - Subprocess inherits the project venv (`sys.executable` of the CopyClip process by default).
-- Iframe `src` is verified to be `localhost`-only on the frontend.
+- Iframe `src` is verified to be `127.0.0.1`-only on the frontend.
+- Iframe uses `sandbox="allow-scripts allow-same-origin allow-forms"` — enough for Marimo's reactive UI without granting top-level navigation, popups, or downloads.
 - No remote upload of generated notebook content (everything is local).
 
 ## Acceptance criteria (epic level)
@@ -294,4 +297,4 @@ These are project-wide working norms that sub-issue PRs should follow. They live
 
 - **Reanalysis trigger**: if the user edits source code between Atlas analysis and clicking a node, the function ref may be stale. Should the bridge detect and prompt re-analyze? — *Provisional: yes, but only if file mtime > analysis timestamp. Implement in v1.*
 - **Input inference**: how aggressively do we try to generate `suggested_inputs`? Pulling from tests is doable; LLM-suggesting is feature creep. — *v1: pass-through whatever the connector provides. Don't generate. Pull-from-tests is v3.*
-- **Project venv detection**: do we use `sys.executable` of the CopyClip process, or detect a project-local `.venv`? — *v1: `sys.executable`. Project venv detection in v2 if Samuel hits a real case.*
+- **Project venv detection**: do we use `sys.executable` of the CopyClip process, or detect a project-local `.venv`? — *v1: `sys.executable`. This assumes CopyClip is installed editable (`pip install -e .`) inside the project's `.venv`; global installs (pipx, system Python, `uv tool install`) will resolve to the wrong interpreter and the playground will fail to import project modules. Project venv detection (scan for `.venv/bin/python` on POSIX, `.venv\Scripts\python.exe` on Windows) lands in v2 if a real case appears.*
