@@ -17,6 +17,9 @@ import { PlanningPage } from './pages/PlanningPage'
 import { HandoffPage } from './pages/HandoffPage'
 import { DebtNavigatorPage } from './pages/DebtNavigatorPage'
 
+import { PlaygroundPanel } from './components/PlaygroundPanel'
+import { PlaygroundProvider } from './hooks/usePlayground'
+
 import type { ArchEdge, ArchNode, ChangeItem, DecisionItem, Overview, RiskItem } from './types/api'
 
 type Page = 'reacquaintance' | 'ask' | 'handoff' | 'debt-navigator' | 'atlas-3d' | 'timeline' | 'planning' | 'changes' | 'architecture' | 'impact' | 'risks' | 'context-builder' | 'decisions' | 'settings'
@@ -84,46 +87,52 @@ export function App() {
   }
 
   return (
-    <div className="app gen-ui-layout" style={{ display: 'flex', height: '100vh', background: 'var(--bg)', color: 'var(--text-primary)' }}>
-      
-      <Sidebar 
-        page={page} 
-        setPage={(v) => setPage(v as Page)} 
-        lastIndexedText={overview?.meta?.generated_at ? `last indexed ${overview.meta.generated_at.replace('T', ' ').slice(0, 16)}` : 'ready'}
-      />
+    <PlaygroundProvider>
+      <div className="app gen-ui-layout" style={{ display: 'flex', height: '100vh', background: 'var(--bg)', color: 'var(--text-primary)' }}>
 
-      <main style={{ flex: 1, overflowY: 'auto', position: 'relative', display: 'flex', flexDirection: 'column' }}>
-        
-        {/* Top Indicator Persistent */}
-        <div style={{ position: 'absolute', top: 12, right: 24, zIndex: 10, display: 'flex', gap: 12 }}>
-           {error && <span className="badge badge-high">PROJECT MEMORY OFFLINE</span>}
-           <span className="badge badge-low">{PAGE_LABELS[page] ?? page.replace('-', ' ')} field</span>
-        </div>
+        <Sidebar
+          page={page}
+          setPage={(v) => setPage(v as Page)}
+          lastIndexedText={overview?.meta?.generated_at ? `last indexed ${overview.meta.generated_at.replace('T', ' ').slice(0, 16)}` : 'ready'}
+        />
 
-        <div style={{ padding: '24px', flex: 1 }}>
-          {page === 'reacquaintance' && <ReacquaintancePage onOpenDecision={openDecision} onOpenRisk={openRisk} onOpenChanges={openChanges} />}
-          {page === 'ask' && <AskPage onNotify={notify} onOpenDecision={openDecision} onOpenRisk={openRisk} onOpenChanges={openChanges} />}
-          {page === 'handoff' && <HandoffPage onNotify={notify} />}
-          {page === 'debt-navigator' && <DebtNavigatorPage onNotify={notify} />}
-          {page === 'atlas-3d' && <Atlas3DPage />}
-          {page === 'timeline' && <TimelinePage />}
-          {page === 'planning' && <PlanningPage />}
-          {page === 'changes' && <ChangesPage items={changes} risks={risks} focusCommitId={focusCommitId} focusFilePath={focusFilePath} onOpenDecision={openDecision} onOpenRisk={openRisk} />}
-          {page === 'architecture' && <ArchitecturePage nodes={nodes} edges={edges} />}
-          {page === 'impact' && <ImpactSimulatorPage />}
-          {page === 'risks' && <RisksPage items={risks} focusRiskArea={focusRiskArea} />}
-          {page === 'context-builder' && <ContextBuilderPage />}
-          {page === 'decisions' && <DecisionsPage items={decisions} focusDecisionId={focusDecisionId} />}
-          {page === 'settings' && <SettingsPage onNotify={notify} />}
-        </div>
-      </main>
+        <main style={{ flex: 1, overflowY: 'auto', position: 'relative', display: 'flex', flexDirection: 'column' }}>
 
-      {/* Global Toast */}
-      {toast && (
-        <div style={{ position: 'fixed', top: 24, left: '50%', transform: 'translateX(-50%)', background: 'var(--accent-cyan)', color: '#000', borderRadius: 4, padding: '8px 16px', zIndex: 9999, fontWeight: 500 }}>
-          {toast}
-        </div>
-      )}
-    </div>
+          {/* Top Indicator Persistent */}
+          <div style={{ position: 'absolute', top: 12, right: 24, zIndex: 10, display: 'flex', gap: 12 }}>
+             {error && <span className="badge badge-high">PROJECT MEMORY OFFLINE</span>}
+             <span className="badge badge-low">{PAGE_LABELS[page] ?? page.replace('-', ' ')} field</span>
+          </div>
+
+          <div style={{ padding: '24px', flex: 1 }}>
+            {page === 'reacquaintance' && <ReacquaintancePage onOpenDecision={openDecision} onOpenRisk={openRisk} onOpenChanges={openChanges} />}
+            {page === 'ask' && <AskPage onNotify={notify} onOpenDecision={openDecision} onOpenRisk={openRisk} onOpenChanges={openChanges} />}
+            {page === 'handoff' && <HandoffPage onNotify={notify} />}
+            {page === 'debt-navigator' && <DebtNavigatorPage onNotify={notify} />}
+            {page === 'atlas-3d' && <Atlas3DPage />}
+            {page === 'timeline' && <TimelinePage />}
+            {page === 'planning' && <PlanningPage />}
+            {page === 'changes' && <ChangesPage items={changes} risks={risks} focusCommitId={focusCommitId} focusFilePath={focusFilePath} onOpenDecision={openDecision} onOpenRisk={openRisk} />}
+            {page === 'architecture' && <ArchitecturePage nodes={nodes} edges={edges} />}
+            {page === 'impact' && <ImpactSimulatorPage />}
+            {page === 'risks' && <RisksPage items={risks} focusRiskArea={focusRiskArea} />}
+            {page === 'context-builder' && <ContextBuilderPage />}
+            {page === 'decisions' && <DecisionsPage items={decisions} focusDecisionId={focusDecisionId} />}
+            {page === 'settings' && <SettingsPage onNotify={notify} />}
+          </div>
+        </main>
+
+        {/* Global Toast */}
+        {toast && (
+          <div style={{ position: 'fixed', top: 24, left: '50%', transform: 'translateX(-50%)', background: 'var(--accent-cyan)', color: '#000', borderRadius: 4, padding: '8px 16px', zIndex: 9999, fontWeight: 500 }}>
+            {toast}
+          </div>
+        )}
+
+        {/* Global Anchored Playground overlay — surfaces (Atlas, Reacquaintance,
+            Debt, etc.) trigger it via usePlayground().launch(req). */}
+        <PlaygroundPanel />
+      </div>
+    </PlaygroundProvider>
   )
 }

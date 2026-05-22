@@ -725,3 +725,44 @@ export type RemediationPlan = {
   notes: Array<Record<string, unknown>>
 }
 
+export type PlaygroundSource =
+  | 'atlas'
+  | 'reacquaintance'
+  | 'debt_navigator'
+  | 'decisions'
+  | 'risks'
+  | 'timeline'
+  | 'context_builder'
+
+export type FunctionRef = {
+  file: string
+  name: string
+  line?: number
+  qualname?: string
+}
+
+export type PlaygroundLaunchRequest = {
+  source: PlaygroundSource
+  function_ref: FunctionRef
+  deps_hint?: string[]
+  suggested_inputs?: unknown[]
+  breadcrumb: string
+}
+
+export type PlaygroundLaunchResponse = {
+  playground_id: string
+  iframe_url: string
+}
+
+export type PlaygroundStatus = 'running' | 'exited' | 'missing'
+
+// Backend emits { error, message, install_hint? } on PlaygroundError —
+// see src/copyclip/intelligence/server.py around the /api/playground/launch
+// handler. The `error` field is a stable code (e.g. "marimo_not_installed",
+// "function_not_found"), not a free-form message.
+export type PlaygroundErrorPayload = {
+  error: string
+  message?: string
+  install_hint?: string
+}
+
