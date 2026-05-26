@@ -4,7 +4,7 @@
 
 Pick up any project after a week away, after 30 agent PRs, or after a context switch — CopyClip tells you exactly what changed, why it matters, and what you should read first.
 
-Built for solo developers and small teams who work alongside AI agents and need to stay in control of code they didn't write line by line.
+Built first for the author's own daily use, working alongside AI agents on long-lived personal codebases. Lives publicly so others with the same pain can read it, fork it, or learn from how the architecture is shaped — but the author optimizes for his own workflow first, team adoption is not currently in scope.
 
 - Project memory anchored to architectural decisions, not just commits.
 - Surfaces unfamiliar code — what AI wrote that you haven't reviewed.
