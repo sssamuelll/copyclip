@@ -5,6 +5,8 @@ from copyclip.intelligence.analyzer import (
     _complexity_score,
     _is_dependency_impacted,
     _is_test_path,
+    _iter_repo_files,
+    _module_from_relpath,
 )
 from copyclip.intelligence.tree_sitter_parser import (
     CallRef,
@@ -20,6 +22,32 @@ def test_is_test_path_variants():
     assert _is_test_path("src/foo/bar.spec.ts")
     assert _is_test_path("src/foo/bar.test.js")
     assert not _is_test_path("src/foo/bar.ts")
+
+
+def test_iter_repo_files_yields_posix_relpaths(tmp_path):
+    """Regression for #111: every downstream consumer of `rel` assumes POSIX
+    separators. On Windows, `str(Path.relative_to(root))` returns backslashes,
+    which broke `_module_from_relpath`, `_is_test_path`, and the stored
+    `files.path` / `symbols.file_path` columns. `_iter_repo_files` is the
+    single point of normalization, so this test pins the contract there."""
+    (tmp_path / "src" / "copyclip" / "intelligence").mkdir(parents=True)
+    (tmp_path / "src" / "copyclip" / "intelligence" / "server.py").write_text("# x", encoding="utf-8")
+    (tmp_path / "src" / "copyclip" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "tests" / "intelligence").mkdir(parents=True)
+    (tmp_path / "tests" / "intelligence" / "test_server.py").write_text("# y", encoding="utf-8")
+
+    rels = [rel for _p, rel in _iter_repo_files(str(tmp_path))]
+
+    assert rels, "fixture must produce at least one file"
+    for rel in rels:
+        assert "\\" not in rel, f"relpath leaked a backslash: {rel!r}"
+
+    # Sanity: downstream consumers now see real module structure rather than
+    # collapsing to 'root'. Pre-fix, `_module_from_relpath` on a backslash
+    # relpath returned 'root' for every file.
+    by_basename = {rel.rsplit("/", 1)[-1]: rel for rel in rels}
+    assert _module_from_relpath(by_basename["server.py"]) != "root"
+    assert _is_test_path(by_basename["test_server.py"])
 
 
 def test_complexity_score_detects_control_flow():

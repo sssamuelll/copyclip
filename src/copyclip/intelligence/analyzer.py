@@ -196,7 +196,13 @@ def _iter_repo_files(root: str) -> Iterable[Tuple[Path, str]]:
         dirs[:] = [d for d in dirs if d not in ignored_dirs]
         for f in files:
             p = Path(base) / f
-            rel = str(p.relative_to(root))
+            # Always emit POSIX-form separators: every downstream consumer
+            # (`_module_from_relpath`, `_is_test_path`, `cognitive_debt`
+            # markers, the stored `files.path` / `symbols.file_path`
+            # columns, frontend `normalizePath`) assumes `/`. Without this
+            # normalization, Windows `\\` separators collapse the entire
+            # project into a single module='root' (see #111).
+            rel = p.relative_to(root).as_posix()
             yield p, rel
 
 
