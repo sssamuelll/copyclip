@@ -438,13 +438,19 @@ const FlowchartCanvas = forwardRef<FlowHandle, FlowchartCanvasProps>(function Fl
     return next
   }, [roots, childMap])
 
+  // One-shot initialization: when data first becomes non-empty, seed
+  // `expanded` with the auto-expand-on-load policy. Subsequent data growth
+  // (e.g. lazy symbol fetch from #110's Module → Function/Method/Class
+  // expansion) must NOT re-fire this effect — otherwise the Module the
+  // user just clicked gets re-collapsed the moment its symbols arrive,
+  // and the view jumps back to the autoFit baseline.
+  const hasInitializedExpand = useRef(false)
   useEffect(() => {
+    if (hasInitializedExpand.current) return
+    if (data.nodes.length === 0) return
     setExpanded(initialExpanded)
-    setSelectedEdge(null)
-    setHoverEdge(null)
-    setHoverNode(null)
-    autoFitDone.current = false
-  }, [initialExpanded, data.nodes.length, data.links.length])
+    hasInitializedExpand.current = true
+  }, [data.nodes.length, initialExpanded])
 
   const orphanIds = useMemo(
     () => new Set(roots.filter((id) => !(childMap.get(id) || []).some((childId) => nodeMap.has(childId)))),
@@ -1166,8 +1172,21 @@ export function Atlas3DPage() {
   // Carry the narrowed node (or null) explicitly so TS sees a non-null
   // FlowNode in every branch that consumes it — avoids the
   // `selectedNode!.name` non-null assertions that the previous shape needed.
+  //
+  // Python-only gate: Marimo (the playground engine) runs Python in v1. A
+  // selection from a .ts/.tsx/.js file would reach `/api/playground/launch`
+  // with a module like 'frontend/src/pages', fail the importable-module
+  // check in resolve_function_ref (playground.py:310), and surface as a
+  // misleading "function_not_found" dialog. We gate at the source so the
+  // pill stays inert and the tooltip explains why.
+  const isPythonSymbolPath = (path: string) => {
+    const colon = path.indexOf(':')
+    const filePath = colon > 0 ? path.slice(0, colon) : path
+    return filePath.toLowerCase().endsWith('.py')
+  }
+  const isLaunchableType = selectedNode != null && LAUNCHABLE_NODE_TYPES.has(selectedNode.type)
   const launchableSelection =
-    selectedNode != null && LAUNCHABLE_NODE_TYPES.has(selectedNode.type)
+    isLaunchableType && selectedNode != null && isPythonSymbolPath(selectedNode.path)
       ? selectedNode
       : null
   const launchPlayground = useCallback(() => {
@@ -1214,7 +1233,9 @@ export function Atlas3DPage() {
             title={
               launchableSelection
                 ? `Run ${launchableSelection.name}() in a Marimo playground`
-                : 'Select a function, method, or class to open in the playground'
+                : isLaunchableType
+                  ? 'Playground is Python-only in v1 — select a function from a .py file'
+                  : 'Select a function, method, or class to open in the playground'
             }
             style={{
               borderColor: launchableSelection ? 'var(--accent-cyan)' : undefined,
