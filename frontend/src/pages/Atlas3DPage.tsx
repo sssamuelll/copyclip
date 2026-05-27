@@ -53,6 +53,7 @@ const DEFAULT_NODE_COLORS: Record<string, string> = {
   Directory: '#f59e0b',
   File: '#42a5f5',
   Class: '#66bb6a',
+  Method: '#9ccc65',
   Interface: '#26a69a',
   Trait: '#81c784',
   Function: '#ffca28',
@@ -118,6 +119,14 @@ type FlowchartCanvasProps = {
   isDark: boolean
   selectedId: number | null
   onSelectNode: (id: number | null) => void
+  // Modules whose symbol children have not been fetched yet (state ≠ 'loaded').
+  // The expand affordance still renders for these so the user can trigger the
+  // lazy fetch; the label shows `+` (unknown count) instead of `+N`.
+  pendingModuleIds: ReadonlySet<number>
+  // Fired the first time a pending Module is expanded. The page wires this
+  // to a fetch against /api/module/symbols and merges the response into the
+  // data on the next render.
+  onModuleExpand: (moduleNodeId: number, modulePath: string) => void
 }
 
 type FlowEdgeInfo = {
@@ -367,7 +376,7 @@ function buildFlowData(tree: TreeNode | null, archNodes: ArchNode[], archEdges: 
 }
 
 const FlowchartCanvas = forwardRef<FlowHandle, FlowchartCanvasProps>(function FlowchartCanvas(
-  { data, width, height, nodeColors, edgeColors, isDark, selectedId, onSelectNode },
+  { data, width, height, nodeColors, edgeColors, isDark, selectedId, onSelectNode, pendingModuleIds, onModuleExpand },
   ref,
 ) {
   const svgRef = useRef<SVGSVGElement>(null)
@@ -703,15 +712,35 @@ const FlowchartCanvas = forwardRef<FlowHandle, FlowchartCanvasProps>(function Fl
 
   const toggleExpand = useCallback((id: number, event: React.MouseEvent) => {
     event.stopPropagation()
+    // Compute fetch intent BEFORE the updater — setExpanded's updater must
+    // stay pure because React strict mode invokes it twice in development,
+    // and calling onModuleExpand inside would fire the request twice.
+    const wasExpanded = expanded.has(id)
+    const node = nodeMap.get(id)
+    const willTriggerFetch =
+      !wasExpanded && node != null && node.type === 'Module' && pendingModuleIds.has(id)
     setExpanded((current) => {
       const next = new Set(current)
       if (next.has(id)) next.delete(id)
       else next.add(id)
       return next
     })
-  }, [])
+    if (willTriggerFetch && node) {
+      // The button stays as `+` (via the totalChildren === 0 branch below)
+      // until the response merges children into `data`; no spinner — by design
+      // the canvas keeps motion budget for the graph itself, not the node chrome.
+      onModuleExpand(id, node.path)
+    }
+  }, [expanded, nodeMap, pendingModuleIds, onModuleExpand])
 
-  const hasChildren = useCallback((id: number) => (childMap.get(id) || []).some((childId) => nodeMap.has(childId)), [childMap, nodeMap])
+  // Pending Modules still show the expand affordance even though childMap has
+  // no entries for them yet — that's how the user discovers there's something
+  // to fetch.
+  const hasChildren = useCallback(
+    (id: number) =>
+      pendingModuleIds.has(id) || (childMap.get(id) || []).some((childId) => nodeMap.has(childId)),
+    [childMap, nodeMap, pendingModuleIds],
+  )
   const childCount = useCallback((id: number) => (childMap.get(id) || []).filter((childId) => nodeMap.has(childId)).length, [childMap, nodeMap])
 
   return (
@@ -909,7 +938,11 @@ const FlowchartCanvas = forwardRef<FlowHandle, FlowchartCanvasProps>(function Fl
                     fill={color}
                     style={{ pointerEvents: 'none' }}
                   >
-                    {expandedNode ? '−' : `+${totalChildren}`}
+                    {expandedNode
+                      ? '−'
+                      : pendingModuleIds.has(id) && totalChildren === 0
+                        ? '+'
+                        : `+${totalChildren}`}
                   </text>
                 </g>
               )}
@@ -960,6 +993,19 @@ export function Atlas3DPage() {
   const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null)
   const [viewport, setViewport] = useState({ width: 1200, height: 760 })
   const flowRef = useRef<FlowHandle | null>(null)
+  // Per-module symbol cache for the lazy Module → Function/Method/Class expand.
+  // `idle` = fetch in flight, `loaded` = response merged (possibly with zero
+  // symbols). Absence = never requested → pending → shows `+` affordance.
+  const [moduleSymbolStates, setModuleSymbolStates] = useState<Map<number, 'idle' | 'loaded'>>(
+    () => new Map(),
+  )
+  const [moduleSymbolChildren, setModuleSymbolChildren] = useState<Map<number, FlowNode[]>>(
+    () => new Map(),
+  )
+  // Monotonically decreasing counter that hands out unique IDs for fetched
+  // symbol nodes. Negatives never collide with `buildFlowData`'s positive
+  // `nextId` allocation, so the merged FlowData can use plain numeric IDs.
+  const symbolIdCounterRef = useRef(-1)
 
   useEffect(() => {
     let cancelled = false
@@ -1013,14 +1059,107 @@ export function Atlas3DPage() {
     return { nodes: keepNodes, links: keepEdges }
   }, [baseData, searchQuery, visibleNodeTypes])
 
+  // Reset the symbol cache whenever a fresh graph arrives (re-analyze, project
+  // switch). The fetched Function/Method/Class IDs would otherwise dangle.
+  useEffect(() => {
+    setModuleSymbolStates(new Map())
+    setModuleSymbolChildren(new Map())
+    symbolIdCounterRef.current = -1
+  }, [baseData])
+
+  const fetchModuleSymbols = useCallback(
+    async (moduleNodeId: number, modulePath: string) => {
+      if (moduleSymbolStates.has(moduleNodeId)) return
+      const dotted = modulePath.startsWith('module:')
+        ? modulePath.slice('module:'.length)
+        : modulePath
+      if (!dotted) return
+      setModuleSymbolStates((prev) => {
+        const next = new Map(prev)
+        next.set(moduleNodeId, 'idle')
+        return next
+      })
+      try {
+        const response = await api.moduleSymbols(dotted)
+        const symbolNodes: FlowNode[] = []
+        for (const symbol of response.symbols) {
+          const kindCap =
+            symbol.kind.charAt(0).toUpperCase() + symbol.kind.slice(1)
+          if (kindCap !== 'Function' && kindCap !== 'Method' && kindCap !== 'Class') continue
+          symbolNodes.push({
+            id: symbolIdCounterRef.current,
+            name: symbol.name,
+            type: kindCap as FlowNodeType,
+            path: `${symbol.file_path}:${symbol.line_start}`,
+          })
+          symbolIdCounterRef.current -= 1
+        }
+        setModuleSymbolChildren((prev) => {
+          const next = new Map(prev)
+          next.set(moduleNodeId, symbolNodes)
+          return next
+        })
+        setModuleSymbolStates((prev) => {
+          const next = new Map(prev)
+          next.set(moduleNodeId, 'loaded')
+          return next
+        })
+      } catch (err) {
+        // Silent retry per the UX brief: no spinner, no error glyph. Drop the
+        // pending state so the next click re-attempts the fetch.
+        console.error('[atlas] module symbol fetch failed', dotted, err)
+        setModuleSymbolStates((prev) => {
+          const next = new Map(prev)
+          next.delete(moduleNodeId)
+          return next
+        })
+      }
+    },
+    [moduleSymbolStates],
+  )
+
+  const mergedData = useMemo<FlowData>(() => {
+    if (moduleSymbolChildren.size === 0) return filteredData
+    const newNodes = [...filteredData.nodes]
+    const newLinks = [...filteredData.links]
+    const parentIdsInData = new Set(filteredData.nodes.map((node) => node.id))
+    const query = searchQuery.trim().toLowerCase()
+    for (const [moduleId, symbolNodes] of moduleSymbolChildren) {
+      if (!parentIdsInData.has(moduleId)) continue
+      for (const symbolNode of symbolNodes) {
+        if (!visibleNodeTypes.has(symbolNode.type)) continue
+        if (
+          query &&
+          !symbolNode.name.toLowerCase().includes(query) &&
+          !symbolNode.path.toLowerCase().includes(query)
+        ) {
+          continue
+        }
+        newNodes.push(symbolNode)
+        newLinks.push({ source: moduleId, target: symbolNode.id, type: 'CONTAINS' })
+      }
+    }
+    return { nodes: newNodes, links: newLinks }
+  }, [filteredData, moduleSymbolChildren, visibleNodeTypes, searchQuery])
+
+  const pendingModuleIds = useMemo(() => {
+    const ids = new Set<number>()
+    for (const node of mergedData.nodes) {
+      if (node.type === 'Module' && moduleSymbolStates.get(node.id) !== 'loaded') {
+        ids.add(node.id)
+      }
+    }
+    return ids
+  }, [mergedData.nodes, moduleSymbolStates])
+
   useEffect(() => {
     if (selectedNodeId == null) return
-    if (!filteredData.nodes.some((node) => node.id === selectedNodeId)) setSelectedNodeId(null)
-  }, [filteredData.nodes, selectedNodeId])
+    if (!mergedData.nodes.some((node) => node.id === selectedNodeId)) setSelectedNodeId(null)
+  }, [mergedData.nodes, selectedNodeId])
 
   const selectedNode = useMemo(
-    () => filteredData.nodes.find((node) => node.id === selectedNodeId) || null,
-    [filteredData.nodes, selectedNodeId],
+    () => mergedData.nodes.find((node) => node.id === selectedNodeId) || null,
+    [mergedData.nodes, selectedNodeId],
   )
 
   const playground = usePlayground()
@@ -1119,7 +1258,7 @@ export function Atlas3DPage() {
         ) : (
           <FlowchartCanvas
             ref={flowRef}
-            data={filteredData}
+            data={mergedData}
             width={viewport.width}
             height={viewport.height}
             nodeColors={DEFAULT_NODE_COLORS}
@@ -1127,6 +1266,8 @@ export function Atlas3DPage() {
             isDark={isDark}
             selectedId={selectedNodeId}
             onSelectNode={setSelectedNodeId}
+            pendingModuleIds={pendingModuleIds}
+            onModuleExpand={fetchModuleSymbols}
           />
         )}
 
