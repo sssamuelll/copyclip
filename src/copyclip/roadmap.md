@@ -1,4 +1,4 @@
-# 🚀 CopyClip → Strategic Roadmap
+# 🚀 CopyClip → Capability Roadmap
 
 > Note: runtime/package version is currently `v0.4.0`. The milestones below describe product capability progress, not a strict semver changelog.
 
@@ -21,13 +21,13 @@
 
 ---
 
-## 🏆 1.0 Milestones: The "Intent Engine"
+## 🛠️ Long-term capability goals (no launch date)
 - [ ] **VSCode Extension:** Integrated intent-aware handoffs directly in the IDE.
-- [ ] **Semantic Refactor Agent:** Specialized agent that suggests architectural cleanups based on intent drift.
-- [ ] **Multi-Repo Project Memory:** Connect multiple repositories into a single "Corporate Brain" Codebase Map.
+- [ ] **Intent Drift Surface:** Passive detection layer that flags code regions which have drifted from registered architectural decisions. Surfaces the drift to the author for inspection; does NOT propose refactors or trigger agentic action. Refactor decisions stay with the author.
+- [ ] **Multi-Repo Project Memory:** If the author ever needs to navigate multiple repos as a single cognitive surface, connect them. Currently single-repo only.
 - [ ] **Exportable Constraints:** Generate `.copyclip/constraints.json` for external LLM system prompts.
 
 ---
 
 # 🎯 Vision
-Evolve CopyClip into the **Project Mind**—a sentinel that prevents developers from losing ownership of their projects as AI agents generate more code.
+A personal cognitive sentinel for the author — the tool that lets him stay attached to his own codebases as AI agents write more of the code. If others with the same pain eventually find it useful, that's downstream of the author's own daily use working.
