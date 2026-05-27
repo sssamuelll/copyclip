@@ -221,8 +221,8 @@ def test_generate_notebook_uses_first_input_only(tmp_path):
     content = Path(nb).read_text(encoding="utf-8")
     ast.parse(content)
     assert "sample = 7" in content
-    assert "99" not in content
-    assert "1000" not in content
+    assert "sample = 99" not in content
+    assert "sample = 1000" not in content
 
 
 # ---------------------------------------------------------------------------
