@@ -645,6 +645,29 @@ const FlowchartCanvas = forwardRef<FlowHandle, FlowchartCanvasProps>(function Fl
     autoFitDone.current = true
   }, [positions, fitView])
 
+  // Re-arm autoFit when the visible-node set grows significantly. Without
+  // this, expanding a node that adds many children pushes the layout past
+  // the current viewport and the user sees mostly empty canvas — the
+  // "pantalla negra" symptom. Threshold tuned to fire on real expansions
+  // (+5 nodes or +50%) without flickering on every collapse/re-expand.
+  //
+  // Declared AFTER the autoFit effect on purpose: setting `autoFitDone=false`
+  // here lands BEFORE the next commit (the one where setPositions resolves),
+  // so the autoFit effect re-runs with up-to-date positions. If this lived
+  // above autoFit, the same-commit autoFit would fire fitView() against the
+  // STALE positions and immediately set autoFitDone=true, and the real
+  // post-positions commit would skip refit.
+  const prevVisibleSizeRef = useRef(0)
+  useEffect(() => {
+    const prev = prevVisibleSizeRef.current
+    const now = visibleIds.size
+    const grew = now > prev + 5 || (prev > 0 && now > prev * 1.5)
+    if (grew) {
+      autoFitDone.current = false
+    }
+    prevVisibleSizeRef.current = now
+  }, [visibleIds.size])
+
   useImperativeHandle(
     ref,
     () => ({
