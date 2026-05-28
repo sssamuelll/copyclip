@@ -21,6 +21,12 @@ const CARD_STYLE: React.CSSProperties = {
   flexDirection: 'column',
   width: '100%',
   maxWidth: 1200,
+  // `height` is mandatory, not just `maxHeight`. The body iframe uses
+  // `flex: 1` to fill remaining vertical space, but flex:1 collapses to
+  // the iframe's intrinsic height (~150px default) when the parent has
+  // no definite height. Setting height explicitly anchors the flex
+  // calculation; the iframe now fills the card.
+  height: '90vh',
   maxHeight: '90vh',
   overflow: 'hidden',
   color: 'var(--text-primary)',
