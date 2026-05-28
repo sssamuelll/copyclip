@@ -240,6 +240,15 @@ export type ModuleSymbolsResponse = {
   }
 }
 
+export type FileSymbolsResponse = {
+  file: string
+  symbols: SymbolItem[]
+  meta?: {
+    project?: string
+    generated_at?: string
+  }
+}
+
 export type ArchaeologyCommit = {
   sha: string
   author: string

@@ -804,6 +804,40 @@ def run_server(
                     self._json(with_meta({"module": module_name, "symbols": symbols}))
                     return
 
+                if parsed.path == "/api/file/symbols":
+                    # Returns every symbol whose `file_path` matches the
+                    # query. Used by the Atlas3D Codebase Map to lazily
+                    # expand a File node into its Function/Method/Class
+                    # children — the right abstraction (the File you see
+                    # in the map IS where the user expects the callable
+                    # symbols to live, not under a sibling Module).
+                    if not pid:
+                        self._json(with_meta({"file": "", "symbols": []}))
+                        return
+                    q = parse_qs(parsed.query or "")
+                    file_path = (q.get("file", [""])[0] or "").strip()
+                    if not file_path:
+                        self._json(with_meta({"file": "", "symbols": []}))
+                        return
+                    # Normalize separators so callers can pass either form.
+                    file_path = file_path.replace("\\", "/")
+                    rows = conn.execute(
+                        "SELECT name, kind, file_path, line_start, line_end FROM symbols WHERE project_id=? AND file_path=? ORDER BY line_start",
+                        (pid, file_path),
+                    ).fetchall()
+                    symbols = [
+                        {
+                            "name": r[0],
+                            "kind": r[1],
+                            "file_path": r[2],
+                            "line_start": r[3],
+                            "line_end": r[4],
+                        }
+                        for r in rows
+                    ]
+                    self._json(with_meta({"file": file_path, "symbols": symbols}))
+                    return
+
                 if parsed.path == "/api/context-bundle":
                     if not pid:
                         self._json(with_meta({"selected_files": [], "manifest": [], "total_candidates": 0}))

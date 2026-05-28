@@ -770,6 +770,66 @@ def test_alert_scheduler_state_get_and_set():
         assert int(s2["interval_sec"]) >= 15
 
 
+def test_file_symbols_endpoint_returns_filtered_rows():
+    """/api/file/symbols filters the symbols table by file_path. This is the
+    endpoint the Codebase Map's lazy File → Function/Method/Class expand
+    uses; without it, the expand affordance on a File node would have no
+    backing data."""
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        root = Path(td)
+        root_path = str(root.absolute())
+
+        conn = connect(root_path)
+        init_schema(conn)
+        conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root_path, "tmp"))
+        pid = int(
+            conn.execute("SELECT id FROM projects WHERE root_path=?", (root_path,)).fetchone()[0]
+        )
+
+        # Seed two files; only one is the target of the query.
+        for name, kind, fpath, line in [
+            ("foo", "function", "src/copyclip/a.py", 10),
+            ("Bar", "class", "src/copyclip/a.py", 20),
+            ("baz", "method", "src/copyclip/a.py", 25),
+            ("other", "function", "src/copyclip/b.py", 5),
+        ]:
+            conn.execute(
+                "INSERT INTO symbols(project_id,name,kind,file_path,line_start,line_end,parent_symbol_id,module) "
+                "VALUES(?,?,?,?,?,?,?,?)",
+                (pid, name, kind, fpath, line, line + 3, None, "copyclip"),
+            )
+        conn.commit()
+
+        port = _free_port()
+        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
+        th.start()
+        _wait_port(port)
+
+        # Match: 3 symbols from src/copyclip/a.py, ordered by line_start.
+        res = _get_json(f"http://127.0.0.1:{port}/api/file/symbols?file=src/copyclip/a.py")
+        assert res["file"] == "src/copyclip/a.py"
+        names = [s["name"] for s in res["symbols"]]
+        kinds = [s["kind"] for s in res["symbols"]]
+        lines = [s["line_start"] for s in res["symbols"]]
+        assert names == ["foo", "Bar", "baz"]
+        assert kinds == ["function", "class", "method"]
+        assert lines == [10, 20, 25]
+
+        # Backslashes in the query normalize to forward slashes (Windows callers).
+        res2 = _get_json(
+            f"http://127.0.0.1:{port}/api/file/symbols?file=src%5Ccopyclip%5Ca.py"
+        )
+        assert [s["name"] for s in res2["symbols"]] == ["foo", "Bar", "baz"]
+
+        # Empty file parameter returns an empty list (not an error).
+        res3 = _get_json(f"http://127.0.0.1:{port}/api/file/symbols?file=")
+        assert res3["symbols"] == []
+
+        # Unknown file path returns an empty list (not an error).
+        res4 = _get_json(f"http://127.0.0.1:{port}/api/file/symbols?file=does/not/exist.py")
+        assert res4["symbols"] == []
+
+
 def test_analyze_job_start_and_status_endpoints():
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)

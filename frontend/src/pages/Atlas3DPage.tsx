@@ -17,11 +17,9 @@ import type { ArchEdge, ArchNode, FunctionRef, Overview, TreeNode } from '../typ
 // narrow — broaden in a follow-up PR if symbol-level nodes start exposing
 // Trait/Interface/etc. callables.
 //
-// TODO(#104): Atlas3D's buildFlowData currently emits only structural
-// nodes (Repository/Directory/File/Module/Other), so this filter never
-// matches in the live UI and the playground button stays disabled. The
-// connector activates the moment Function/Method/Class nodes reach
-// FlowData — see issue #104 for the data-layer work that unblocks it.
+// Symbol-level nodes (Function/Method/Class) are emitted lazily as
+// children of FILE nodes via the `+` expand affordance — see the
+// `pendingFileIds` / `fetchFileSymbols` pair below.
 const LAUNCHABLE_NODE_TYPES: ReadonlySet<string> = new Set(['Function', 'Method', 'Class'])
 
 // FlowNode.path encodes either a project-relative file path
@@ -119,14 +117,14 @@ type FlowchartCanvasProps = {
   isDark: boolean
   selectedId: number | null
   onSelectNode: (id: number | null) => void
-  // Modules whose symbol children have not been fetched yet (state ≠ 'loaded').
+  // Files whose symbol children have not been fetched yet (state ≠ 'loaded').
   // The expand affordance still renders for these so the user can trigger the
   // lazy fetch; the label shows `+` (unknown count) instead of `+N`.
-  pendingModuleIds: ReadonlySet<number>
-  // Fired the first time a pending Module is expanded. The page wires this
-  // to a fetch against /api/module/symbols and merges the response into the
+  pendingFileIds: ReadonlySet<number>
+  // Fired the first time a pending File is expanded. The page wires this
+  // to a fetch against /api/file/symbols and merges the response into the
   // data on the next render.
-  onModuleExpand: (moduleNodeId: number, modulePath: string) => void
+  onFileExpand: (fileNodeId: number, filePath: string) => void
 }
 
 type FlowEdgeInfo = {
@@ -376,7 +374,7 @@ function buildFlowData(tree: TreeNode | null, archNodes: ArchNode[], archEdges: 
 }
 
 const FlowchartCanvas = forwardRef<FlowHandle, FlowchartCanvasProps>(function FlowchartCanvas(
-  { data, width, height, nodeColors, edgeColors, isDark, selectedId, onSelectNode, pendingModuleIds, onModuleExpand },
+  { data, width, height, nodeColors, edgeColors, isDark, selectedId, onSelectNode, pendingFileIds, onFileExpand },
   ref,
 ) {
   const svgRef = useRef<SVGSVGElement>(null)
@@ -720,11 +718,11 @@ const FlowchartCanvas = forwardRef<FlowHandle, FlowchartCanvasProps>(function Fl
     event.stopPropagation()
     // Compute fetch intent BEFORE the updater — setExpanded's updater must
     // stay pure because React strict mode invokes it twice in development,
-    // and calling onModuleExpand inside would fire the request twice.
+    // and calling onFileExpand inside would fire the request twice.
     const wasExpanded = expanded.has(id)
     const node = nodeMap.get(id)
     const willTriggerFetch =
-      !wasExpanded && node != null && node.type === 'Module' && pendingModuleIds.has(id)
+      !wasExpanded && node != null && node.type === 'File' && pendingFileIds.has(id)
     setExpanded((current) => {
       const next = new Set(current)
       if (next.has(id)) next.delete(id)
@@ -735,17 +733,17 @@ const FlowchartCanvas = forwardRef<FlowHandle, FlowchartCanvasProps>(function Fl
       // The button stays as `+` (via the totalChildren === 0 branch below)
       // until the response merges children into `data`; no spinner — by design
       // the canvas keeps motion budget for the graph itself, not the node chrome.
-      onModuleExpand(id, node.path)
+      onFileExpand(id, node.path)
     }
-  }, [expanded, nodeMap, pendingModuleIds, onModuleExpand])
+  }, [expanded, nodeMap, pendingFileIds, onFileExpand])
 
-  // Pending Modules still show the expand affordance even though childMap has
+  // Pending Files still show the expand affordance even though childMap has
   // no entries for them yet — that's how the user discovers there's something
   // to fetch.
   const hasChildren = useCallback(
     (id: number) =>
-      pendingModuleIds.has(id) || (childMap.get(id) || []).some((childId) => nodeMap.has(childId)),
-    [childMap, nodeMap, pendingModuleIds],
+      pendingFileIds.has(id) || (childMap.get(id) || []).some((childId) => nodeMap.has(childId)),
+    [childMap, nodeMap, pendingFileIds],
   )
   const childCount = useCallback((id: number) => (childMap.get(id) || []).filter((childId) => nodeMap.has(childId)).length, [childMap, nodeMap])
 
@@ -946,7 +944,7 @@ const FlowchartCanvas = forwardRef<FlowHandle, FlowchartCanvasProps>(function Fl
                   >
                     {expandedNode
                       ? '−'
-                      : pendingModuleIds.has(id) && totalChildren === 0
+                      : pendingFileIds.has(id) && totalChildren === 0
                         ? '+'
                         : `+${totalChildren}`}
                   </text>
@@ -999,13 +997,19 @@ export function Atlas3DPage() {
   const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null)
   const [viewport, setViewport] = useState({ width: 1200, height: 760 })
   const flowRef = useRef<FlowHandle | null>(null)
-  // Per-module symbol cache for the lazy Module → Function/Method/Class expand.
+  // Per-file symbol cache for the lazy File → Function/Method/Class expand.
   // `idle` = fetch in flight, `loaded` = response merged (possibly with zero
   // symbols). Absence = never requested → pending → shows `+` affordance.
-  const [moduleSymbolStates, setModuleSymbolStates] = useState<Map<number, 'idle' | 'loaded'>>(
+  //
+  // The expansion hangs off the FILE node (the rectangle the user actually
+  // sees and clicks) rather than the sibling MODULE — the original #110
+  // wiring under Module was correct data-model-wise but unusable in practice
+  // because the Module node was hidden inside collapseLargeSiblingSets
+  // chunks and easy to miss.
+  const [fileSymbolStates, setFileSymbolStates] = useState<Map<number, 'idle' | 'loaded'>>(
     () => new Map(),
   )
-  const [moduleSymbolChildren, setModuleSymbolChildren] = useState<Map<number, FlowNode[]>>(
+  const [fileSymbolChildren, setFileSymbolChildren] = useState<Map<number, FlowNode[]>>(
     () => new Map(),
   )
   // Monotonically decreasing counter that hands out unique IDs for fetched
@@ -1068,25 +1072,22 @@ export function Atlas3DPage() {
   // Reset the symbol cache whenever a fresh graph arrives (re-analyze, project
   // switch). The fetched Function/Method/Class IDs would otherwise dangle.
   useEffect(() => {
-    setModuleSymbolStates(new Map())
-    setModuleSymbolChildren(new Map())
+    setFileSymbolStates(new Map())
+    setFileSymbolChildren(new Map())
     symbolIdCounterRef.current = -1
   }, [baseData])
 
-  const fetchModuleSymbols = useCallback(
-    async (moduleNodeId: number, modulePath: string) => {
-      if (moduleSymbolStates.has(moduleNodeId)) return
-      const dotted = modulePath.startsWith('module:')
-        ? modulePath.slice('module:'.length)
-        : modulePath
-      if (!dotted) return
-      setModuleSymbolStates((prev) => {
+  const fetchFileSymbols = useCallback(
+    async (fileNodeId: number, filePath: string) => {
+      if (fileSymbolStates.has(fileNodeId)) return
+      if (!filePath) return
+      setFileSymbolStates((prev) => {
         const next = new Map(prev)
-        next.set(moduleNodeId, 'idle')
+        next.set(fileNodeId, 'idle')
         return next
       })
       try {
-        const response = await api.moduleSymbols(dotted)
+        const response = await api.fileSymbols(filePath)
         const symbolNodes: FlowNode[] = []
         for (const symbol of response.symbols) {
           const kindCap =
@@ -1100,38 +1101,38 @@ export function Atlas3DPage() {
           })
           symbolIdCounterRef.current -= 1
         }
-        setModuleSymbolChildren((prev) => {
+        setFileSymbolChildren((prev) => {
           const next = new Map(prev)
-          next.set(moduleNodeId, symbolNodes)
+          next.set(fileNodeId, symbolNodes)
           return next
         })
-        setModuleSymbolStates((prev) => {
+        setFileSymbolStates((prev) => {
           const next = new Map(prev)
-          next.set(moduleNodeId, 'loaded')
+          next.set(fileNodeId, 'loaded')
           return next
         })
       } catch (err) {
         // Silent retry per the UX brief: no spinner, no error glyph. Drop the
         // pending state so the next click re-attempts the fetch.
-        console.error('[atlas] module symbol fetch failed', dotted, err)
-        setModuleSymbolStates((prev) => {
+        console.error('[atlas] file symbol fetch failed', filePath, err)
+        setFileSymbolStates((prev) => {
           const next = new Map(prev)
-          next.delete(moduleNodeId)
+          next.delete(fileNodeId)
           return next
         })
       }
     },
-    [moduleSymbolStates],
+    [fileSymbolStates],
   )
 
   const mergedData = useMemo<FlowData>(() => {
-    if (moduleSymbolChildren.size === 0) return filteredData
+    if (fileSymbolChildren.size === 0) return filteredData
     const newNodes = [...filteredData.nodes]
     const newLinks = [...filteredData.links]
     const parentIdsInData = new Set(filteredData.nodes.map((node) => node.id))
     const query = searchQuery.trim().toLowerCase()
-    for (const [moduleId, symbolNodes] of moduleSymbolChildren) {
-      if (!parentIdsInData.has(moduleId)) continue
+    for (const [fileId, symbolNodes] of fileSymbolChildren) {
+      if (!parentIdsInData.has(fileId)) continue
       for (const symbolNode of symbolNodes) {
         if (!visibleNodeTypes.has(symbolNode.type)) continue
         if (
@@ -1142,28 +1143,32 @@ export function Atlas3DPage() {
           continue
         }
         newNodes.push(symbolNode)
-        newLinks.push({ source: moduleId, target: symbolNode.id, type: 'CONTAINS' })
+        newLinks.push({ source: fileId, target: symbolNode.id, type: 'CONTAINS' })
       }
     }
     return { nodes: newNodes, links: newLinks }
-  }, [filteredData, moduleSymbolChildren, visibleNodeTypes, searchQuery])
+  }, [filteredData, fileSymbolChildren, visibleNodeTypes, searchQuery])
 
-  const pendingModuleIds = useMemo(() => {
+  const pendingFileIds = useMemo(() => {
     const ids = new Set<number>()
     for (const node of mergedData.nodes) {
-      if (node.type === 'Module' && moduleSymbolStates.get(node.id) !== 'loaded') {
-        ids.add(node.id)
-      }
+      // Only Python files surface the lazy-symbol affordance — the playground
+      // backend is Python-only in v1 (#114 tracks multi-language). Showing
+      // `+` on a .ts/.tsx File would dangle a useless affordance.
+      if (node.type !== 'File') continue
+      if (fileSymbolStates.get(node.id) === 'loaded') continue
+      if (!node.path.toLowerCase().endsWith('.py')) continue
+      ids.add(node.id)
     }
     return ids
-  }, [mergedData.nodes, moduleSymbolStates])
+  }, [mergedData.nodes, fileSymbolStates])
 
   // Force a fresh `FlowchartCanvas` mount whenever the *structural* inputs
   // change (project re-analyze, search query, or visible-type filter). This
   // resets internal canvas state — expanded set, pan/zoom, hover — so the
   // new tree's roots get the auto-expand-on-load treatment again. Crucially,
-  // it does NOT depend on `moduleSymbolChildren` or `mergedData`, so a lazy
-  // symbol fetch (which only appends children to an existing Module) does
+  // it does NOT depend on `fileSymbolChildren` or `mergedData`, so a lazy
+  // symbol fetch (which only appends children to an existing File) does
   // not trigger a remount and the user's expand stays intact.
   const canvasResetKey = useMemo(
     () =>
@@ -1303,8 +1308,8 @@ export function Atlas3DPage() {
             isDark={isDark}
             selectedId={selectedNodeId}
             onSelectNode={setSelectedNodeId}
-            pendingModuleIds={pendingModuleIds}
-            onModuleExpand={fetchModuleSymbols}
+            pendingFileIds={pendingFileIds}
+            onFileExpand={fetchFileSymbols}
           />
         )}
 
