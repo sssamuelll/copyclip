@@ -176,3 +176,30 @@ def test_git_blame_returns_sha_for_lines(tmp_path):
     out = git_blame(str(tmp_path), "a.txt", line_start=1, line_end=3)
     assert all(len(b["commit"]) >= 7 for b in out["blame"])
     assert len(out["blame"]) == 3
+
+
+def test_git_blame_handles_repeated_sha_with_interleaved_authors(tmp_path):
+    """Regression: porcelain header (author/when) is emitted only on a SHA's
+    FIRST occurrence. Reappearances must still report the original author."""
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "alice@t")
+    _git(tmp_path, "config", "user.name",  "alice")
+    (tmp_path / "a.txt").write_text("line1\nline2\n")
+    _git(tmp_path, "add", "a.txt")
+    _git(tmp_path, "commit", "-m", "alice-init")
+
+    _git(tmp_path, "config", "user.email", "bob@t")
+    _git(tmp_path, "config", "user.name",  "bob")
+    # Insert a Bob-authored line BETWEEN Alice's two lines so the porcelain
+    # output is: alice-sha (full header), bob-sha (full header), alice-sha
+    # (no header - relies on cached metadata).
+    (tmp_path / "a.txt").write_text("line1\nbob-line\nline2\n")
+    _git(tmp_path, "commit", "-am", "bob-insert")
+
+    out = git_blame(str(tmp_path), "a.txt", line_start=1, line_end=3)
+    assert len(out["blame"]) == 3
+    authors = [b["author"] for b in out["blame"]]
+    # Line 1: alice. Line 2: bob. Line 3: alice (the second occurrence - the
+    # bug would report bob here because the parser overwrites current_author
+    # when bob's SHA is seen).
+    assert authors == ["alice", "bob", "alice"], f"got {authors}"

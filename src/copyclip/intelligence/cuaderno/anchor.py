@@ -184,28 +184,33 @@ def git_blame(
     if code != 0:
         return {"error": "git_failed", "detail": err.strip()}
     blame_entries: list[dict[str, Any]] = []
-    current_sha = None
-    current_author = None
-    current_when = None
+    # Git's --porcelain emits the full header (author, author-time, ...) only
+    # the FIRST time a SHA appears. Subsequent occurrences of the same SHA
+    # emit only the SHA-line + `\tcontent`. Cache per-SHA so reappearances
+    # restore the correct author/when.
+    sha_meta: dict[str, dict[str, Optional[str]]] = {}
+    current_sha: Optional[str] = None
     for line in out.splitlines():
         if not line:
             continue
         if line.startswith("\t"):
+            meta = sha_meta.get(current_sha or "", {})
             blame_entries.append(
                 {
                     "commit": (current_sha or "")[:12],
-                    "author": current_author,
-                    "when": current_when,
+                    "author": meta.get("author"),
+                    "when": meta.get("when"),
                 }
             )
             continue
         head = line.split(" ", 1)[0]
         if len(head) == 40 and all(c in "0123456789abcdef" for c in head):
             current_sha = head
-        elif line.startswith("author "):
-            current_author = line[7:]
-        elif line.startswith("author-time "):
-            current_when = line[len("author-time "):]
+            sha_meta.setdefault(current_sha, {"author": None, "when": None})
+        elif line.startswith("author ") and current_sha is not None:
+            sha_meta[current_sha]["author"] = line[7:]
+        elif line.startswith("author-time ") and current_sha is not None:
+            sha_meta[current_sha]["when"] = line[len("author-time "):]
     return {"blame": blame_entries}
 
 
