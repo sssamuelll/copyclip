@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 from pathlib import Path
 from typing import Any, Optional
 
@@ -42,4 +43,51 @@ def read_file(
     return {
         "path": path,
         "lines": [{"n": n, "text": text} for n, text in sliced],
+    }
+
+
+def grep_symbols(
+    conn: sqlite3.Connection,
+    project_id: int,
+    *,
+    name: Optional[str] = None,
+    kind: Optional[str] = None,
+    file: Optional[str] = None,
+    module: Optional[str] = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    where = ["project_id = ?"]
+    params: list[Any] = [project_id]
+    if name:
+        where.append("name = ?")
+        params.append(name)
+    if kind:
+        where.append("kind = ?")
+        params.append(kind)
+    if file:
+        where.append("file_path = ?")
+        params.append(file.replace("\\", "/"))
+    if module:
+        where.append("module = ?")
+        params.append(module)
+    params.append(int(limit))
+
+    sql = (
+        "SELECT name, kind, file_path, line_start, line_end, module "
+        "FROM symbols WHERE " + " AND ".join(where) +
+        " ORDER BY file_path, line_start LIMIT ?"
+    )
+    rows = conn.execute(sql, params).fetchall()
+    return {
+        "symbols": [
+            {
+                "name": r[0],
+                "kind": r[1],
+                "file_path": r[2],
+                "line_start": r[3],
+                "line_end": r[4],
+                "module": r[5],
+            }
+            for r in rows
+        ]
     }
