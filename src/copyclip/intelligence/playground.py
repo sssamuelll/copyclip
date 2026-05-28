@@ -300,9 +300,16 @@ def resolve_function_ref(
     db_kind = row[1]
     db_file = row[2]
     db_line = row[3]
-    # Use db_file (canonical from analyzer) for the module fallback so a
-    # mis-cased input path can't poison the import statement.
-    db_module = row[4] or _module_from_file(db_file)
+    # The analyzer stores `symbols.module` in slash-style ('copyclip/intelligence')
+    # because that's the form the architecture graph and multi-language
+    # consumers want. The playground needs a dotted Python module for
+    # `from {mod} import …`, so derive it from the canonical file path
+    # unconditionally — `_module_from_file('src/copyclip/intelligence/agents.py')`
+    # yields `copyclip.intelligence.agents`. Trusting the DB column here was
+    # the original bug: it produced strings like `copyclip/intelligence` that
+    # failed the dotted-identifier check below and surfaced to the user as
+    # the misleading "function not found in the index" dialog.
+    db_module = _module_from_file(db_file)
 
     # The module string is embedded directly in `from {mod} import ...`.
     # Reject anything that isn't a dotted sequence of identifiers — protects

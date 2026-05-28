@@ -736,6 +736,31 @@ def test_resolve_function_ref_uses_db_file_for_module_fallback():
     assert resolved.module == "copyclip.foo"
 
 
+def test_resolve_function_ref_overrides_slash_style_db_module():
+    """The analyzer stores `symbols.module` in slash-style for the architecture
+    graph (e.g. 'copyclip/intelligence'). Trusting that value here would
+    produce a `from copyclip/intelligence import …` line that fails the
+    dotted-identifier check and surfaces to the user as the misleading
+    'function not found in the index' dialog. The resolver must derive the
+    dotted module from the canonical file path instead of using the DB
+    column."""
+    conn = sqlite3.connect(":memory:")
+    init_schema(conn)
+    pid = _seed_project(conn)
+    _seed_symbol(
+        conn,
+        pid,
+        name="AgentTool",
+        kind="class",
+        file_path="src/copyclip/intelligence/agents.py",
+        module="copyclip/intelligence",  # slash-style as the analyzer stores it
+    )
+    resolved = resolve_function_ref(
+        conn, pid, FunctionRef(file="src/copyclip/intelligence/agents.py", name="AgentTool")
+    )
+    assert resolved.module == "copyclip.intelligence.agents"
+
+
 def test_launch_playground_cleans_temp_dir_on_runner_failure(tmp_path):
     """Failed runner.launch must not leak per-request temp dirs."""
     conn = sqlite3.connect(":memory:")
