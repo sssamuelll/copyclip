@@ -22,6 +22,8 @@ import { PlaygroundProvider } from './hooks/usePlayground'
 
 import type { ArchEdge, ArchNode, ChangeItem, DecisionItem, Overview, RiskItem } from './types/api'
 
+import './styles/cuaderno.css'
+
 type Page = 'reacquaintance' | 'ask' | 'handoff' | 'debt-navigator' | 'atlas-3d' | 'timeline' | 'planning' | 'changes' | 'architecture' | 'impact' | 'risks' | 'context-builder' | 'decisions' | 'settings'
 
 export function App() {
