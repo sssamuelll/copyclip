@@ -372,6 +372,17 @@ def run_server(
 
         threading.Thread(target=_runner, daemon=True).start()
         return job_id
+
+    # Boot-time schema initialization. Ensures all tables (including cuaderno_*)
+    # exist before any HTTP handler runs, so GET/PATCH endpoints don't fail with
+    # "no such table" if hit before the first POST.
+    _boot_conn = connect(root)
+    try:
+        init_schema(_boot_conn)
+        init_cuaderno_schema(_boot_conn)
+    finally:
+        _boot_conn.close()
+
     class Handler(BaseHTTPRequestHandler):
         def _json(self, payload, code=200):
             json_response(self, payload, code=code)
@@ -1891,7 +1902,6 @@ def run_server(
             conn = connect(root)
             try:
                 init_schema(conn)
-                init_cuaderno_schema(conn)
                 pid = project_id(conn, root)
                 if not pid:
                     self._json({"error": "run_analyze_first"}, 400)
