@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import subprocess
 from pathlib import Path
@@ -222,3 +223,26 @@ def git_diff(project_root: str, commit_sha: str, path: Optional[str] = None) -> 
     if code != 0:
         return {"error": "git_failed", "detail": err.strip()}
     return {"diff": out}
+
+
+def find_tests(project_root: str, symbol_name: str) -> dict[str, Any]:
+    """Scan tests/ directory for files mentioning the symbol name."""
+    root = Path(project_root).resolve()
+    tests_dir = root / "tests"
+    if not tests_dir.exists() or not tests_dir.is_dir():
+        return {"tests": []}
+    pattern = re.compile(r"\b" + re.escape(symbol_name) + r"\b")
+    results: list[dict[str, Any]] = []
+    for fp in tests_dir.rglob("*.py"):
+        try:
+            text = fp.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        matches = []
+        for i, line in enumerate(text.splitlines(), start=1):
+            if pattern.search(line):
+                matches.append({"line": i, "text": line.rstrip()})
+        if matches:
+            rel = str(fp.relative_to(root)).replace("\\", "/")
+            results.append({"file_path": rel, "matches": matches[:5]})
+    return {"tests": results}

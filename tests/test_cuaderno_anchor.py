@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 
 from copyclip.intelligence.cuaderno.anchor import (
+    find_tests,
     git_blame,
     git_diff,
     git_log,
@@ -203,3 +204,17 @@ def test_git_blame_handles_repeated_sha_with_interleaved_authors(tmp_path):
     # bug would report bob here because the parser overwrites current_author
     # when bob's SHA is seen).
     assert authors == ["alice", "bob", "alice"], f"got {authors}"
+
+
+def test_find_tests_scans_tests_dir_for_symbol_name(tmp_path):
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_a.py").write_text(
+        "def test_foo_does_x():\n    foo()\n", encoding="utf-8"
+    )
+    (tmp_path / "tests" / "test_b.py").write_text(
+        "def test_bar():\n    pass\n", encoding="utf-8"
+    )
+
+    out = find_tests(str(tmp_path), "foo")
+    assert sorted(t["file_path"] for t in out["tests"]) == ["tests/test_a.py"]
+    assert out["tests"][0]["matches"][0]["line"] >= 1
