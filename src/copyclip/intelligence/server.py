@@ -1623,6 +1623,43 @@ def run_server(
                     handle_settings_get(self, ctx, conn)
                     return
 
+                if parsed.path == "/api/cuaderno/file":
+                    if not pid:
+                        self._json({"error": "no_project"}, 400)
+                        return
+                    q = parse_qs(parsed.query or "")
+                    file_path = (q.get("path", [""])[0] or "").strip()
+                    if not file_path:
+                        self._json({"error": "path_required"}, 400)
+                        return
+                    try:
+                        ls_raw = q.get("line_start", [""])[0]
+                        le_raw = q.get("line_end", [""])[0]
+                        line_start = int(ls_raw) if ls_raw else None
+                        line_end   = int(le_raw) if le_raw else None
+                    except ValueError:
+                        self._json({"error": "invalid_line_range"}, 400)
+                        return
+                    from .cuaderno.anchor import read_file
+                    out = read_file(ctx.root, file_path, line_start, line_end)
+                    if out.get("error"):
+                        status = 404 if out["error"] == "file_not_found" else 400
+                        self._json(out, status)
+                        return
+                    # Best-effort blame for the slice
+                    if line_start and line_end:
+                        from .cuaderno.anchor import git_blame
+                        b = git_blame(ctx.root, file_path, line_start, line_end)
+                        if b.get("blame"):
+                            first = b["blame"][0]
+                            out["blame"] = {
+                                "commit": first.get("commit", ""),
+                                "author": first.get("author", ""),
+                                "when": first.get("when", ""),
+                            }
+                    self._json(out)
+                    return
+
                 if parsed.path.startswith("/api/cuaderno/sessions/"):
                     if not pid:
                         self._json({"error": "no_project"}, 400)
