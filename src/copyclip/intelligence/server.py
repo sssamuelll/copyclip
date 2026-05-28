@@ -2408,6 +2408,47 @@ def run_server(
                     self._json({"ok": True, "decision_id": decision_id, "link_type": link_type, "target_pattern": target_pattern})
                     return
 
+                if parsed.path == "/api/cuaderno/ask":
+                    if not pid:
+                        self._json({"error": "no_project"}, 400)
+                        return
+                    try:
+                        data = json.loads(self.rfile.read(
+                            int(self.headers.get("Content-Length", "0"))
+                        ).decode("utf-8") or "{}")
+                    except json.JSONDecodeError:
+                        self._json({"error": "invalid_request"}, 400)
+                        return
+                    question = (data.get("question") or "").strip()
+                    if not question:
+                        self._json({"error": "question_required"}, 400)
+                        return
+                    session_id = data.get("session_id")
+                    from .cuaderno import compositor as _compositor
+                    from .cuaderno.anthropic_client import AnthropicAdapter
+                    from .cuaderno.persistence import (
+                        create_session, save_question,
+                    )
+                    from .cuaderno.schema import frame_to_dict
+                    if not session_id:
+                        session_id = create_session(conn, project_root=ctx.root)
+                    try:
+                        client = AnthropicAdapter()
+                    except RuntimeError as exc:
+                        self._json({"error": "llm_not_configured", "detail": str(exc)}, 503)
+                        return
+                    frame = _compositor.compose_frame(
+                        client=client, question=question,
+                        project_root=ctx.root, project_id=pid, conn=conn,
+                    )
+                    position = save_question(conn, session_id, question, frame)
+                    self._json({
+                        "session_id": session_id,
+                        "position": position,
+                        "frame": frame_to_dict(frame),
+                    })
+                    return
+
                 self._json({"error": "not_found"}, 404)
             finally:
                 try:
