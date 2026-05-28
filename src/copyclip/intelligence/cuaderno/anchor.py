@@ -91,3 +91,47 @@ def grep_symbols(
             for r in rows
         ]
     }
+
+
+def get_callers(
+    conn: sqlite3.Connection, project_id: int, symbol_name: str
+) -> dict[str, Any]:
+    rows = conn.execute(
+        """
+        SELECT s.name, s.kind, s.file_path, s.line_start
+        FROM symbol_edges e
+        JOIN symbols s_to ON e.to_symbol_id = s_to.id
+        JOIN symbols s    ON e.from_symbol_id = s.id
+        WHERE e.project_id=? AND s_to.name=? AND e.edge_type='calls'
+        ORDER BY s.file_path, s.line_start
+        """,
+        (project_id, symbol_name),
+    ).fetchall()
+    return {
+        "callers": [
+            {"name": r[0], "kind": r[1], "file_path": r[2], "line_start": r[3]}
+            for r in rows
+        ]
+    }
+
+
+def get_callees(
+    conn: sqlite3.Connection, project_id: int, symbol_name: str
+) -> dict[str, Any]:
+    rows = conn.execute(
+        """
+        SELECT s.name, s.kind, s.file_path, s.line_start
+        FROM symbol_edges e
+        JOIN symbols s_from ON e.from_symbol_id = s_from.id
+        JOIN symbols s      ON e.to_symbol_id = s.id
+        WHERE e.project_id=? AND s_from.name=? AND e.edge_type='calls'
+        ORDER BY s.file_path, s.line_start
+        """,
+        (project_id, symbol_name),
+    ).fetchall()
+    return {
+        "callees": [
+            {"name": r[0], "kind": r[1], "file_path": r[2], "line_start": r[3]}
+            for r in rows
+        ]
+    }

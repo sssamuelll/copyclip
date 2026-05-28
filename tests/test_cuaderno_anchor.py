@@ -90,3 +90,49 @@ def test_grep_symbols_limit(tmp_path):
 
     out = grep_symbols(conn, pid, limit=5)
     assert len(out["symbols"]) == 5
+
+
+from copyclip.intelligence.cuaderno.anchor import get_callers, get_callees
+
+
+def _seed_edges(conn, pid, edges):
+    """edges: list of (caller_name, callee_name, kind)"""
+    name_to_id = {}
+    for name, kind in {(e[0], "function") for e in edges} | {(e[1], "function") for e in edges}:
+        if name not in name_to_id:
+            cur = conn.execute(
+                "INSERT INTO symbols(project_id,name,kind,file_path,line_start,line_end,parent_symbol_id,module) "
+                "VALUES(?,?,?,?,?,?,?,?)",
+                (pid, name, kind, f"src/{name}.py", 1, 5, None, "x"),
+            )
+            name_to_id[name] = cur.lastrowid
+    for caller, callee, edge_kind in edges:
+        conn.execute(
+            "INSERT INTO symbol_edges(project_id,from_symbol_id,to_symbol_id,edge_type) "
+            "VALUES(?,?,?,?)",
+            (pid, name_to_id[caller], name_to_id[callee], edge_kind),
+        )
+    conn.commit()
+    return name_to_id
+
+
+def test_get_callers_returns_call_sites(tmp_path):
+    conn = sqlite3.connect(":memory:")
+    init_schema(conn)
+    conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (str(tmp_path), "t"))
+    pid = int(conn.execute("SELECT id FROM projects").fetchone()[0])
+    _seed_edges(conn, pid, [("foo", "bar", "calls"), ("baz", "bar", "calls")])
+
+    out = get_callers(conn, pid, "bar")
+    assert sorted(c["name"] for c in out["callers"]) == ["baz", "foo"]
+
+
+def test_get_callees_returns_outgoing_calls(tmp_path):
+    conn = sqlite3.connect(":memory:")
+    init_schema(conn)
+    conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (str(tmp_path), "t"))
+    pid = int(conn.execute("SELECT id FROM projects").fetchone()[0])
+    _seed_edges(conn, pid, [("foo", "bar", "calls"), ("foo", "baz", "calls")])
+
+    out = get_callees(conn, pid, "foo")
+    assert sorted(c["name"] for c in out["callees"]) == ["bar", "baz"]
