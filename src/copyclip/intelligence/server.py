@@ -1623,6 +1623,27 @@ def run_server(
                     handle_settings_get(self, ctx, conn)
                     return
 
+                if parsed.path.startswith("/api/cuaderno/sessions/"):
+                    if not pid:
+                        self._json({"error": "no_project"}, 400)
+                        return
+                    sid = parsed.path[len("/api/cuaderno/sessions/"):]
+                    if not sid:
+                        self._json({"error": "session_id_required"}, 400)
+                        return
+                    from .cuaderno.persistence import list_questions
+                    questions = list_questions(conn, sid)
+                    if not questions:
+                        # session does not exist OR has no questions yet
+                        row = conn.execute(
+                            "SELECT id FROM cuaderno_sessions WHERE id=?", (sid,),
+                        ).fetchone()
+                        if not row:
+                            self._json({"error": "session_not_found"}, 404)
+                            return
+                    self._json({"session_id": sid, "questions": questions})
+                    return
+
                 self._json({"error": "not_found"}, 404)
             finally:
                 try:

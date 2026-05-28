@@ -100,3 +100,34 @@ def test_post_ask_rejects_missing_question():
         assert e.code == 400
         body = json.loads(e.read().decode("utf-8"))
         assert body["error"] == "question_required"
+
+
+def _get_json(url):
+    with request.urlopen(url, timeout=5) as r:
+        return r.status, json.loads(r.read().decode("utf-8"))
+
+
+def test_get_session_returns_questions_in_order():
+    root, port = _setup_server()
+    stub_frame_1 = Frame(question="q1", blocks=[Block.lead("a")])
+    stub_frame_2 = Frame(question="q2", blocks=[Block.lead("b")])
+    responses = [stub_frame_1, stub_frame_2]
+
+    def fake_compose_frame(**kwargs):
+        return responses.pop(0)
+
+    with patch(
+        "copyclip.intelligence.cuaderno.compositor.compose_frame",
+        side_effect=fake_compose_frame,
+    ):
+        _, b1 = _post_json(f"http://127.0.0.1:{port}/api/cuaderno/ask",
+                           {"question": "q1"})
+        sid = b1["session_id"]
+        _post_json(f"http://127.0.0.1:{port}/api/cuaderno/ask",
+                   {"question": "q2", "session_id": sid})
+
+    status, body = _get_json(f"http://127.0.0.1:{port}/api/cuaderno/sessions/{sid}")
+    assert status == 200
+    assert body["session_id"] == sid
+    assert [q["question"] for q in body["questions"]] == ["q1", "q2"]
+    assert [q["position"] for q in body["questions"]] == [1, 2]
