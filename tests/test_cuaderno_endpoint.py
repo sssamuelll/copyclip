@@ -131,3 +131,34 @@ def test_get_session_returns_questions_in_order():
     assert body["session_id"] == sid
     assert [q["question"] for q in body["questions"]] == ["q1", "q2"]
     assert [q["position"] for q in body["questions"]] == [1, 2]
+
+
+def _patch_json(url, payload):
+    data = json.dumps(payload).encode("utf-8")
+    req = request.Request(url, method="PATCH", data=data,
+                          headers={"Content-Type": "application/json"})
+    with request.urlopen(req, timeout=5) as r:
+        return r.status, json.loads(r.read().decode("utf-8"))
+
+
+def test_patch_bookmark_and_gotit():
+    root, port = _setup_server()
+    stub_frame = Frame(question="q1", blocks=[Block.lead("hi")])
+    with patch(
+        "copyclip.intelligence.cuaderno.compositor.compose_frame",
+        return_value=stub_frame,
+    ):
+        _, b = _post_json(f"http://127.0.0.1:{port}/api/cuaderno/ask",
+                          {"question": "q1"})
+    sid = b["session_id"]
+
+    status, _ = _patch_json(
+        f"http://127.0.0.1:{port}/api/cuaderno/sessions/{sid}/questions/1",
+        {"bookmarked": True, "got_it": "got"},
+    )
+    assert status == 200
+
+    _, session = _get_json(f"http://127.0.0.1:{port}/api/cuaderno/sessions/{sid}")
+    q1 = session["questions"][0]
+    assert q1["bookmarked"] is True
+    assert q1["got_it"] == "got"

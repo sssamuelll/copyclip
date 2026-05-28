@@ -1657,6 +1657,32 @@ def run_server(
             try:
                 init_schema(conn)
                 pid = project_id(conn, root)
+
+                import re as _re
+                _m = _re.match(
+                    r"^/api/cuaderno/sessions/([^/]+)/questions/(\d+)$",
+                    parsed.path,
+                )
+                if _m:
+                    if not pid:
+                        self._json({"error": "no_project"}, 400)
+                        return
+                    sid, pos = _m.group(1), int(_m.group(2))
+                    try:
+                        data = json.loads(self.rfile.read(
+                            int(self.headers.get("Content-Length", "0"))
+                        ).decode("utf-8") or "{}")
+                    except json.JSONDecodeError:
+                        self._json({"error": "invalid_request"}, 400)
+                        return
+                    from .cuaderno.persistence import set_bookmark, set_got_it
+                    if "bookmarked" in data:
+                        set_bookmark(conn, sid, pos, bool(data["bookmarked"]))
+                    if "got_it" in data:
+                        set_got_it(conn, sid, pos, data["got_it"])
+                    self._json({"ok": True})
+                    return
+
                 if not pid:
                     self._json({"error": "run_analyze_first"}, 400)
                     return
