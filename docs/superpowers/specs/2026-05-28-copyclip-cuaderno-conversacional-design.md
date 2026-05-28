@@ -4,6 +4,7 @@
 **Status:** Approved for implementation planning
 **Supersedes:** [Anchored Playground v1 design](2026-05-22-anchored-playground-design.md) (the v1 surface becomes evidence; v2 reformulates the question)
 **Tracking:** to be opened as a new epic; v1 sub-PRs (#98, #99, #102, #103, #110, #113, #115) remain in git history as evidence of the question that was being formulated before it was named.
+**Visual + interaction design (canonical):** [`./2026-05-28-cuaderno-prototype/`](./2026-05-28-cuaderno-prototype/) — open `CopyClip Cuaderno.html` in a browser. Hi-fi interactive prototype with 5 scenes, 4 overlays, 5 visual variations, and a Tweaks panel for live retheming. The prototype is the source of truth for **how it looks and feels**; this spec is the source of truth for **what it is and what's in/out of scope**.
 
 ---
 
@@ -68,12 +69,16 @@ The conversational cuaderno is **designed to be the home of CopyClip**. Phase 1 
 └────────────────────────────────────────────────────────────────┘
 ```
 
-Surface principles:
+Surface principles (concrete shape locked in the prototype):
 
-- **Conversational input** at the bottom. Question enters in natural language.
-- **Active educational frame** at top. The LLM-designed response. Content is ad-hoc — the LLM composes text + executable code blocks + widgets according to what the question needs.
-- **No visible history by default**. The session is saved in the background; the user can invoke it ("show me earlier questions", "go back to the frame from 3 questions ago") but the default view is **one active frame**, not a queue.
-- **No sidebar of old pages**. Codebase Map, Reacquaintance, Debt Navigator stop existing as primary pages. The LLM invokes them as widgets inside the frame when applicable. They remain accessible via explicit commands (`/codebase-map`, etc.) as debug tools — not as home.
+- **Top crumb** — `copyclip · cuaderno · ~/code/copyclip · session 14`, plus a **question number** (`01 · q`, `02 · q`…) that increments like notebook page numbers. Hamburger `≡` opens session history.
+- **Question echo** at the top of every non-empty frame: `you asked · …`. The LLM's frame always shows what it's answering.
+- **Active educational frame** mid-page. Content is ad-hoc — the LLM composes serif body text + cited code blocks + visual widget glimpses (graph subset / sequence / callers tree even in Phase 1, see *Phasing* below).
+- **"I got this / I didn't" markers** below the frame. `✓ I got this` (slate-teal accent-2) saves to *"this matters"*; `↻ I didn't` requests a re-explanation or follow-up. Sparing usage by design — they read as a different gesture than asking another question.
+- **Conversational input** at the bottom (the *composer*) — italic prompt, sienna `›` prefix, pill shape, soft shadow, bottom-anchored, never scrolls.
+- **No visible history by default**. The session is saved in the background. The `≡` button opens a session-history overlay (bookmarkable Qs, active Q highlighted, ESC closes).
+- **Side panel for citations** — clicking any `▸ path:lines` chip opens a side panel with the file rendered with line numbers, the cited range highlighted, and a blame footer (`commit · author · date`). Clicking `▸ commit <sha>` opens a diff view variant of the same panel. ESC closes.
+- **No sidebar of old pages**. Codebase Map, Reacquaintance, Debt Navigator stop existing as primary pages. They remain accessible via explicit commands (`/codebase-map`, etc.) as debug tools — not as home.
 
 Access:
 
@@ -81,6 +86,18 @@ Access:
 - Opening CopyClip → user sees the cuaderno ready to receive their first question. If there is a previous session, the cuaderno resumes it. If it is the user's first time in the project, the cuaderno offers an overview (asking first what interests them).
 
 The session **is** the user's note. There is no separate note layer. Conversation + frames + bookmarks ("this matters") together form the artifact.
+
+### Visual system (locked in the prototype)
+
+Editorial notebook. Warm paper, serif headlines, sienna ink for citations, generous whitespace. *The frame is the page; the input is the pen.*
+
+- **Fonts** — `Newsreader` (display, italic optical sizing — lead lines, follow-up buttons, question echo) · `Source Serif 4` (body — long-form prose) · `JetBrains Mono` (code, citations, file paths, tool calls) · `Inter` (chrome, small caps, kickers — rare).
+- **Light palette** — paper `#FAF6EC`, surface `#F1EADC`, ink `#1B1814`, ink-3 `#79716A`, sienna `oklch(0.56 0.13 45)` (primary accent — citations, prefix, active markers), accent-2 `oklch(0.52 0.10 200)` slate-teal (sparing complementary, `got it / didn't` only).
+- **Dark theme** — same structure inverted; full token table in [`./2026-05-28-cuaderno-prototype/styles.css`](./2026-05-28-cuaderno-prototype/styles.css).
+- **Density variations** — compact / regular / comfy (regular is default; Tweaks panel switches live for review).
+- **Motion** — frame swap default is `soft fade-up` (honors "continuous state" while telegraphing the mutation). Alternatives in Tweaks: `cut` (hard) or `slide-up`.
+- **Tool calls visualization** — default `stream-then-collapse` (visible while streaming, collapsed once the frame settles). Alternatives in Tweaks: `never` or `always`.
+- **Variations to consider before lock-in** — `ink-blue` and `forest` accents (alternatives to sienna). Decision deferred; pick during Phase 1 implementation against real usage.
 
 ---
 
@@ -143,40 +160,50 @@ Phasing is by **structural dependency, not by feature recortado**. Each phase de
 
 ### Phase 1 — Wedge probe
 
-Primitives in the frame:
+Primitives in the frame (matching the prototype scenes A / B / C):
 
-- **Explanatory text** (markdown render)
-- **Code blocks** (not executable yet — syntactic display, with citation to the path:lines they come from)
-- **Citation chips** — `▸ src/foo.py:152-164` — clickable, open file in side panel (read-only)
-- **Suggested follow-up questions** — clickable buttons that turn into the next user question
+- **Explanatory text** — serif body, lead line in italic display font
+- **Code blocks** — syntactic display, no execution yet, citation chip attached
+- **Citation chips** — `▸ src/foo.py:152-164` — clickable, open file in side panel with line numbers + highlight + blame footer
+- **Suggested follow-up questions** — `↳ go deeper` buttons; clicking them turns into the next user question (frame mutates)
+- **Visual widget glimpses** (display-only in Phase 1, interactive in Phase 2):
+  - `graph_subset` — small inline graph showing the seam of the answer (e.g. analyzer → DB ← playground)
+  - `sequence_diagram` — actor lanes with directional steps when the answer is a flow
+  - `callers_tree` — root symbol + caller list when the answer is about a function's reach
+- **Mid-stream view** — tool calls are visible while running (`✓ done · 64ms`, `◐ running…`, `· queued`), partial text streams below; once the frame settles, tool calls collapse.
+- **"I got this / I didn't" markers** — under every settled frame.
+- **Citation side panel + session history overlay** — both ship in Phase 1 (the prototype shows the canonical interaction).
 
 What the LLM **does** in Phase 1:
 
-- Receives user question
-- Decides which files / symbols / commits it needs to read
+- Receives the question
+- Decides which files / symbols / commits / call sites it needs
 - Reads them via the Anchor System (multiple tool call rounds allowed, bounded)
-- Composes a structured response: alternation of text + cited code blocks + sub-questions
-- Renders in the frame
+- Composes a structured response: lead line + alternation of text + cited code + glimpse widgets + follow-up suggestions
+- Renders in the frame; the frame swaps with `soft fade-up`
 
 What is NOT in Phase 1:
 
-- Executable code blocks (requires mock generation; Phase 2)
-- Map / sequence diagram / diff viewer widgets (Phase 2)
+- **Executable** code blocks (requires mock generation; Phase 2)
+- **Interactive** widgets — Phase 1 widgets are display-only static SVG/HTML; Phase 2 makes them zoomable / clickable / live-bound to LLM state
+- AI-generated mocks for executable blocks (Phase 2)
 - Cuaderno replacing home (Phase 3 — only after 1 + 2 validate)
 
-**Hypothesis to validate in Phase 1:** can the LLM in tutor posture, anchored to real code, produce explanations that effectively teach? If yes, continue. If no, the v2 wedge is wrong and we re-think.
+**Hypothesis to validate in Phase 1:** can the LLM in tutor posture, anchored to real code, produce explanations of the shape the prototype demonstrates? If yes, continue. If no, the v2 wedge is wrong and we re-think.
 
-### Phase 2 — Pluggable widgets
+### Phase 2 — Widgets become interactive + executable
 
-The Compositor gains the capacity to invoke rich widgets. Each widget is a Lego primitive that the LLM may compose into the frame. Widgets are added **one at a time** in their own mini-spec/PR. Each widget has a JSON contract: the LLM decides to invoke it, the frontend renders it.
+The Compositor gains the capacity to invoke **fully interactive** widgets. The widgets that shipped as static glimpses in Phase 1 (`graph_subset`, `sequence_diagram`, `callers_tree`) become live: zoom / pan / hover, click into nodes to ask follow-ups, bind to LLM state for re-render on continued conversation.
 
-Initial widget set (subject to Phase 1 learnings):
+New widgets added in Phase 2 (one mini-spec/PR each):
 
-- `code_block_executable(code, mocks)` — embedded Marimo block with AI-generated mocks
-- `graph_subset(nodes, edges)` — codebase map subgraph, filtered to context
-- `sequence_diagram(steps)` — call sequence the AI infers from call sites
-- `diff_view(commit_sha, path)` — diff of a relevant commit
-- `callers_tree(symbol)` — who calls this symbol
+- `code_block_executable(code, mocks)` — embedded Marimo block with **AI-generated mocks**. The LLM reads the function signature and existing tests, proposes a realistic mock set, the user can edit before running. Output appears inline below the code.
+- `diff_view(commit_sha, path)` — diff of a relevant commit, with hunk navigation
+
+Phase 2 also introduces:
+
+- A **widget contract** — JSON schema each widget honors so the LLM can compose them safely. The frontend renders by widget kind.
+- A **widget catalog** the LLM is taught (system prompt) so it knows which to invoke.
 
 ### Phase 3 — Dashboard replacement
 
@@ -185,6 +212,10 @@ The cuaderno transitions from "new view" to "single home". Old pages become debu
 ---
 
 ## How it feels — three examples
+
+> The text blocks below are the **canonical content** for the three Phase 1 example questions. The **visual rendering** of these frames (including the inline widget glimpses, citation chips, follow-up `↳` buttons, "I got this / I didn't" markers, and side panel behavior) is locked in the prototype at [`./2026-05-28-cuaderno-prototype/`](./2026-05-28-cuaderno-prototype/). Open `CopyClip Cuaderno.html` and click through the *Scenes* section to see them live.
+
+
 
 ### Example A — broad question
 
@@ -341,9 +372,13 @@ These do not block Phase 1 start but need answers before Phase 2:
 
 Phase 1 ships when:
 
-- The user can open CopyClip on this repo (CopyClip itself), ask the three example questions above (and analogous ones), and receive frames structured like Examples A/B/C.
-- Every claim in every frame has a verifiable citation (`▸ path:line` or `▸ commit-sha`).
-- The frame mutates correctly when a follow-up question is asked — no scroll history, no accumulation.
+- The user can open CopyClip on this repo (CopyClip itself), ask the three example questions above (and analogous ones), and receive frames that **visually match the prototype scenes A / B / C** (within reasonable token / latency variance).
+- Every claim in every frame has a verifiable citation (`▸ path:line` or `▸ commit-sha`); citation chips open the side panel with line highlight + blame footer per the prototype.
+- The frame mutates correctly when a follow-up question is asked — no scroll history, no accumulation. Soft fade-up swap by default.
+- Tool calls visible during streaming (`✓ done · 64 ms`, `◐ running…`, `· queued`); collapse once the frame settles.
+- Session history overlay (`≡`) lists past questions with bookmark + active states.
+- "I got this / I didn't" markers below every settled frame; `got` saves to a "this matters" set.
+- The visual system matches the locked tokens (paper, sienna, fonts) from `./2026-05-28-cuaderno-prototype/styles.css`.
 - Latency: the frame begins streaming text within 5 seconds of `[send]`. Full frame in < 30 seconds for typical questions.
 - The hypothesis verdict is recorded: does the LLM-tutor-anchored-to-code model produce explanations that effectively teach? Answer informs whether Phase 2 proceeds, and in what shape.
 
@@ -354,3 +389,4 @@ Phase 1 ships when:
 - Memory: [[copyclip-temporal-causal-wedge]], [[copyclip-personal-tool]], [[voronov-phase-fit]].
 - Supersedes: `2026-05-22-anchored-playground-design.md` (v1 spec).
 - Open follow-up issue: #114 (multi-language playground execution).
+- **Canonical visual + interaction artifact**: [`./2026-05-28-cuaderno-prototype/`](./2026-05-28-cuaderno-prototype/) — open `CopyClip Cuaderno.html` in any browser. No build step; React + Babel from CDN. 5 scenes, 4 overlays, 5 visual variations, Tweaks panel for live retheming during review.

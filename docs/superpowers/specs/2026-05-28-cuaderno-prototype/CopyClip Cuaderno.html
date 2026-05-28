@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>CopyClip · Cuaderno — design surface</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap"
+/>
+
+<link rel="stylesheet" href="styles.css" />
+
+<style>
+  html, body {
+    margin: 0; padding: 0;
+    background: #efe9da;
+    font-family: "Inter", -apple-system, sans-serif;
+    color: #1B1814;
+    height: 100%;
+  }
+  /* design-context intro card (top of canvas) */
+  .intro-card {
+    background: #FAF6EC;
+    border: 1px solid #D8CFB7;
+    border-radius: 12px;
+    padding: 28px 32px;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    color: #1B1814;
+    line-height: 1.55;
+  }
+  .intro-card h1 {
+    font-family: "Newsreader", serif;
+    font-size: 28px;
+    font-style: italic;
+    font-weight: 400;
+    margin: 0 0 4px;
+    letter-spacing: -0.01em;
+  }
+  .intro-card .sub {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #6B6660;
+    margin-bottom: 18px;
+  }
+  .intro-card h2 {
+    font-family: "Inter", sans-serif;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: #B25E37;
+    margin: 22px 0 8px;
+    font-weight: 600;
+  }
+  .intro-card p { margin: 0 0 10px; color: #4A443B; font-size: 14px; }
+  .intro-card ul { margin: 4px 0 12px 18px; padding: 0; color: #4A443B; font-size: 14px; }
+  .intro-card li { margin-bottom: 4px; }
+  .intro-card .swatches {
+    display: flex; gap: 12px; align-items: center;
+    flex-wrap: wrap;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    margin-top: 6px;
+  }
+  .intro-card .swatch {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+  }
+  .intro-card .swatch .sw {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    border: 1px solid rgba(0,0,0,0.08);
+  }
+  .intro-card code {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12.5px;
+    background: #F1EADC;
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+
+  /* artboard helpers */
+  .artboard-wrap {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    position: relative;
+    background: #FAF6EC;
+    border-radius: 6px;
+  }
+  .theme-dark.artboard-wrap, .artboard-wrap.dark { background: #14110D; }
+
+  /* main interactive prototype label */
+  .ptype-label {
+    position: absolute;
+    top: -36px; left: 0;
+    font-family: "Inter", sans-serif;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: #6B6660;
+  }
+  .ptype-label .dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: oklch(0.56 0.13 45);
+    margin-right: 8px;
+    vertical-align: 1px;
+  }
+</style>
+
+<!-- React + Babel -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="file-samples.jsx"></script>
+<script type="text/babel" src="widgets.jsx"></script>
+<script type="text/babel" src="frames.jsx"></script>
+<script type="text/babel" src="cuaderno.jsx"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "theme": "light",
+  "accent": "sienna",
+  "density": "regular",
+  "swapAnim": "fade",
+  "showFollowups": true,
+  "showToolCalls": "stream-then-collapse"
+}/*EDITMODE-END*/;
+
+function App() {
+  const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+
+  // shared Cuaderno props derived from tweaks
+  const sharedProps = {
+    theme: t.theme,
+    accent: t.accent,
+    density: t.density,
+    swapAnim: t.swapAnim,
+    showFollowups: t.showFollowups,
+  };
+
+  return (
+    <>
+      <DesignCanvas
+        defaultSections={[
+          { id: 'intro',        title: 'Context',          subtitle: 'design reasoning · system · variations' },
+          { id: 'prototype',    title: 'Primary prototype', subtitle: 'fully interactive · ask, get a frame, drill in' },
+          { id: 'scenes',       title: 'Scenes',            subtitle: 'frozen states · A / B / C / mid-stream / empty' },
+          { id: 'overlays',     title: 'Overlays',          subtitle: 'citation side panel · history · I-got-this markers' },
+          { id: 'variations',   title: 'Visual variations', subtitle: 'theme · accent · density' },
+        ]}
+      >
+        {/* ── CONTEXT ───────────────────────────────────────────────────────── */}
+        <DCSection id="intro" title="Context" subtitle="design reasoning · system · variations">
+          <DCArtboard id="reasoning" label="Design reasoning" width={780} height={680}>
+            <div className="intro-card">
+              <h1>Cuaderno · v2 conversational surface</h1>
+              <div className="sub">copyclip · hi-fi prototype · 2026-05-28</div>
+
+              <h2>What I built</h2>
+              <p>
+                A single interactive prototype of the cuaderno surface plus a set
+                of frozen scenes and visual variations. The prototype answers the
+                three example questions in the spec (broad / relational / atomic),
+                opens citations into a read-only side panel, and exposes a session
+                history overlay. Phase-1 primitives are real; Phase-2 widgets
+                (sequence diagram, callers tree, graph subset, executable block)
+                appear as inline glimpses inside the relevant frames.
+              </p>
+
+              <h2>Visual system</h2>
+              <p>
+                Editorial notebook — the cuaderno feels like a real one. Warm paper,
+                serif headlines, sienna ink for citations, generous whitespace.
+                The frame is the page; the input is the pen.
+              </p>
+              <ul>
+                <li>
+                  <b>Display</b> · <code>Newsreader</code> (italic optical sizing) — lead lines, follow-up buttons, question echo
+                </li>
+                <li>
+                  <b>Body</b> · <code>Source Serif 4</code> — long-form prose, descriptions
+                </li>
+                <li>
+                  <b>Mono</b> · <code>JetBrains Mono</code> — code, citations, file paths, tool calls
+                </li>
+                <li>
+                  <b>UI</b> · <code>Inter</code> — chrome, small caps, kickers (rare)
+                </li>
+              </ul>
+
+              <h2>Palette</h2>
+              <div className="swatches">
+                <div className="swatch"><div className="sw" style={{ background: '#FAF6EC' }} /><span>paper</span></div>
+                <div className="swatch"><div className="sw" style={{ background: '#F1EADC' }} /><span>surface</span></div>
+                <div className="swatch"><div className="sw" style={{ background: '#1B1814' }} /><span>ink</span></div>
+                <div className="swatch"><div className="sw" style={{ background: '#79716A' }} /><span>ink-3</span></div>
+                <div className="swatch"><div className="sw" style={{ background: 'oklch(0.56 0.13 45)' }} /><span>sienna</span></div>
+                <div className="swatch"><div className="sw" style={{ background: 'oklch(0.52 0.10 200)' }} /><span>accent-2</span></div>
+              </div>
+
+              <h2>Decisions made on your behalf</h2>
+              <ul>
+                <li>
+                  <b>Frame swap</b> · soft fade-up — honours "continuous state" while still telegraphing the mutation. The Tweaks panel lets you switch to hard cut or slide-up.
+                </li>
+                <li>
+                  <b>Tool calls</b> · visible while streaming, then collapsed once the frame settles. The mid-stream scene shows the in-flight state. Tweaks: always-on, stream-then-collapse, or never.
+                </li>
+                <li>
+                  <b>Composer</b> · italic prompt, pill, soft shadow, sienna prefix mark <code>›</code>. Bottom-anchored, never scrolls.
+                </li>
+                <li>
+                  <b>Got-this markers</b> · use the slate-teal complementary accent — sparingly — so they read as a different gesture than "ask another question".
+                </li>
+              </ul>
+
+              <h2>How to use this canvas</h2>
+              <ul>
+                <li>The <b>Primary prototype</b> artboard is fully interactive — click follow-ups, citations, the ≡ icon, type in the composer. <code>esc</code> closes the side panel; open the focus overlay (↗ at the corner) for a fullscreen run.</li>
+                <li>The <b>Scenes</b> and <b>Overlays</b> rows are frozen instances — useful for review.</li>
+                <li>Use the <b>Tweaks</b> toolbar to retheme every artboard at once.</li>
+              </ul>
+            </div>
+          </DCArtboard>
+        </DCSection>
+
+        {/* ── PRIMARY PROTOTYPE ─────────────────────────────────────────────── */}
+        <DCSection
+          id="prototype"
+          title="Primary prototype"
+          subtitle="fully interactive · type, click follow-ups, open citations"
+        >
+          <DCArtboard id="main" label="Cuaderno — interactive" width={1280} height={880}>
+            <div className="artboard-wrap">
+              <Cuaderno {...sharedProps} scene="empty" />
+            </div>
+          </DCArtboard>
+        </DCSection>
+
+        {/* ── SCENES ────────────────────────────────────────────────────────── */}
+        <DCSection
+          id="scenes"
+          title="Scenes"
+          subtitle="frozen states — useful for review"
+        >
+          <DCArtboard id="scene-empty" label="01 · empty · first visit" width={920} height={720}>
+            <div className="artboard-wrap">
+              <Cuaderno {...sharedProps} scene="empty" interactive={false} questionNumber="00 · q" />
+            </div>
+          </DCArtboard>
+          <DCArtboard id="scene-mid" label="02 · mid-stream · tool calls visible" width={920} height={720}>
+            <div className="artboard-wrap">
+              <Cuaderno {...sharedProps} scene="midstream" interactive={false} questionNumber="02 · q" />
+            </div>
+          </DCArtboard>
+          <DCArtboard id="scene-a" label="03 · Example A · broad" width={920} height={1100}>
+            <div className="artboard-wrap">
+              <Cuaderno {...sharedProps} scene="A" interactive={false} questionNumber="01 · q" />
+            </div>
+          </DCArtboard>
+          <DCArtboard id="scene-b" label="04 · Example B · relational + sequence widget" width={920} height={1280}>
+            <div className="artboard-wrap">
+              <Cuaderno {...sharedProps} scene="B" interactive={false} questionNumber="02 · q" />
+            </div>
+          </DCArtboard>
+          <DCArtboard id="scene-c" label="05 · Example C · atomic + callers + blame" width={920} height={1280}>
+            <div className="artboard-wrap">
+              <Cuaderno {...sharedProps} scene="C" interactive={false} questionNumber="03 · q" />
+            </div>
+          </DCArtboard>
+        </DCSection>
+
+        {/* ── OVERLAYS ──────────────────────────────────────────────────────── */}
+        <DCSection
+          id="overlays"
+          title="Overlays"
+          subtitle="states that float over the active frame"
+        >
+          <DCArtboard id="ovl-citation" label="Citation side panel open" width={1280} height={820}>
+            <div className="artboard-wrap">
+              <Cuaderno
+                {...sharedProps}
+                scene="C"
+                interactive={false}
+                sidePanelOpenFor="src/copyclip/intelligence/analyzer.py:152-164"
+                questionNumber="03 · q"
+              />
+            </div>
+          </DCArtboard>
+          <DCArtboard id="ovl-commit" label="Citation side panel · commit view" width={1280} height={820}>
+            <div className="artboard-wrap">
+              <Cuaderno
+                {...sharedProps}
+                scene="B"
+                interactive={false}
+                sidePanelOpenFor="commit a0dae63"
+                questionNumber="02 · q"
+              />
+            </div>
+          </DCArtboard>
+          <DCArtboard id="ovl-history" label="Session history overlay" width={920} height={760}>
+            <div className="artboard-wrap">
+              <Cuaderno
+                {...sharedProps}
+                scene="B"
+                interactive={false}
+                historyOpen={true}
+                questionNumber="03 · q"
+              />
+            </div>
+          </DCArtboard>
+          <DCArtboard id="ovl-got" label="'I got this' marked" width={920} height={1280}>
+            <div className="artboard-wrap">
+              <Cuaderno
+                {...sharedProps}
+                scene="C"
+                interactive={false}
+                gotIt="got"
+                questionNumber="03 · q"
+              />
+            </div>
+          </DCArtboard>
+          <DCArtboard id="ovl-didnt" label="'I didn't' marked" width={920} height={1100}>
+            <div className="artboard-wrap">
+              <Cuaderno
+                {...sharedProps}
+                scene="A"
+                interactive={false}
+                gotIt="didnt"
+                questionNumber="01 · q"
+              />
+            </div>
+          </DCArtboard>
+        </DCSection>
+
+        {/* ── VISUAL VARIATIONS ─────────────────────────────────────────────── */}
+        <DCSection
+          id="variations"
+          title="Visual variations"
+          subtitle="alt themes — pick one or let Tweaks ride"
+        >
+          <DCArtboard id="var-dark" label="V1 · Dark · sienna" width={920} height={780}>
+            <div className="artboard-wrap dark">
+              <Cuaderno {...sharedProps} theme="dark" accent="sienna" scene="B" interactive={false} />
+            </div>
+          </DCArtboard>
+          <DCArtboard id="var-blue" label="V2 · Light · ink blue accent" width={920} height={780}>
+            <div className="artboard-wrap">
+              <Cuaderno {...sharedProps} theme="light" accent="ink-blue" scene="A" interactive={false} />
+            </div>
+          </DCArtboard>
+          <DCArtboard id="var-forest" label="V3 · Light · forest accent" width={920} height={780}>
+            <div className="artboard-wrap">
+              <Cuaderno {...sharedProps} theme="light" accent="forest" scene="C" interactive={false} />
+            </div>
+          </DCArtboard>
+          <DCArtboard id="var-compact" label="V4 · Light · compact density" width={920} height={780}>
+            <div className="artboard-wrap">
+              <Cuaderno {...sharedProps} density="compact" scene="B" interactive={false} />
+            </div>
+          </DCArtboard>
+          <DCArtboard id="var-comfy-dark" label="V5 · Dark · comfy density · ink blue" width={920} height={900}>
+            <div className="artboard-wrap dark">
+              <Cuaderno {...sharedProps} theme="dark" accent="ink-blue" density="comfy" scene="A" interactive={false} />
+            </div>
+          </DCArtboard>
+        </DCSection>
+      </DesignCanvas>
+
+      {/* ── Tweaks panel ─────────────────────────────────────────────────── */}
+      <TweaksPanel>
+        <TweakSection label="Theme" />
+        <TweakRadio
+          label="Mode"
+          value={t.theme}
+          options={['light', 'dark']}
+          onChange={v => setTweak('theme', v)}
+        />
+        <TweakRadio
+          label="Accent"
+          value={t.accent}
+          options={['sienna', 'ink-blue', 'forest']}
+          onChange={v => setTweak('accent', v)}
+        />
+        <TweakRadio
+          label="Density"
+          value={t.density}
+          options={['compact', 'regular', 'comfy']}
+          onChange={v => setTweak('density', v)}
+        />
+
+        <TweakSection label="Motion" />
+        <TweakRadio
+          label="Frame swap"
+          value={t.swapAnim}
+          options={['cut', 'fade', 'slide']}
+          onChange={v => setTweak('swapAnim', v)}
+        />
+
+        <TweakSection label="Behaviour" />
+        <TweakToggle
+          label="Show follow-ups"
+          value={t.showFollowups}
+          onChange={v => setTweak('showFollowups', v)}
+        />
+        <TweakSelect
+          label="Tool-call visibility"
+          value={t.showToolCalls}
+          options={['never', 'stream-then-collapse', 'always']}
+          onChange={v => setTweak('showToolCalls', v)}
+        />
+      </TweaksPanel>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+
+<!-- direct-edit overrides go here -->
+<style id="__om-edit-overrides"></style>
+</body>
+</html>
