@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import subprocess
 from pathlib import Path
 from typing import Any, Optional
 
@@ -135,3 +136,84 @@ def get_callees(
             for r in rows
         ]
     }
+
+
+def _run_git(project_root: str, *args: str) -> tuple[int, str, str]:
+    proc = subprocess.run(
+        ["git", *args],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+def git_log(
+    project_root: str, path: Optional[str] = None, limit: int = 20
+) -> dict[str, Any]:
+    args = ["log", f"-n{int(limit)}", "--pretty=format:%H%x09%an%x09%ai%x09%s"]
+    if path:
+        args += ["--", path]
+    code, out, err = _run_git(project_root, *args)
+    if code != 0:
+        return {"error": "git_failed", "detail": err.strip()}
+    commits = []
+    for line in out.splitlines():
+        parts = line.split("\t", 3)
+        if len(parts) == 4:
+            sha, author, when, msg = parts
+            commits.append(
+                {"commit": sha[:12], "author": author, "when": when, "message": msg}
+            )
+    return {"commits": commits}
+
+
+def git_blame(
+    project_root: str, path: str, line_start: int, line_end: int
+) -> dict[str, Any]:
+    code, out, err = _run_git(
+        project_root,
+        "blame",
+        f"-L{int(line_start)},{int(line_end)}",
+        "--porcelain",
+        "--",
+        path,
+    )
+    if code != 0:
+        return {"error": "git_failed", "detail": err.strip()}
+    blame_entries: list[dict[str, Any]] = []
+    current_sha = None
+    current_author = None
+    current_when = None
+    for line in out.splitlines():
+        if not line:
+            continue
+        if line.startswith("\t"):
+            blame_entries.append(
+                {
+                    "commit": (current_sha or "")[:12],
+                    "author": current_author,
+                    "when": current_when,
+                }
+            )
+            continue
+        head = line.split(" ", 1)[0]
+        if len(head) == 40 and all(c in "0123456789abcdef" for c in head):
+            current_sha = head
+        elif line.startswith("author "):
+            current_author = line[7:]
+        elif line.startswith("author-time "):
+            current_when = line[len("author-time "):]
+    return {"blame": blame_entries}
+
+
+def git_diff(project_root: str, commit_sha: str, path: Optional[str] = None) -> dict[str, Any]:
+    args = ["show", "--pretty=format:%H%n%an%n%ai%n%s", "--no-color", commit_sha]
+    if path:
+        args += ["--", path]
+    code, out, err = _run_git(project_root, *args)
+    if code != 0:
+        return {"error": "git_failed", "detail": err.strip()}
+    return {"diff": out}

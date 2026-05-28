@@ -1,8 +1,15 @@
 import sqlite3
+import subprocess
 import tempfile
 from pathlib import Path
 
-from copyclip.intelligence.cuaderno.anchor import grep_symbols, read_file
+from copyclip.intelligence.cuaderno.anchor import (
+    git_blame,
+    git_diff,
+    git_log,
+    grep_symbols,
+    read_file,
+)
 from copyclip.intelligence.db import init_schema
 
 
@@ -136,3 +143,36 @@ def test_get_callees_returns_outgoing_calls(tmp_path):
 
     out = get_callees(conn, pid, "foo")
     assert sorted(c["name"] for c in out["callees"]) == ["bar", "baz"]
+
+
+def _git(cwd: Path, *args):
+    subprocess.run(["git", *args], cwd=cwd, check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def test_git_log_returns_commits(tmp_path):
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "t@t")
+    _git(tmp_path, "config", "user.name",  "t")
+    (tmp_path / "a.txt").write_text("1")
+    _git(tmp_path, "add", "a.txt")
+    _git(tmp_path, "commit", "-m", "first")
+    (tmp_path / "a.txt").write_text("2")
+    _git(tmp_path, "commit", "-am", "second")
+
+    out = git_log(str(tmp_path), limit=10)
+    msgs = [c["message"] for c in out["commits"]]
+    assert "first" in msgs and "second" in msgs
+
+
+def test_git_blame_returns_sha_for_lines(tmp_path):
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "t@t")
+    _git(tmp_path, "config", "user.name",  "t")
+    (tmp_path / "a.txt").write_text("line1\nline2\nline3\n")
+    _git(tmp_path, "add", "a.txt")
+    _git(tmp_path, "commit", "-m", "init")
+
+    out = git_blame(str(tmp_path), "a.txt", line_start=1, line_end=3)
+    assert all(len(b["commit"]) >= 7 for b in out["blame"])
+    assert len(out["blame"]) == 3
