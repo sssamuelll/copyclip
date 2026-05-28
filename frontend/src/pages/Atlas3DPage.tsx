@@ -1158,6 +1158,21 @@ export function Atlas3DPage() {
     return ids
   }, [mergedData.nodes, moduleSymbolStates])
 
+  // Force a fresh `FlowchartCanvas` mount whenever the *structural* inputs
+  // change (project re-analyze, search query, or visible-type filter). This
+  // resets internal canvas state — expanded set, pan/zoom, hover — so the
+  // new tree's roots get the auto-expand-on-load treatment again. Crucially,
+  // it does NOT depend on `moduleSymbolChildren` or `mergedData`, so a lazy
+  // symbol fetch (which only appends children to an existing Module) does
+  // not trigger a remount and the user's expand stays intact.
+  const canvasResetKey = useMemo(
+    () =>
+      `${baseData.nodes.length}|${searchQuery}|${Array.from(visibleNodeTypes)
+        .sort()
+        .join(',')}`,
+    [baseData.nodes.length, searchQuery, visibleNodeTypes],
+  )
+
   useEffect(() => {
     if (selectedNodeId == null) return
     if (!mergedData.nodes.some((node) => node.id === selectedNodeId)) setSelectedNodeId(null)
@@ -1279,6 +1294,7 @@ export function Atlas3DPage() {
         ) : (
           <FlowchartCanvas
             ref={flowRef}
+            key={canvasResetKey}
             data={mergedData}
             width={viewport.width}
             height={viewport.height}
