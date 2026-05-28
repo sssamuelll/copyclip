@@ -28,7 +28,7 @@ from .handoff import (
     save_handoff_review_summary,
     update_handoff_packet,
 )
-from .db import connect, init_schema
+from .db import connect, init_schema, init_cuaderno_schema
 from .playground import (
     MarimoNotInstalledError,
     PlaygroundError,
@@ -1891,6 +1891,7 @@ def run_server(
             conn = connect(root)
             try:
                 init_schema(conn)
+                init_cuaderno_schema(conn)
                 pid = project_id(conn, root)
                 if not pid:
                     self._json({"error": "run_analyze_first"}, 400)

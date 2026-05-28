@@ -72,7 +72,7 @@ def grep_symbols(
     if module:
         where.append("module = ?")
         params.append(module)
-    params.append(int(limit))
+    params.append(min(int(limit or 50), 200))
 
     sql = (
         "SELECT name, kind, file_path, line_start, line_end, module "

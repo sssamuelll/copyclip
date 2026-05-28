@@ -28,7 +28,7 @@ def compose_frame(
     project_root: str,
     project_id: int,
     conn: Optional[sqlite3.Connection],
-    model: str = "claude-sonnet-4-6",
+    model: str = "claude-sonnet-4-5",
     max_tool_rounds: int = 8,
     max_tokens: int = 8192,
 ) -> Frame:
@@ -77,15 +77,23 @@ def compose_frame(
         for block in content:
             if block.get("type") != "tool_use":
                 continue
-            result = dispatch_tool(
-                block["name"], block.get("input", {}) or {},
-                project_root=project_root, project_id=project_id, conn=conn,
-            )
-            tool_results.append({
-                "type": "tool_result",
-                "tool_use_id": block["id"],
-                "content": json.dumps(result),
-            })
+            try:
+                result = dispatch_tool(
+                    block["name"], block.get("input", {}) or {},
+                    project_root=project_root, project_id=project_id, conn=conn,
+                )
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block["id"],
+                    "content": json.dumps(result),
+                })
+            except Exception as exc:  # noqa: BLE001 — surface tool failures to the LLM as tool_result errors so it can recover within the same turn
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block["id"],
+                    "content": json.dumps({"error": "tool_failed", "detail": str(exc)}),
+                    "is_error": True,
+                })
         messages.append({"role": "user", "content": tool_results})
 
     return _fallback_frame(question, "tool-call budget exhausted")
