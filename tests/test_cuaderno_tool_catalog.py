@@ -7,7 +7,20 @@ def test_tool_definitions_include_all_tools():
     assert names == {
         "read_file", "grep_symbols", "get_callers", "get_callees",
         "git_log", "git_blame", "git_diff", "find_tests",
+        "emit_block", "finish",
     }
+
+
+def test_emit_block_requires_kind():
+    tools = build_tool_definitions()
+    emit = next(t for t in tools if t["name"] == "emit_block")
+    assert emit["input_schema"]["required"] == ["kind"]
+    assert emit["input_schema"]["additionalProperties"] is True
+
+
+def test_answer_tools_set():
+    from copyclip.intelligence.cuaderno.tool_catalog import ANSWER_TOOLS
+    assert ANSWER_TOOLS == {"emit_block", "finish"}
 
 
 def test_tool_definitions_have_anthropic_shape():
