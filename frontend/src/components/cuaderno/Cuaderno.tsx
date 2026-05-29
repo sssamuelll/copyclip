@@ -20,6 +20,7 @@ type Props = {
   toolCalls?: ToolRow[]
   providers?: CuadernoProvidersResponse | null
   onSetProvider?: (provider: string, model: string) => void
+  onOpenDashboard?: () => void
   onAsk: (question: string) => void
   onSelectFromHistory: (position: number) => void
   onSetGotIt: (position: number, value: 'got' | 'didnt') => void
@@ -36,6 +37,7 @@ export function Cuaderno({
   toolCalls = [],
   providers = null,
   onSetProvider,
+  onOpenDashboard,
   onAsk,
   onSelectFromHistory,
   onSetGotIt,
@@ -63,6 +65,16 @@ export function Cuaderno({
           <span style={{ color: 'var(--ink-2)' }}>{sessionLabel}</span>
         </div>
         <div className="right">
+          {onOpenDashboard && (
+            <button
+              className="hamb"
+              onClick={onOpenDashboard}
+              aria-label="open dashboard"
+              title="dashboard"
+            >
+              ⊞
+            </button>
+          )}
           {onSetProvider && (
             <ProviderSelector data={providers} onChange={onSetProvider} />
           )}

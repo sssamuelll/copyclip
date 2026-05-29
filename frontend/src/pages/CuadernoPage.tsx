@@ -5,7 +5,7 @@ import { askStream, cuadernoApi } from '../api/cuaderno'
 
 const SESSION_STORAGE_KEY = 'copyclip.cuaderno.session_id'
 
-export function CuadernoPage() {
+export function CuadernoPage({ onOpenDashboard }: { onOpenDashboard?: () => void } = {}) {
   const [sessionId, setSessionId] = useState<string | null>(() =>
     localStorage.getItem(SESSION_STORAGE_KEY),
   )
@@ -170,6 +170,7 @@ export function CuadernoPage() {
         toolCalls={toolCalls}
         providers={providers}
         onSetProvider={onSetProvider}
+        onOpenDashboard={onOpenDashboard}
         onAsk={onAsk}
         onSelectFromHistory={onSelectFromHistory}
         onSetGotIt={onSetGotIt}
