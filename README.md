@@ -37,6 +37,19 @@ CopyClip exposes its project memory, ask, and handoff layers as MCP tools. Exter
 
 ---
 
+## Cuaderno (Phase 1)
+
+The cuaderno is the conversational surface where the user asks questions
+about the codebase and receives interactive frames composed by an LLM tutor.
+See `docs/superpowers/specs/2026-05-28-copyclip-cuaderno-conversacional-design.md`
+for the design and `docs/superpowers/specs/2026-05-28-cuaderno-prototype/` for
+the visual reference.
+
+Phase 1 requires `ANTHROPIC_API_KEY` set in env or `.copyclip/config`. Run
+`copyclip start` to onboard.
+
+---
+
 ## How it works
 
 CopyClip runs locally. It indexes your codebase, ingests your git history, tracks architectural decisions you mark (or that agents propose), and keeps a running record of which code each human and agent has actually read or written.

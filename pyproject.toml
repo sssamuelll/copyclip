@@ -26,6 +26,7 @@ dependencies = [
   "tree-sitter-cpp",
   "tree-sitter-rust",
   "psutil>=5.9",
+  "anthropic>=0.39",
 ]
 
 [project.optional-dependencies]

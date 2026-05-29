@@ -571,3 +571,35 @@ def get_active_decisions(project_root: str):
         return out
     except Exception:
         return []
+
+
+# Brief: init_cuaderno_schema
+
+def init_cuaderno_schema(conn: sqlite3.Connection) -> None:
+    """Create cuaderno session + question tables. Idempotent."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS cuaderno_sessions (
+            id           TEXT PRIMARY KEY,
+            project_root TEXT NOT NULL,
+            created_at   TEXT NOT NULL,
+            last_seen_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS cuaderno_questions (
+            id          INTEGER PRIMARY KEY,
+            session_id  TEXT NOT NULL REFERENCES cuaderno_sessions(id) ON DELETE CASCADE,
+            position    INTEGER NOT NULL,
+            question    TEXT NOT NULL,
+            frame_json  TEXT NOT NULL,
+            bookmarked  INTEGER NOT NULL DEFAULT 0,
+            got_it      TEXT,
+            created_at  TEXT NOT NULL,
+            UNIQUE(session_id, position)
+        );
+
+        CREATE INDEX IF NOT EXISTS cuaderno_questions_session
+            ON cuaderno_questions(session_id, position);
+        """
+    )
+    conn.commit()

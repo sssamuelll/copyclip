@@ -16,13 +16,16 @@ import { TimelinePage } from './pages/TimelinePage'
 import { PlanningPage } from './pages/PlanningPage'
 import { HandoffPage } from './pages/HandoffPage'
 import { DebtNavigatorPage } from './pages/DebtNavigatorPage'
+import { CuadernoPage } from './pages/CuadernoPage'
 
 import { PlaygroundPanel } from './components/PlaygroundPanel'
 import { PlaygroundProvider } from './hooks/usePlayground'
 
 import type { ArchEdge, ArchNode, ChangeItem, DecisionItem, Overview, RiskItem } from './types/api'
 
-type Page = 'reacquaintance' | 'ask' | 'handoff' | 'debt-navigator' | 'atlas-3d' | 'timeline' | 'planning' | 'changes' | 'architecture' | 'impact' | 'risks' | 'context-builder' | 'decisions' | 'settings'
+import './styles/cuaderno.css'
+
+type Page = 'cuaderno' | 'reacquaintance' | 'ask' | 'handoff' | 'debt-navigator' | 'atlas-3d' | 'timeline' | 'planning' | 'changes' | 'architecture' | 'impact' | 'risks' | 'context-builder' | 'decisions' | 'settings'
 
 export function App() {
   const [page, setPage] = useState<Page>('reacquaintance')
@@ -105,6 +108,7 @@ export function App() {
           </div>
 
           <div style={{ padding: '24px', flex: 1 }}>
+            {page === 'cuaderno' && <CuadernoPage />}
             {page === 'reacquaintance' && <ReacquaintancePage onOpenDecision={openDecision} onOpenRisk={openRisk} onOpenChanges={openChanges} />}
             {page === 'ask' && <AskPage onNotify={notify} onOpenDecision={openDecision} onOpenRisk={openRisk} onOpenChanges={openChanges} />}
             {page === 'handoff' && <HandoffPage onNotify={notify} />}

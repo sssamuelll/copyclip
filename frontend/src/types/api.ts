@@ -766,3 +766,85 @@ export type PlaygroundErrorPayload = {
   install_hint?: string
 }
 
+// --- Cuaderno -------------------------------------------------------------
+
+export type PathCitation = {
+  kind: 'path'
+  path: string
+  line_start?: number
+  line_end?: number
+}
+
+export type CommitCitation = {
+  kind: 'commit'
+  commit: string
+}
+
+export type Citation = PathCitation | CommitCitation
+
+export type GraphSubsetWidget = {
+  kind: 'graph_subset'
+  nodes: Array<{ id: string; label: string; you?: boolean }>
+  edges: Array<{ from: string; to: string; label?: string }>
+}
+
+export type SequenceDiagramWidget = {
+  kind: 'sequence_diagram'
+  actors: string[]
+  steps: Array<{ from: number; to: number; label: string }>
+}
+
+export type CallersTreeWidget = {
+  kind: 'callers_tree'
+  root: string
+  callers: Array<{ citation: Citation; note?: string }>
+}
+
+export type Widget = GraphSubsetWidget | SequenceDiagramWidget | CallersTreeWidget
+
+export type Block =
+  | { kind: 'lead'; text: string }
+  | { kind: 'paragraph'; text: string }
+  | {
+      kind: 'ordered_list'
+      items: Array<{ head: string; desc: string; citation?: Citation }>
+    }
+  | { kind: 'code_block'; code: string; language: string; citation?: Citation }
+  | { kind: 'ascii_block'; text: string }
+  | { kind: 'citation'; citation: Citation }
+  | {
+      kind: 'citation_stack'
+      items: Array<{ citation: Citation; note?: string }>
+    }
+  | { kind: 'callout'; kicker: string; text: string; citations?: Citation[] }
+  | { kind: 'widget'; widget: Widget }
+  | {
+      kind: 'followups'
+      items: Array<{ label: string; question: string }>
+    }
+
+export type Frame = {
+  question: string
+  blocks: Block[]
+}
+
+export type CuadernoAskResponse = {
+  session_id: string
+  position: number
+  frame: Frame
+}
+
+export type CuadernoQuestion = {
+  position: number
+  question: string
+  frame: Frame
+  bookmarked: boolean
+  got_it: 'got' | 'didnt' | null
+  created_at: string
+}
+
+export type CuadernoSession = {
+  session_id: string
+  questions: CuadernoQuestion[]
+}
+

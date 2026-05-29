@@ -4,6 +4,7 @@ const GROUPS = [
   {
     label: 'Project Memory',
     pages: [
+      { id: 'cuaderno', label: 'cuaderno' },
       { id: 'reacquaintance', label: 'catch me up' },
       { id: 'ask', label: 'ask project' },
       { id: 'handoff', label: 'safe handoff' },

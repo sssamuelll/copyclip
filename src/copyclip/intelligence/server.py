@@ -28,7 +28,7 @@ from .handoff import (
     save_handoff_review_summary,
     update_handoff_packet,
 )
-from .db import connect, init_schema
+from .db import connect, init_schema, init_cuaderno_schema
 from .playground import (
     MarimoNotInstalledError,
     PlaygroundError,
@@ -372,6 +372,17 @@ def run_server(
 
         threading.Thread(target=_runner, daemon=True).start()
         return job_id
+
+    # Boot-time schema initialization. Ensures all tables (including cuaderno_*)
+    # exist before any HTTP handler runs, so GET/PATCH endpoints don't fail with
+    # "no such table" if hit before the first POST.
+    _boot_conn = connect(root)
+    try:
+        init_schema(_boot_conn)
+        init_cuaderno_schema(_boot_conn)
+    finally:
+        _boot_conn.close()
+
     class Handler(BaseHTTPRequestHandler):
         def _json(self, payload, code=200):
             json_response(self, payload, code=code)
@@ -1623,6 +1634,64 @@ def run_server(
                     handle_settings_get(self, ctx, conn)
                     return
 
+                if parsed.path == "/api/cuaderno/file":
+                    if not pid:
+                        self._json({"error": "no_project"}, 400)
+                        return
+                    q = parse_qs(parsed.query or "")
+                    file_path = (q.get("path", [""])[0] or "").strip()
+                    if not file_path:
+                        self._json({"error": "path_required"}, 400)
+                        return
+                    try:
+                        ls_raw = q.get("line_start", [""])[0]
+                        le_raw = q.get("line_end", [""])[0]
+                        line_start = int(ls_raw) if ls_raw else None
+                        line_end   = int(le_raw) if le_raw else None
+                    except ValueError:
+                        self._json({"error": "invalid_line_range"}, 400)
+                        return
+                    from .cuaderno.anchor import read_file
+                    out = read_file(ctx.root, file_path, line_start, line_end)
+                    if out.get("error"):
+                        status = 404 if out["error"] == "file_not_found" else 400
+                        self._json(out, status)
+                        return
+                    # Best-effort blame for the slice
+                    if line_start and line_end:
+                        from .cuaderno.anchor import git_blame
+                        b = git_blame(ctx.root, file_path, line_start, line_end)
+                        if b.get("blame"):
+                            first = b["blame"][0]
+                            out["blame"] = {
+                                "commit": first.get("commit", ""),
+                                "author": first.get("author", ""),
+                                "when": first.get("when", ""),
+                            }
+                    self._json(out)
+                    return
+
+                if parsed.path.startswith("/api/cuaderno/sessions/"):
+                    if not pid:
+                        self._json({"error": "no_project"}, 400)
+                        return
+                    sid = parsed.path[len("/api/cuaderno/sessions/"):]
+                    if not sid:
+                        self._json({"error": "session_id_required"}, 400)
+                        return
+                    from .cuaderno.persistence import list_questions
+                    questions = list_questions(conn, sid)
+                    if not questions:
+                        # session does not exist OR has no questions yet
+                        row = conn.execute(
+                            "SELECT id FROM cuaderno_sessions WHERE id=?", (sid,),
+                        ).fetchone()
+                        if not row:
+                            self._json({"error": "session_not_found"}, 404)
+                            return
+                    self._json({"session_id": sid, "questions": questions})
+                    return
+
                 self._json({"error": "not_found"}, 404)
             finally:
                 try:
@@ -1636,6 +1705,32 @@ def run_server(
             try:
                 init_schema(conn)
                 pid = project_id(conn, root)
+
+                import re as _re
+                _m = _re.match(
+                    r"^/api/cuaderno/sessions/([^/]+)/questions/(\d+)$",
+                    parsed.path,
+                )
+                if _m:
+                    if not pid:
+                        self._json({"error": "no_project"}, 400)
+                        return
+                    sid, pos = _m.group(1), int(_m.group(2))
+                    try:
+                        data = json.loads(self.rfile.read(
+                            int(self.headers.get("Content-Length", "0"))
+                        ).decode("utf-8") or "{}")
+                    except json.JSONDecodeError:
+                        self._json({"error": "invalid_request"}, 400)
+                        return
+                    from .cuaderno.persistence import set_bookmark, set_got_it
+                    if "bookmarked" in data:
+                        set_bookmark(conn, sid, pos, bool(data["bookmarked"]))
+                    if "got_it" in data:
+                        set_got_it(conn, sid, pos, data["got_it"])
+                    self._json({"ok": True})
+                    return
+
                 if not pid:
                     self._json({"error": "run_analyze_first"}, 400)
                     return
@@ -2406,6 +2501,47 @@ def run_server(
                     conn.commit()
                     publish_event("decision.link_added", {"decision_id": decision_id, "link_type": link_type, "target_pattern": target_pattern})
                     self._json({"ok": True, "decision_id": decision_id, "link_type": link_type, "target_pattern": target_pattern})
+                    return
+
+                if parsed.path == "/api/cuaderno/ask":
+                    if not pid:
+                        self._json({"error": "no_project"}, 400)
+                        return
+                    try:
+                        data = json.loads(self.rfile.read(
+                            int(self.headers.get("Content-Length", "0"))
+                        ).decode("utf-8") or "{}")
+                    except json.JSONDecodeError:
+                        self._json({"error": "invalid_request"}, 400)
+                        return
+                    question = (data.get("question") or "").strip()
+                    if not question:
+                        self._json({"error": "question_required"}, 400)
+                        return
+                    session_id = data.get("session_id")
+                    from .cuaderno import compositor as _compositor
+                    from .cuaderno.anthropic_client import AnthropicAdapter
+                    from .cuaderno.persistence import (
+                        create_session, save_question,
+                    )
+                    from .cuaderno.schema import frame_to_dict
+                    if not session_id:
+                        session_id = create_session(conn, project_root=ctx.root)
+                    try:
+                        client = AnthropicAdapter()
+                    except RuntimeError as exc:
+                        self._json({"error": "llm_not_configured", "detail": str(exc)}, 503)
+                        return
+                    frame = _compositor.compose_frame(
+                        client=client, question=question,
+                        project_root=ctx.root, project_id=pid, conn=conn,
+                    )
+                    position = save_question(conn, session_id, question, frame)
+                    self._json({
+                        "session_id": session_id,
+                        "position": position,
+                        "frame": frame_to_dict(frame),
+                    })
                     return
 
                 self._json({"error": "not_found"}, 404)
