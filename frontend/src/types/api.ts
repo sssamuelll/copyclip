@@ -863,3 +863,15 @@ export type CuadernoStreamEvent =
   | { type: 'frame'; position: number; frame: Frame }
   | { type: 'error'; message: string; partial: boolean }
 
+export type ProviderInfo = {
+  name: string
+  key_configured: boolean
+  default_model: string | null
+}
+
+export type CuadernoProvidersResponse = {
+  providers: ProviderInfo[]
+  tool_incapable_models: string[]
+  current: { provider: string | null; model: string | null }
+}
+
