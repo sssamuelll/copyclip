@@ -1,5 +1,6 @@
 from copyclip.intelligence.cuaderno.schema import (
     Citation, Block, Widget, Frame, frame_to_dict, frame_from_dict,
+    KNOWN_BLOCK_KINDS, validate_block_dict,
 )
 
 
@@ -47,3 +48,25 @@ def test_frame_round_trip_full():
     d = frame_to_dict(f)
     f2 = frame_from_dict(d)
     assert frame_to_dict(f2) == d
+
+
+def test_validate_block_dict_accepts_known_kind():
+    assert validate_block_dict({"kind": "lead", "text": "hi"}) is None
+    assert validate_block_dict({"kind": "paragraph", "text": "x"}) is None
+
+
+def test_validate_block_dict_rejects_unknown_kind():
+    reason = validate_block_dict({"kind": "bogus", "text": "x"})
+    assert reason is not None and "bogus" in reason
+
+
+def test_validate_block_dict_rejects_non_object():
+    assert validate_block_dict("nope") is not None
+    assert validate_block_dict({"text": "no kind"}) is not None
+
+
+def test_known_block_kinds_matches_constructors():
+    assert KNOWN_BLOCK_KINDS == {
+        "lead", "paragraph", "ordered_list", "code_block", "ascii_block",
+        "citation", "citation_stack", "callout", "widget", "followups",
+    }

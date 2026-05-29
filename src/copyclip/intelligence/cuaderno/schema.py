@@ -136,3 +136,25 @@ def frame_from_dict(d: dict[str, Any]) -> Frame:
         question=d["question"],
         blocks=[Block.from_dict(b) for b in d["blocks"]],
     )
+
+
+KNOWN_BLOCK_KINDS: frozenset[str] = frozenset({
+    "lead", "paragraph", "ordered_list", "code_block", "ascii_block",
+    "citation", "citation_stack", "callout", "widget", "followups",
+})
+
+
+def validate_block_dict(d: Any) -> Optional[str]:
+    """Return None if d is a renderable Block dict, else a short reason string.
+
+    Light validation: the block must be an object with a known `kind`. Per-kind
+    field validation is intentionally deferred — Block.from_dict tolerates extra
+    or missing fields, and the kind check is what guards the renderer against an
+    unknown block type falling through to a null render.
+    """
+    if not isinstance(d, dict):
+        return "block is not an object"
+    kind = d.get("kind")
+    if kind not in KNOWN_BLOCK_KINDS:
+        return f"unknown or missing block kind: {kind!r}"
+    return None
