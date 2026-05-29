@@ -194,3 +194,32 @@ def test_compose_frame_wrapper_returns_terminal_frame(tmp_path: Path):
     assert isinstance(frame, Frame)
     assert frame.question == "q"
     assert frame.blocks[0].kind == "lead"
+
+
+def test_emit_block_across_two_turns_emits_once(tmp_path: Path):
+    """A turn emits a valid block but does NOT finish (stop_reason tool_use); a
+    second turn finishes. The block must be emitted exactly once (during the
+    first stream), acked in between, and appear once in the final frame. This is
+    the non-terminal emit_block continue/ack path (spec line 69)."""
+    turns = [
+        [
+            _tool_stop("b1", "emit_block", {"kind": "lead", "text": "hi"}),
+            _msg_stop("tool_use", [_content("b1", "emit_block", {"kind": "lead", "text": "hi"})]),
+        ],
+        [
+            _tool_stop("f", "finish", {}),
+            _msg_stop("tool_use", [_content("f", "finish", {})]),
+        ],
+    ]
+    client = StubStream(turns)
+    events = list(iter_compose_events(
+        client=client, question="q", project_root=str(tmp_path),
+        project_id=1, conn=None,
+    ))
+    block_events = [e for e in events if e["type"] == "block"]
+    assert len(block_events) == 1
+    assert block_events[0]["block"] == {"kind": "lead", "text": "hi"}
+    frame = next(e for e in events if e["type"] == "frame")
+    assert frame["frame"]["blocks"] == [{"kind": "lead", "text": "hi"}]
+    # The second turn must have been driven (ack fed back) → two stream calls.
+    assert len(client.calls) == 2
