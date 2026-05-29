@@ -1,21 +1,4 @@
-import type {
-  CuadernoAskResponse,
-  CuadernoSession,
-  CuadernoStreamEvent,
-} from '../types/api'
-
-async function postJson<T>(url: string, body: unknown): Promise<T> {
-  const r = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  if (!r.ok) {
-    const text = await r.text()
-    throw new Error(`POST ${url} → ${r.status}: ${text}`)
-  }
-  return (await r.json()) as T
-}
+import type { CuadernoSession, CuadernoStreamEvent } from '../types/api'
 
 async function patchJson<T>(url: string, body: unknown): Promise<T> {
   const r = await fetch(url, {
@@ -40,12 +23,6 @@ async function getJson<T>(url: string): Promise<T> {
 }
 
 export const cuadernoApi = {
-  ask(question: string, sessionId?: string) {
-    return postJson<CuadernoAskResponse>('/api/cuaderno/ask', {
-      question,
-      session_id: sessionId,
-    })
-  },
   session(sessionId: string) {
     return getJson<CuadernoSession>(
       `/api/cuaderno/sessions/${encodeURIComponent(sessionId)}`,

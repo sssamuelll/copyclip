@@ -828,12 +828,6 @@ export type Frame = {
   blocks: Block[]
 }
 
-export type CuadernoAskResponse = {
-  session_id: string
-  position: number
-  frame: Frame
-}
-
 export type CuadernoQuestion = {
   position: number
   question: string
