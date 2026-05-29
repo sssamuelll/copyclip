@@ -1,11 +1,4 @@
-type ToolState = 'queued' | 'running' | 'done'
-
-type ToolRow = {
-  state: ToolState
-  name: string
-  args: string
-  ms: number | null
-}
+import type { ToolRow } from '../../../types/api'
 
 type Props = {
   question: string
@@ -24,13 +17,21 @@ export function FrameMidStream({ question, tools, partial }: Props) {
         {tools.map((t, i) => (
           <div key={i} className={`row ${t.state}`}>
             <span className="tag">
-              {t.state === 'done' ? '✓' : t.state === 'running' ? '◐' : '·'}
+              {t.state === 'done'
+                ? '✓'
+                : t.state === 'error'
+                ? '⨯'
+                : t.state === 'running'
+                ? '◐'
+                : '·'}
             </span>
             <span className="name">{t.name}</span>
             <span className="args">{t.args}</span>
             <span className="meta">
               {t.state === 'done'
                 ? `${t.ms ?? 0} ms`
+                : t.state === 'error'
+                ? 'failed'
                 : t.state === 'running'
                 ? 'running…'
                 : 'queued'}

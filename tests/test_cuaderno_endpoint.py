@@ -11,10 +11,10 @@ from urllib.error import HTTPError
 
 from copyclip.intelligence.db import connect, init_schema, init_cuaderno_schema
 from copyclip.intelligence.server import run_server
-from copyclip.intelligence.cuaderno.schema import Frame, Block, frame_to_dict
+from copyclip.intelligence.cuaderno.schema import Block
 
-# AnthropicAdapter is constructed by the route before compose_frame runs.
-# Tests stub compose_frame so the client is never actually used, but the
+# AnthropicAdapter is constructed by the route before the compositor runs.
+# Tests stub iter_compose_events so the client is never actually used, but the
 # adapter init demands an API key. Provide a placeholder so the route can
 # proceed to the patched compositor.
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-placeholder-key")
@@ -39,11 +39,34 @@ def _wait_port(port, timeout_s=3.0):
     raise RuntimeError(f"server did not start on {port}")
 
 
-def _post_json(url, payload):
+def _post_sse(url, payload, timeout=15):
+    """POST and parse a text/event-stream response into (status, events list).
+
+    Reads line-by-line and stops after the terminal event (frame or error) so
+    the keep-alive connection doesn't cause a hang.
+    """
     data = json.dumps(payload).encode("utf-8")
     req = request.Request(url, method="POST", data=data,
                           headers={"Content-Type": "application/json"})
-    with request.urlopen(req, timeout=10) as r:
+    with request.urlopen(req, timeout=timeout) as r:
+        status = r.status
+        events = []
+        for line in r:
+            line = line.decode("utf-8").rstrip("\n").rstrip("\r")
+            if line.startswith("data:"):
+                ev = json.loads(line[len("data:"):].strip())
+                events.append(ev)
+                if ev.get("type") in ("frame", "error"):
+                    break
+    return status, events
+
+
+def _post_json(url, payload, timeout=10):
+    """POST expecting a plain JSON response (used for error-path tests)."""
+    data = json.dumps(payload).encode("utf-8")
+    req = request.Request(url, method="POST", data=data,
+                          headers={"Content-Type": "application/json"})
+    with request.urlopen(req, timeout=timeout) as r:
         return r.status, json.loads(r.read().decode("utf-8"))
 
 
@@ -65,28 +88,29 @@ def _setup_server():
 
 def test_post_ask_returns_frame_when_compositor_is_stubbed():
     root, port = _setup_server()
-    stub_frame = Frame(
-        question="hello",
-        blocks=[Block.lead("CopyClip is a tool.")],
-    )
+    stub_block = Block.lead("CopyClip is a tool.")
 
-    def fake_compose_frame(**kwargs):
-        return stub_frame
+    def fake_iter_compose_events(**kwargs):
+        yield {"type": "block", "block": stub_block.to_dict()}
+        yield {"type": "frame", "frame": {"question": "hello",
+                                          "blocks": [stub_block.to_dict()]}}
 
     with patch(
-        "copyclip.intelligence.cuaderno.compositor.compose_frame",
-        side_effect=fake_compose_frame,
+        "copyclip.intelligence.cuaderno.ask_stream.iter_compose_events",
+        side_effect=fake_iter_compose_events,
     ):
-        status, body = _post_json(
+        status, events = _post_sse(
             f"http://127.0.0.1:{port}/api/cuaderno/ask",
             {"question": "hello"},
         )
 
     assert status == 200
-    assert "session_id" in body
-    assert body["position"] == 1
-    assert body["frame"]["question"] == "hello"
-    assert body["frame"]["blocks"][0]["kind"] == "lead"
+    meta = next(e for e in events if e["type"] == "meta")
+    assert "session_id" in meta
+    frame_ev = next(e for e in events if e["type"] == "frame")
+    assert frame_ev["position"] == 1
+    assert frame_ev["frame"]["question"] == "hello"
+    assert frame_ev["frame"]["blocks"][0]["kind"] == "lead"
 
 
 def test_post_ask_rejects_missing_question():
@@ -109,22 +133,27 @@ def _get_json(url):
 
 def test_get_session_returns_questions_in_order():
     root, port = _setup_server()
-    stub_frame_1 = Frame(question="q1", blocks=[Block.lead("a")])
-    stub_frame_2 = Frame(question="q2", blocks=[Block.lead("b")])
-    responses = [stub_frame_1, stub_frame_2]
+    stubs = [
+        [Block.lead("a")],
+        [Block.lead("b")],
+    ]
 
-    def fake_compose_frame(**kwargs):
-        return responses.pop(0)
+    def fake_iter_compose_events(question, **kwargs):
+        blks = stubs.pop(0)
+        for b in blks:
+            yield {"type": "block", "block": b.to_dict()}
+        yield {"type": "frame", "frame": {"question": question,
+                                          "blocks": [b.to_dict() for b in blks]}}
 
     with patch(
-        "copyclip.intelligence.cuaderno.compositor.compose_frame",
-        side_effect=fake_compose_frame,
+        "copyclip.intelligence.cuaderno.ask_stream.iter_compose_events",
+        side_effect=fake_iter_compose_events,
     ):
-        _, b1 = _post_json(f"http://127.0.0.1:{port}/api/cuaderno/ask",
-                           {"question": "q1"})
-        sid = b1["session_id"]
-        _post_json(f"http://127.0.0.1:{port}/api/cuaderno/ask",
-                   {"question": "q2", "session_id": sid})
+        _, evs1 = _post_sse(f"http://127.0.0.1:{port}/api/cuaderno/ask",
+                            {"question": "q1"})
+        sid = next(e for e in evs1 if e["type"] == "meta")["session_id"]
+        _post_sse(f"http://127.0.0.1:{port}/api/cuaderno/ask",
+                  {"question": "q2", "session_id": sid})
 
     status, body = _get_json(f"http://127.0.0.1:{port}/api/cuaderno/sessions/{sid}")
     assert status == 200
@@ -143,14 +172,20 @@ def _patch_json(url, payload):
 
 def test_patch_bookmark_and_gotit():
     root, port = _setup_server()
-    stub_frame = Frame(question="q1", blocks=[Block.lead("hi")])
+    stub_block = Block.lead("hi")
+
+    def fake_iter_compose_events(question, **kwargs):
+        yield {"type": "block", "block": stub_block.to_dict()}
+        yield {"type": "frame", "frame": {"question": question,
+                                          "blocks": [stub_block.to_dict()]}}
+
     with patch(
-        "copyclip.intelligence.cuaderno.compositor.compose_frame",
-        return_value=stub_frame,
+        "copyclip.intelligence.cuaderno.ask_stream.iter_compose_events",
+        side_effect=fake_iter_compose_events,
     ):
-        _, b = _post_json(f"http://127.0.0.1:{port}/api/cuaderno/ask",
-                          {"question": "q1"})
-    sid = b["session_id"]
+        _, evs = _post_sse(f"http://127.0.0.1:{port}/api/cuaderno/ask",
+                           {"question": "q1"})
+    sid = next(e for e in evs if e["type"] == "meta")["session_id"]
 
     status, _ = _patch_json(
         f"http://127.0.0.1:{port}/api/cuaderno/sessions/{sid}/questions/1",

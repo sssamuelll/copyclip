@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { CuadernoQuestion } from '../types/api'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { Block, CuadernoQuestion, ToolRow } from '../types/api'
 import { Cuaderno } from '../components/cuaderno/Cuaderno'
-import { cuadernoApi } from '../api/cuaderno'
+import { askStream, cuadernoApi } from '../api/cuaderno'
 
 const SESSION_STORAGE_KEY = 'copyclip.cuaderno.session_id'
 
@@ -13,6 +13,13 @@ export function CuadernoPage() {
   const [activePosition, setActivePosition] = useState<number | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [streamingQuestion, setStreamingQuestion] = useState('')
+  const [partialBlocks, setPartialBlocks] = useState<Block[]>([])
+  const [toolCalls, setToolCalls] = useState<ToolRow[]>([])
+  const abortRef = useRef<AbortController | null>(null)
+
+  // Abort an in-flight stream on unmount.
+  useEffect(() => () => abortRef.current?.abort(), [])
 
   const activeQuestion = useMemo(
     () => questions.find((q) => q.position === activePosition) ?? null,
@@ -38,28 +45,71 @@ export function CuadernoPage() {
   }, [sessionId])
 
   const onAsk = (question: string) => {
-    setIsLoading(true)
+    abortRef.current?.abort()
+    const ac = new AbortController()
+    abortRef.current = ac
+
     setError(null)
-    cuadernoApi
-      .ask(question, sessionId ?? undefined)
-      .then((r) => {
-        if (!sessionId) {
-          setSessionId(r.session_id)
-          localStorage.setItem(SESSION_STORAGE_KEY, r.session_id)
+    setIsLoading(true)
+    setStreamingQuestion(question)
+    setPartialBlocks([])
+    setToolCalls([])
+
+    let capturedSession = sessionId
+
+    askStream(question, sessionId ?? undefined, {
+      signal: ac.signal,
+      onEvent: (e) => {
+        switch (e.type) {
+          case 'meta':
+            if (!capturedSession) {
+              capturedSession = e.session_id
+              setSessionId(e.session_id)
+              localStorage.setItem(SESSION_STORAGE_KEY, e.session_id)
+            }
+            break
+          case 'tool':
+            setToolCalls((prev) => {
+              const key = `${e.name} ${e.args}`
+              const next = prev.filter((t) => `${t.name} ${t.args}` !== key)
+              return [
+                ...next,
+                { state: e.state, name: e.name, args: e.args, ms: e.ms },
+              ]
+            })
+            break
+          case 'block':
+            setPartialBlocks((prev) => [...prev, e.block])
+            break
+          case 'frame': {
+            const newQ: CuadernoQuestion = {
+              position: e.position,
+              question,
+              frame: e.frame,
+              bookmarked: false,
+              got_it: null,
+              created_at: new Date().toISOString(),
+            }
+            setQuestions((prev) => [...prev, newQ])
+            setActivePosition(e.position)
+            break
+          }
+          case 'error':
+            setError(e.partial ? `${e.message} (partial answer saved)` : e.message)
+            break
         }
-        const newQ: CuadernoQuestion = {
-          position: r.position,
-          question,
-          frame: r.frame,
-          bookmarked: false,
-          got_it: null,
-          created_at: new Date().toISOString(),
-        }
-        setQuestions((prev) => [...prev, newQ])
-        setActivePosition(r.position)
+      },
+    })
+      .catch((err) => {
+        if (ac.signal.aborted) return
+        setError(String(err))
       })
-      .catch((e) => setError(String(e)))
-      .finally(() => setIsLoading(false))
+      .finally(() => {
+        if (ac.signal.aborted) return
+        setIsLoading(false)
+        setPartialBlocks([])
+        setToolCalls([])
+      })
   }
 
   const onSelectFromHistory = (position: number) => {
@@ -102,6 +152,9 @@ export function CuadernoPage() {
         questions={questions}
         activeQuestion={activeQuestion}
         isLoading={isLoading}
+        streamingQuestion={streamingQuestion}
+        partialBlocks={partialBlocks}
+        toolCalls={toolCalls}
         onAsk={onAsk}
         onSelectFromHistory={onSelectFromHistory}
         onSetGotIt={onSetGotIt}

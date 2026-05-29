@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Citation, CuadernoQuestion } from '../../types/api'
+import type { Block, Citation, CuadernoQuestion, ToolRow } from '../../types/api'
 import { Composer } from './Composer'
 import { GotItMarkers } from './GotItMarkers'
 import { SidePanel } from './SidePanel'
@@ -14,8 +14,9 @@ type Props = {
   questions: CuadernoQuestion[]
   activeQuestion: CuadernoQuestion | null
   isLoading: boolean
-  partialText?: string
-  toolCalls?: Array<{ state: 'queued' | 'running' | 'done'; name: string; args: string; ms: number | null }>
+  streamingQuestion?: string
+  partialBlocks?: Block[]
+  toolCalls?: ToolRow[]
   onAsk: (question: string) => void
   onSelectFromHistory: (position: number) => void
   onSetGotIt: (position: number, value: 'got' | 'didnt') => void
@@ -27,7 +28,8 @@ export function Cuaderno({
   questions,
   activeQuestion,
   isLoading,
-  partialText = '',
+  streamingQuestion = '',
+  partialBlocks = [],
   toolCalls = [],
   onAsk,
   onSelectFromHistory,
@@ -36,8 +38,13 @@ export function Cuaderno({
   const [sidePanelFor, setSidePanelFor] = useState<Citation | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
 
-  const scene: 'empty' | 'midstream' | 'frame' =
-    isLoading ? 'midstream' : activeQuestion ? 'frame' : 'empty'
+  const scene: 'empty' | 'midstream' | 'writing' | 'frame' = !isLoading
+    ? activeQuestion
+      ? 'frame'
+      : 'empty'
+    : partialBlocks.length > 0
+    ? 'writing'
+    : 'midstream'
 
   return (
     <div className="cuaderno theme-light accent-sienna density-regular">
@@ -68,9 +75,16 @@ export function Cuaderno({
             {scene === 'empty' && <FrameEmpty onAsk={onAsk} />}
             {scene === 'midstream' && (
               <FrameMidStream
-                question={questions[questions.length - 1]?.question ?? '…'}
+                question={streamingQuestion || questions[questions.length - 1]?.question || '…'}
                 tools={toolCalls}
-                partial={partialText}
+                partial=""
+              />
+            )}
+            {scene === 'writing' && (
+              <FrameDynamic
+                frame={{ question: streamingQuestion, blocks: partialBlocks }}
+                onOpenCitation={setSidePanelFor}
+                onAsk={onAsk}
               />
             )}
             {scene === 'frame' && activeQuestion && (

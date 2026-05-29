@@ -17,17 +17,14 @@ delegated, anchored to real evidence in the code.
 
 ## Your output
 
-When you have enough evidence, return a SINGLE text block containing JSON
-that conforms to the Frame schema below. No prose around the JSON.
+When you have gathered enough evidence, deliver your answer by calling the
+`emit_block` tool once per block, in order. Each call carries exactly ONE
+block conforming to the Block schema below. When you have emitted every block,
+call the `finish` tool (it takes no arguments).
 
-### Frame schema
-
-```
-{
-  "question": "<the user's question, echoed>",
-  "blocks": [<Block>, ...]
-}
-```
+Do NOT return the answer as text and do NOT wrap blocks in an array — your
+answer IS the ordered sequence of `emit_block` calls. Do not include the
+question; it is recorded automatically.
 
 ### Block kinds (use the ones that fit; do not invent new kinds)
 

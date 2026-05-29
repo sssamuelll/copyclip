@@ -5,6 +5,8 @@ from typing import Any
 
 from . import anchor
 
+ANSWER_TOOLS: frozenset[str] = frozenset({"emit_block", "finish"})
+
 
 def build_tool_definitions() -> list[dict[str, Any]]:
     """Return Anthropic-format tool definitions for the cuaderno compositor."""
@@ -98,6 +100,30 @@ def build_tool_definitions() -> list[dict[str, Any]]:
                 "properties": {"symbol": {"type": "string"}},
                 "required": ["symbol"],
             },
+        },
+        {
+            "name": "emit_block",
+            "description": (
+                "Emit ONE block of your answer. Call once per block, in order. "
+                "Each block must conform to the Block schema in the system prompt. "
+                "Your answer IS the ordered sequence of emit_block calls."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "description": "lead | paragraph | ordered_list | code_block | ascii_block | citation | citation_stack | callout | widget | followups",
+                    },
+                },
+                "required": ["kind"],
+                "additionalProperties": True,
+            },
+        },
+        {
+            "name": "finish",
+            "description": "Call once, after you have emitted every block of your answer. Takes no arguments. Ends the answer.",
+            "input_schema": {"type": "object", "properties": {}},
         },
     ]
 
