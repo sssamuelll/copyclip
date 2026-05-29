@@ -67,6 +67,8 @@ def test_e2e_example_A_streams_frame_over_sse():
     """Full-stack: POST /api/cuaderno/ask drives the streaming compositor
     (messages_stream + emit_block) and returns an SSE stream whose terminal
     frame event carries the composed blocks."""
+    import os
+    os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
     td = tempfile.mkdtemp(prefix="cuaderno-e2e-")
     root = str(Path(td).absolute())
     (Path(td) / "README.md").write_text("# CopyClip", encoding="utf-8")
@@ -74,6 +76,7 @@ def test_e2e_example_A_streams_frame_over_sse():
     init_schema(conn)
     init_cuaderno_schema(conn)
     conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root, "test"))
+    conn.execute("INSERT OR REPLACE INTO config(key,value) VALUES('cuaderno_provider','anthropic')")
     conn.commit()
     conn.close()
 
@@ -108,7 +111,9 @@ def test_e2e_example_A_streams_frame_over_sse():
 
     with patch(
         "copyclip.intelligence.cuaderno.anthropic_client.AnthropicAdapter"
-    ) as MockAdapter:
+    ) as MockAdapter, patch(
+        "copyclip.intelligence.cuaderno.provider.AnthropicAdapter", MockAdapter
+    ):
         MockAdapter.return_value.messages_stream.side_effect = _stream
         status, ctype, events = _post_sse(
             f"http://127.0.0.1:{port}/api/cuaderno/ask",
