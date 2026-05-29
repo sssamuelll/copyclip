@@ -848,3 +848,24 @@ export type CuadernoSession = {
   questions: CuadernoQuestion[]
 }
 
+export type ToolRow = {
+  state: 'queued' | 'running' | 'done' | 'error'
+  name: string
+  args: string
+  ms: number | null
+}
+
+export type CuadernoStreamEvent =
+  | { type: 'meta'; session_id: string }
+  | {
+      type: 'tool'
+      id: string
+      name: string
+      args: string
+      state: 'running' | 'done' | 'error'
+      ms: number | null
+    }
+  | { type: 'block'; block: Block }
+  | { type: 'frame'; position: number; frame: Frame }
+  | { type: 'error'; message: string; partial: boolean }
+
