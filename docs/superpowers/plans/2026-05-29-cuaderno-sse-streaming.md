@@ -40,6 +40,7 @@
 
 - `tests/test_cuaderno_compositor.py` — rewrite for the streaming generator + `emit_block` protocol.
 - `tests/test_cuaderno_tool_catalog.py` — update the tool-name assertion.
+- `tests/test_cuaderno_e2e.py` — the pre-existing full-stack HTTP test mocks the old `messages_create` + single-JSON-response contract; it is skipped during PR1 (so the suite stays green) and rewritten against the SSE route in PR2 (Task 9).
 
 ### Tests — new files
 
@@ -1241,7 +1242,154 @@ Expected: `parse ok`.
 Run: `python -m pytest tests/ -k cuaderno -v`
 Expected: PASS (the handler change has no dedicated unit test; it is exercised manually in Step 4 and by the frontend e2e in PR4).
 
-- [ ] **Step 4: Manual smoke test (requires ANTHROPIC_API_KEY + an analyzed project)**
+- [ ] **Step 4: Rewrite the full-stack e2e test for SSE**
+
+`tests/test_cuaderno_e2e.py` was skipped in PR1 (it mocked the old `messages_create` + single-JSON contract). Now that the route is SSE, replace the ENTIRE file contents with:
+
+```python
+import json
+import socket
+import tempfile
+import threading
+import time
+from pathlib import Path
+from unittest.mock import patch
+from urllib import request
+
+from copyclip.intelligence.db import connect, init_schema, init_cuaderno_schema
+from copyclip.intelligence.server import run_server
+
+
+def _free_port():
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close()
+    return p
+
+
+def _wait_port(port, timeout_s=3.0):
+    start = time.time()
+    while time.time() - start < timeout_s:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                return
+        except OSError:
+            time.sleep(0.05)
+    raise RuntimeError("server did not start")
+
+
+def _post_sse(url, body, timeout=15):
+    """POST and parse a text/event-stream response into a list of event dicts."""
+    data = json.dumps(body).encode("utf-8")
+    req = request.Request(url, method="POST", data=data,
+                          headers={"Content-Type": "application/json"})
+    with request.urlopen(req, timeout=timeout) as r:
+        status = r.status
+        ctype = r.headers.get("Content-Type", "")
+        raw = r.read().decode("utf-8")
+    events = []
+    for record in raw.split("\n\n"):
+        record = record.strip()
+        if not record:
+            continue
+        for line in record.split("\n"):
+            if line.startswith("data:"):
+                events.append(json.loads(line[len("data:"):].strip()))
+    return status, ctype, events
+
+
+def _stop(bid, name, inp):
+    return {"type": "block_stop",
+            "block": {"type": "tool_use", "id": bid, "name": name, "input": inp}}
+
+
+def _content(bid, name, inp):
+    return {"type": "tool_use", "id": bid, "name": name, "input": inp}
+
+
+def _msg(reason, content):
+    return {"type": "message_stop", "stop_reason": reason, "content": content}
+
+
+def test_e2e_example_A_streams_frame_over_sse():
+    """Full-stack: POST /api/cuaderno/ask drives the streaming compositor
+    (messages_stream + emit_block) and returns an SSE stream whose terminal
+    frame event carries the composed blocks."""
+    td = tempfile.mkdtemp(prefix="cuaderno-e2e-")
+    root = str(Path(td).absolute())
+    (Path(td) / "README.md").write_text("# CopyClip", encoding="utf-8")
+    conn = connect(root)
+    init_schema(conn)
+    init_cuaderno_schema(conn)
+    conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root, "test"))
+    conn.commit()
+    conn.close()
+
+    port = _free_port()
+    th = threading.Thread(target=run_server, args=(root, port), daemon=True)
+    th.start()
+    _wait_port(port)
+
+    lead = {"kind": "lead", "text": "CopyClip is a personal tool."}
+    cite = {"kind": "citation",
+            "citation": {"kind": "path", "path": "README.md", "line_start": 1, "line_end": 1}}
+    turns = [
+        [
+            _stop("t1", "read_file", {"path": "README.md"}),
+            _msg("tool_use", [_content("t1", "read_file", {"path": "README.md"})]),
+        ],
+        [
+            _stop("b1", "emit_block", lead),
+            _stop("b2", "emit_block", cite),
+            _stop("f", "finish", {}),
+            _msg("tool_use", [
+                _content("b1", "emit_block", lead),
+                _content("b2", "emit_block", cite),
+                _content("f", "finish", {}),
+            ]),
+        ],
+    ]
+
+    def _stream(**kwargs):
+        for ev in turns.pop(0):
+            yield ev
+
+    with patch(
+        "copyclip.intelligence.cuaderno.anthropic_client.AnthropicAdapter"
+    ) as MockAdapter:
+        MockAdapter.return_value.messages_stream.side_effect = _stream
+        status, ctype, events = _post_sse(
+            f"http://127.0.0.1:{port}/api/cuaderno/ask",
+            {"question": "what does this project do?"},
+        )
+
+    assert status == 200
+    assert "text/event-stream" in ctype
+    types = [e["type"] for e in events]
+    assert types[0] == "meta"
+    assert "tool" in types
+    assert "block" in types
+    frame_ev = next(e for e in events if e["type"] == "frame")
+    kinds = [b["kind"] for b in frame_ev["frame"]["blocks"]]
+    assert "lead" in kinds
+    assert "citation" in kinds
+    assert frame_ev["position"] == 1
+```
+
+Run: `python -m pytest tests/test_cuaderno_e2e.py -v`
+Expected: PASS, 1 test.
+
+NOTE on connection close: `_post_sse` uses `r.read()`, which blocks until the server closes the socket at stream end. This works because `BaseHTTPRequestHandler`'s default `protocol_version` is HTTP/1.0, so the connection closes when the handler returns. If this test hangs, it means the handler is keeping the connection open after the stream — verify the handler returns promptly after `sse_response` and does not set HTTP/1.1 keep-alive that outlives the response. If it proves flaky in CI, the manual smoke (Step 6) is the fallback verification and the test may be `@pytest.mark.skip`-ed with a recorded reason rather than left failing.
+
+- [ ] **Step 5: Run the full cuaderno suite and commit**
+
+Run: `python -m pytest tests/ -k cuaderno -q`
+Expected: PASS (the e2e test now runs and passes; nothing skipped for the streaming path).
+
+```bash
+git add src/copyclip/intelligence/server.py tests/test_cuaderno_e2e.py
+git commit -m "feat(cuaderno): /api/cuaderno/ask streams SSE events"
+```
+
+- [ ] **Step 6: Manual smoke test (requires ANTHROPIC_API_KEY + an analyzed project)**
 
 Start the server on this repo and curl the stream:
 
@@ -1255,13 +1403,6 @@ curl -N -X POST http://127.0.0.1:4310/api/cuaderno/ask \
 ```
 
 Expected: a `text/event-stream` where you see `data: {"type": "meta", ...}` first, then `data: {"type": "tool", ...}` rows, then `data: {"type": "block", ...}` lines appearing progressively, then a final `data: {"type": "frame", "position": N, ...}`.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/copyclip/intelligence/server.py
-git commit -m "feat(cuaderno): /api/cuaderno/ask streams SSE events"
-```
 
 ---
 
