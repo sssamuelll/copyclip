@@ -1634,6 +1634,36 @@ def run_server(
                     handle_settings_get(self, ctx, conn)
                     return
 
+                if parsed.path == "/api/cuaderno/providers":
+                    from .cuaderno.provider import (
+                        provider_key_status, DEFAULT_MODELS, TOOL_INCAPABLE_MODELS,
+                    )
+                    status = provider_key_status()
+                    cur_provider = None
+                    cur_model = None
+                    row = conn.execute(
+                        "SELECT value FROM config WHERE key='cuaderno_provider'").fetchone()
+                    if row:
+                        cur_provider = row[0]
+                    row = conn.execute(
+                        "SELECT value FROM config WHERE key='cuaderno_model'").fetchone()
+                    if row:
+                        cur_model = row[0]
+                    providers = [
+                        {
+                            "name": name,
+                            "key_configured": configured,
+                            "default_model": DEFAULT_MODELS.get(name),
+                        }
+                        for name, configured in status.items()
+                    ]
+                    self._json({
+                        "providers": providers,
+                        "tool_incapable_models": sorted(TOOL_INCAPABLE_MODELS),
+                        "current": {"provider": cur_provider, "model": cur_model},
+                    })
+                    return
+
                 if parsed.path == "/api/cuaderno/file":
                     if not pid:
                         self._json({"error": "no_project"}, 400)
@@ -2519,20 +2549,25 @@ def run_server(
                         self._json({"error": "question_required"}, 400)
                         return
                     session_id = data.get("session_id")
-                    from .cuaderno.anthropic_client import AnthropicAdapter
                     from .cuaderno.ask_stream import iter_ask_events
                     from .cuaderno.persistence import create_session
+                    from .cuaderno.provider import (
+                        resolve_cuaderno_provider, build_cuaderno_client,
+                        CuadernoProviderError,
+                    )
                     if not session_id:
                         session_id = create_session(conn, project_root=ctx.root)
                     try:
-                        client = AnthropicAdapter()
-                    except RuntimeError as exc:
-                        self._json({"error": "llm_not_configured", "detail": str(exc)}, 503)
+                        resolved = resolve_cuaderno_provider(conn)
+                    except CuadernoProviderError as exc:
+                        self._json({"error": "llm_not_configured",
+                                    "provider": exc.provider, "detail": str(exc)}, 503)
                         return
+                    client = build_cuaderno_client(resolved)
                     events = iter_ask_events(
                         client=client, question=question,
                         project_root=ctx.root, project_id=pid, conn=conn,
-                        session_id=session_id,
+                        session_id=session_id, model=resolved["model"],
                     )
                     sse_response(self, events)
                     return

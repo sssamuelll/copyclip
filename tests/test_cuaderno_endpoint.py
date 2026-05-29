@@ -77,6 +77,7 @@ def _setup_server():
     init_schema(conn)
     init_cuaderno_schema(conn)
     conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root, "test"))
+    conn.execute("INSERT OR REPLACE INTO config(key,value) VALUES('cuaderno_provider','anthropic')")
     conn.commit()
     conn.close()
     port = _free_port()

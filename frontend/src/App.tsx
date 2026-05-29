@@ -28,7 +28,8 @@ import './styles/cuaderno.css'
 type Page = 'cuaderno' | 'reacquaintance' | 'ask' | 'handoff' | 'debt-navigator' | 'atlas-3d' | 'timeline' | 'planning' | 'changes' | 'architecture' | 'impact' | 'risks' | 'context-builder' | 'decisions' | 'settings'
 
 export function App() {
-  const [page, setPage] = useState<Page>('reacquaintance')
+  const [page, setPage] = useState<Page>('cuaderno')
+  const [dashLoaded, setDashLoaded] = useState(false)
   const [overview, setOverview] = useState<Overview>()
   const [decisions, setDecisions] = useState<DecisionItem[]>([])
   const [risks, setRisks] = useState<RiskItem[]>([])
@@ -64,9 +65,15 @@ export function App() {
     }
   }, [])
 
+  // Dashboard data (overview/risks/changes/architecture) is only needed when the
+  // dashboard is shown — the cuaderno home has its own API. Load it lazily on the
+  // first entry into any dashboard page, once.
   useEffect(() => {
-    loadAll()
-  }, [loadAll])
+    if (page !== 'cuaderno' && !dashLoaded) {
+      setDashLoaded(true)
+      loadAll()
+    }
+  }, [page, dashLoaded, loadAll])
 
   const notify = (msg: string) => {
     setToast(msg)
@@ -89,6 +96,21 @@ export function App() {
     setPage('changes')
   }
 
+  // copyclip IS the cuaderno: it is the full-screen home, rendered outside the
+  // dashboard shell. The dashboard pages are retained and reachable (the cuaderno
+  // offers a toggle into them; the sidebar returns here), to strengthen the
+  // cuaderno later. Reversible: flip the `page` default above to restore the
+  // dashboard-first behavior.
+  if (page === 'cuaderno') {
+    return (
+      <PlaygroundProvider>
+        <div style={{ height: '100vh', overflow: 'hidden', background: 'var(--bg)', color: 'var(--text-primary)' }}>
+          <CuadernoPage onOpenDashboard={() => setPage('reacquaintance')} />
+        </div>
+      </PlaygroundProvider>
+    )
+  }
+
   return (
     <PlaygroundProvider>
       <div className="app gen-ui-layout" style={{ display: 'flex', height: '100vh', background: 'var(--bg)', color: 'var(--text-primary)' }}>
@@ -108,7 +130,6 @@ export function App() {
           </div>
 
           <div style={{ padding: '24px', flex: 1 }}>
-            {page === 'cuaderno' && <CuadernoPage />}
             {page === 'reacquaintance' && <ReacquaintancePage onOpenDecision={openDecision} onOpenRisk={openRisk} onOpenChanges={openChanges} />}
             {page === 'ask' && <AskPage onNotify={notify} onOpenDecision={openDecision} onOpenRisk={openRisk} onOpenChanges={openChanges} />}
             {page === 'handoff' && <HandoffPage onNotify={notify} />}
