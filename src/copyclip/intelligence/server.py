@@ -1634,6 +1634,36 @@ def run_server(
                     handle_settings_get(self, ctx, conn)
                     return
 
+                if parsed.path == "/api/cuaderno/providers":
+                    from .cuaderno.provider import (
+                        provider_key_status, DEFAULT_MODELS, TOOL_INCAPABLE_MODELS,
+                    )
+                    status = provider_key_status()
+                    cur_provider = None
+                    cur_model = None
+                    row = conn.execute(
+                        "SELECT value FROM config WHERE key='cuaderno_provider'").fetchone()
+                    if row:
+                        cur_provider = row[0]
+                    row = conn.execute(
+                        "SELECT value FROM config WHERE key='cuaderno_model'").fetchone()
+                    if row:
+                        cur_model = row[0]
+                    providers = [
+                        {
+                            "name": name,
+                            "key_configured": configured,
+                            "default_model": DEFAULT_MODELS.get(name),
+                        }
+                        for name, configured in status.items()
+                    ]
+                    self._json({
+                        "providers": providers,
+                        "tool_incapable_models": sorted(TOOL_INCAPABLE_MODELS),
+                        "current": {"provider": cur_provider, "model": cur_model},
+                    })
+                    return
+
                 if parsed.path == "/api/cuaderno/file":
                     if not pid:
                         self._json({"error": "no_project"}, 400)
