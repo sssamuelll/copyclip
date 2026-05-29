@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Block, Citation, CuadernoQuestion, ToolRow } from '../../types/api'
+import type { Block, Citation, CuadernoQuestion, ToolRow, CuadernoProvidersResponse } from '../../types/api'
 import { Composer } from './Composer'
 import { GotItMarkers } from './GotItMarkers'
 import { SidePanel } from './SidePanel'
@@ -7,6 +7,7 @@ import { HistoryOverlay } from './HistoryOverlay'
 import { FrameEmpty } from './frames/FrameEmpty'
 import { FrameMidStream } from './frames/FrameMidStream'
 import { FrameDynamic } from './frames/FrameDynamic'
+import { ProviderSelector } from './ProviderSelector'
 
 type Props = {
   sessionLabel: string
@@ -17,6 +18,8 @@ type Props = {
   streamingQuestion?: string
   partialBlocks?: Block[]
   toolCalls?: ToolRow[]
+  providers?: CuadernoProvidersResponse | null
+  onSetProvider?: (provider: string, model: string) => void
   onAsk: (question: string) => void
   onSelectFromHistory: (position: number) => void
   onSetGotIt: (position: number, value: 'got' | 'didnt') => void
@@ -31,6 +34,8 @@ export function Cuaderno({
   streamingQuestion = '',
   partialBlocks = [],
   toolCalls = [],
+  providers = null,
+  onSetProvider,
   onAsk,
   onSelectFromHistory,
   onSetGotIt,
@@ -58,6 +63,9 @@ export function Cuaderno({
           <span style={{ color: 'var(--ink-2)' }}>{sessionLabel}</span>
         </div>
         <div className="right">
+          {onSetProvider && (
+            <ProviderSelector data={providers} onChange={onSetProvider} />
+          )}
           <span className="session">{questionNumber}</span>
           <button
             className="hamb"
