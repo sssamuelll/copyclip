@@ -56,3 +56,28 @@ def read_json_body(handler):
     length = int(handler.headers.get("Content-Length", "0"))
     raw = handler.rfile.read(length) if length else b"{}"
     return json.loads(raw.decode("utf-8"))
+
+
+def sse_response(handler, events) -> bool:
+    """Stream JSON event dicts as text/event-stream.
+
+    Writes SSE headers, then one `data: <json>\\n\\n` record per event with an
+    explicit flush. Returns True if the stream completed, False if the client
+    disconnected (in which case the events generator is closed so its finally
+    can run — e.g. to persist a partial frame).
+    """
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/event-stream")
+    handler.send_header("Cache-Control", "no-cache")
+    handler.send_header("Connection", "keep-alive")
+    handler.end_headers()
+    for ev in events:
+        try:
+            handler.wfile.write(f"data: {json.dumps(ev)}\n\n".encode("utf-8"))
+            handler.wfile.flush()
+        except (BrokenPipeError, ConnectionError, OSError):
+            close = getattr(events, "close", None)
+            if close is not None:
+                close()
+            return False
+    return True
