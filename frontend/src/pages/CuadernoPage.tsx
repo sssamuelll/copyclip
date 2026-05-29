@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Block, CuadernoQuestion, ToolRow } from '../types/api'
+import type { Block, CuadernoQuestion, ToolRow, CuadernoProvidersResponse } from '../types/api'
 import { Cuaderno } from '../components/cuaderno/Cuaderno'
 import { askStream, cuadernoApi } from '../api/cuaderno'
 
@@ -13,6 +13,7 @@ export function CuadernoPage() {
   const [activePosition, setActivePosition] = useState<number | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [providers, setProviders] = useState<CuadernoProvidersResponse | null>(null)
   const [streamingQuestion, setStreamingQuestion] = useState('')
   const [partialBlocks, setPartialBlocks] = useState<Block[]>([])
   const [toolCalls, setToolCalls] = useState<ToolRow[]>([])
@@ -43,6 +44,18 @@ export function CuadernoPage() {
         setSessionId(null)
       })
   }, [sessionId])
+
+  // Load the provider list / current selection once on mount.
+  useEffect(() => {
+    cuadernoApi.providers().then(setProviders).catch(() => {})
+  }, [])
+
+  const onSetProvider = (provider: string, model: string) => {
+    cuadernoApi.setProvider(provider, model).catch(() => {})
+    setProviders((prev) =>
+      prev ? { ...prev, current: { provider, model } } : prev,
+    )
+  }
 
   const onAsk = (question: string) => {
     abortRef.current?.abort()
@@ -155,6 +168,8 @@ export function CuadernoPage() {
         streamingQuestion={streamingQuestion}
         partialBlocks={partialBlocks}
         toolCalls={toolCalls}
+        providers={providers}
+        onSetProvider={onSetProvider}
         onAsk={onAsk}
         onSelectFromHistory={onSelectFromHistory}
         onSetGotIt={onSetGotIt}
