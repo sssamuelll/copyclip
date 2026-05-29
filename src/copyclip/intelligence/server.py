@@ -39,7 +39,7 @@ from .playground import (
 from .reacquaintance import build_reacquaintance_briefing, record_reacquaintance_visit
 from .server_context import ServerContext
 from .server_events import handle_events_get, publish_event as publish_event_impl
-from .server_helpers import json_response, pagination, parse_dt, project_id, read_json_body, with_meta as add_meta
+from .server_helpers import json_response, pagination, parse_dt, project_id, read_json_body, sse_response, with_meta as add_meta
 from .server_routes_core import handle_health_get, handle_settings_get, handle_settings_post
 from .phases import (
     PHASE_COMPLETED,
@@ -2519,12 +2519,9 @@ def run_server(
                         self._json({"error": "question_required"}, 400)
                         return
                     session_id = data.get("session_id")
-                    from .cuaderno import compositor as _compositor
                     from .cuaderno.anthropic_client import AnthropicAdapter
-                    from .cuaderno.persistence import (
-                        create_session, save_question,
-                    )
-                    from .cuaderno.schema import frame_to_dict
+                    from .cuaderno.ask_stream import iter_ask_events
+                    from .cuaderno.persistence import create_session
                     if not session_id:
                         session_id = create_session(conn, project_root=ctx.root)
                     try:
@@ -2532,16 +2529,12 @@ def run_server(
                     except RuntimeError as exc:
                         self._json({"error": "llm_not_configured", "detail": str(exc)}, 503)
                         return
-                    frame = _compositor.compose_frame(
+                    events = iter_ask_events(
                         client=client, question=question,
                         project_root=ctx.root, project_id=pid, conn=conn,
+                        session_id=session_id,
                     )
-                    position = save_question(conn, session_id, question, frame)
-                    self._json({
-                        "session_id": session_id,
-                        "position": position,
-                        "frame": frame_to_dict(frame),
-                    })
+                    sse_response(self, events)
                     return
 
                 self._json({"error": "not_found"}, 404)
