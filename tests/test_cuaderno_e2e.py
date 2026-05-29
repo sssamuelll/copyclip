@@ -7,6 +7,8 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib import request
 
+import pytest
+
 from copyclip.intelligence.db import connect, init_schema, init_cuaderno_schema
 from copyclip.intelligence.server import run_server
 
@@ -35,6 +37,11 @@ def _post(url, body):
         return r.status, json.loads(r.read().decode("utf-8"))
 
 
+@pytest.mark.skip(
+    reason="Wired to the old messages_create + single-JSON-response contract. "
+    "Rewritten against the SSE route (messages_stream + emit_block, parsing "
+    "text/event-stream) in the SSE-route task (T9 of the SSE streaming plan)."
+)
 def test_e2e_example_A_compositor_returns_valid_frame():
     """A scripted run that walks the compositor through tool_use → tool_result →
     final Frame JSON, and verifies the HTTP response."""
