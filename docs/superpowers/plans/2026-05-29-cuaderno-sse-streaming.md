@@ -41,6 +41,7 @@
 - `tests/test_cuaderno_compositor.py` — rewrite for the streaming generator + `emit_block` protocol.
 - `tests/test_cuaderno_tool_catalog.py` — update the tool-name assertion.
 - `tests/test_cuaderno_e2e.py` — the pre-existing full-stack HTTP test mocks the old `messages_create` + single-JSON-response contract; it is skipped during PR1 (so the suite stays green) and rewritten against the SSE route in PR2 (Task 9).
+- `tests/test_cuaderno_endpoint.py` — its 3 ask-route tests assert the old single-JSON `/ask` contract; they are migrated to the SSE contract in PR2 (Task 9), stubbing `ask_stream.iter_compose_events` and reading the event stream. The 400/503 error guards still emit plain JSON and keep their assertions. (Discovered during execution; not in the original file map.)
 
 ### Tests — new files
 
