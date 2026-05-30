@@ -12,6 +12,20 @@ def build_tool_definitions() -> list[dict[str, Any]]:
     """Return Anthropic-format tool definitions for the cuaderno compositor."""
     return [
         {
+            "name": "list_dir",
+            "description": (
+                "List a project-relative directory's entries (subdirectories "
+                "and files). Use this FIRST to orient yourself before reading. "
+                "read_file is for files, not directories."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Project-relative directory (POSIX). Defaults to the project root '.'."},
+                },
+            },
+        },
+        {
             "name": "read_file",
             "description": "Read a project-relative file. Returns lines numbered from 1. Optionally slice by line range.",
             "input_schema": {
@@ -137,6 +151,8 @@ def dispatch_tool(
     conn: sqlite3.Connection | None,
 ) -> dict[str, Any]:
     """Execute a tool by name with the provided args + ambient project context."""
+    if name == "list_dir":
+        return anchor.list_dir(project_root, args.get("path") or ".")
     if name == "read_file":
         return anchor.read_file(project_root, args["path"], args.get("line_start"), args.get("line_end"))
     if name == "grep_symbols":

@@ -7,7 +7,31 @@ from typing import Any, Iterator, Optional
 
 from .prompts import SYSTEM_PROMPT
 from .schema import Block, Frame, frame_from_dict, frame_to_dict, validate_block_dict
-from .tool_catalog import build_tool_definitions, dispatch_tool
+from .tool_catalog import ANSWER_TOOLS, build_tool_definitions, dispatch_tool
+
+CLOSING_DIRECTIVE = (
+    "You have gathered your evidence — the research tools are no longer "
+    "available. Compose your answer NOW: call emit_block for each block (at "
+    "least a lead and a paragraph), anchoring every claim to what you have "
+    "already read, then call finish. If the evidence is thin, say so honestly "
+    "in the answer rather than asking for more."
+)
+
+
+def _inject_directive(messages: list[dict[str, Any]], text: str) -> None:
+    """Append a user-side directive, merging into the trailing user turn when
+    possible so we never emit two consecutive user messages."""
+    block = {"type": "text", "text": text}
+    if messages and messages[-1].get("role") == "user":
+        content = messages[-1]["content"]
+        if isinstance(content, str):
+            messages[-1]["content"] = [{"type": "text", "text": content}, block]
+        elif isinstance(content, list):
+            content.append(block)
+        else:
+            messages.append({"role": "user", "content": [block]})
+    else:
+        messages.append({"role": "user", "content": [block]})
 
 
 def _fallback_frame(question: str, reason: str) -> Frame:
@@ -72,10 +96,19 @@ def iter_compose_events(
     phase and surface as tool events.
     """
     tools = build_tool_definitions()
+    answer_only = [t for t in tools if t["name"] in ANSWER_TOOLS]
     messages: list[dict[str, Any]] = [{"role": "user", "content": question}]
     emitted: list[Block] = []
 
-    for _ in range(max_tool_rounds):
+    for round_i in range(max_tool_rounds):
+        # Final round: take the research tools away and force an answer, so a
+        # model that keeps exploring still produces a real Frame instead of the
+        # budget-exhausted fallback.
+        is_closing = round_i == max_tool_rounds - 1
+        if is_closing:
+            _inject_directive(messages, CLOSING_DIRECTIVE)
+        round_tools = answer_only if is_closing else tools
+
         turn_content: list[dict[str, Any]] = []
         stop_reason: Optional[str] = None
         finish_seen = False
@@ -85,7 +118,7 @@ def iter_compose_events(
             for sev in client.messages_stream(
                 model=model,
                 system=SYSTEM_PROMPT,
-                tools=tools,
+                tools=round_tools,
                 messages=messages,
                 max_tokens=max_tokens,
             ):

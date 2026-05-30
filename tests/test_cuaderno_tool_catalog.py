@@ -5,10 +5,26 @@ def test_tool_definitions_include_all_tools():
     tools = build_tool_definitions()
     names = {t["name"] for t in tools}
     assert names == {
-        "read_file", "grep_symbols", "get_callers", "get_callees",
+        "list_dir", "read_file", "grep_symbols", "get_callers", "get_callees",
         "git_log", "git_blame", "git_diff", "find_tests",
         "emit_block", "finish",
     }
+
+
+def test_dispatch_list_dir(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "a.txt").write_text("x", encoding="utf-8")
+    out = dispatch_tool("list_dir", {"path": "."}, project_root=str(tmp_path),
+                        project_id=1, conn=None)
+    names = [e["name"] for e in out["entries"]]
+    assert names == ["src", "a.txt"]
+
+
+def test_dispatch_list_dir_defaults_path(tmp_path):
+    (tmp_path / "a.txt").write_text("x", encoding="utf-8")
+    out = dispatch_tool("list_dir", {}, project_root=str(tmp_path),
+                        project_id=1, conn=None)
+    assert {"name": "a.txt", "type": "file"} in out["entries"]
 
 
 def test_emit_block_requires_kind():
