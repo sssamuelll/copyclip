@@ -99,7 +99,7 @@ def _post_json(url: str, payload: dict):
 
 
 def test_decisions_pagination_and_meta():
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)
         root_path = str(root.absolute())
         conn = connect(root_path)
@@ -127,7 +127,7 @@ def test_decisions_pagination_and_meta():
 
 
 def test_decision_history_endpoint():
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)
         root_path = str(root.absolute())
         conn = connect(root_path)
@@ -153,7 +153,7 @@ def test_decision_history_endpoint():
 
 
 def test_events_endpoint_starts_with_connected_event():
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)
         root_path = str(root.absolute())
         conn = connect(root_path)
@@ -172,7 +172,7 @@ def test_events_endpoint_starts_with_connected_event():
 
 
 def test_health_endpoint_contract():
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)
         root_path = str(root.absolute())
         conn = connect(root_path)
@@ -196,7 +196,7 @@ def test_health_endpoint_survives_sustained_requests():
     # Each handler invocation opens a SQLite conn; if we leak them, the
     # server eventually exhausts fds. Documents the intent that every
     # do_* handler closes its conn on every return path.
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)
         root_path = str(root.absolute())
         conn = connect(root_path)
@@ -220,7 +220,7 @@ def test_health_endpoint_survives_sustained_requests():
 
 
 def test_ask_endpoint_returns_evidence_first_contract():
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)
         root_path = str(root.absolute())
         conn = connect(root_path)
@@ -265,7 +265,7 @@ def test_ask_endpoint_returns_evidence_first_contract():
 
 
 def test_ask_endpoint_returns_structured_insufficient_evidence_response():
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)
         root_path = str(root.absolute())
         conn = connect(root_path)
@@ -299,7 +299,7 @@ def test_ask_endpoint_returns_structured_insufficient_evidence_response():
 
 
 def test_ask_endpoint_surfaces_contradictory_signals_instead_of_false_certainty():
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)
         root_path = str(root.absolute())
         conn = connect(root_path)
@@ -349,7 +349,7 @@ def test_ask_endpoint_surfaces_contradictory_signals_instead_of_false_certainty(
 
 
 def test_ask_endpoint_requires_decision_and_drift_risk_to_overlap_on_same_file():
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)
         root_path = str(root.absolute())
         conn = connect(root_path)
@@ -392,7 +392,7 @@ def test_ask_endpoint_requires_decision_and_drift_risk_to_overlap_on_same_file()
 
 
 def test_ask_endpoint_does_not_ground_vague_question_from_generic_project_noise():
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)
         root_path = str(root.absolute())
         conn = connect(root_path)
@@ -423,7 +423,7 @@ def test_ask_endpoint_does_not_ground_vague_question_from_generic_project_noise(
 
 
 def test_ask_endpoint_does_not_ground_common_word_match_in_decision_text():
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)
         root_path = str(root.absolute())
         conn = connect(root_path)
@@ -448,7 +448,7 @@ def test_ask_endpoint_does_not_ground_common_word_match_in_decision_text():
 
 
 def test_ask_endpoint_does_not_ground_common_word_file_path_match():
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)
         root_path = str(root.absolute())
         conn = connect(root_path)
@@ -473,7 +473,7 @@ def test_ask_endpoint_does_not_ground_common_word_file_path_match():
 
 
 def test_context_bundle_endpoint_returns_manifest():
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)
         root_path = str(root.absolute())
         conn = connect(root_path)
@@ -502,7 +502,7 @@ def test_context_bundle_endpoint_returns_manifest():
 
 
 def test_analyze_cancel_without_running_job_returns_404():
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)
         root_path = str(root.absolute())
         conn = connect(root_path)
@@ -525,7 +525,7 @@ def test_analyze_cancel_without_running_job_returns_404():
 
 
 def test_risk_trends_endpoint_works_with_snapshot_breakdown():
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)
         root_path = str(root.absolute())
         conn = connect(root_path)
@@ -549,7 +549,7 @@ def test_risk_trends_endpoint_works_with_snapshot_breakdown():
 
 
 def test_quality_gate_blocks_resolve_without_evidence():
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)
         root_path = str(root.absolute())
         conn = connect(root_path)
@@ -577,7 +577,7 @@ def test_quality_gate_blocks_resolve_without_evidence():
 
 
 def test_quality_gate_allows_resolve_with_ref_or_note():
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)
         root_path = str(root.absolute())
         conn = connect(root_path)
@@ -606,7 +606,7 @@ def test_quality_gate_allows_resolve_with_ref_or_note():
 
 
 def test_pulls_endpoint_pagination():
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)
         root_path = str(root.absolute())
         conn = connect(root_path)
@@ -633,7 +633,7 @@ def test_pulls_endpoint_pagination():
 
 
 def test_alert_rules_and_cooldown_evaluation():
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)
         root_path = str(root.absolute())
         conn = connect(root_path)
@@ -664,7 +664,7 @@ def test_alert_rules_and_cooldown_evaluation():
 
 
 def test_weekly_export_endpoint_returns_markdown_and_summary():
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)
         root_path = str(root.absolute())
         conn = connect(root_path)
@@ -690,7 +690,7 @@ def test_weekly_export_endpoint_returns_markdown_and_summary():
 
 
 def test_settings_alias_get_and_post():
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)
         root_path = str(root.absolute())
         conn = connect(root_path)
@@ -713,7 +713,7 @@ def test_settings_alias_get_and_post():
 
 
 def test_alert_rule_patch_and_delete():
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)
         root_path = str(root.absolute())
         conn = connect(root_path)
@@ -748,7 +748,7 @@ def test_alert_rule_patch_and_delete():
 
 
 def test_alert_scheduler_state_get_and_set():
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)
         root_path = str(root.absolute())
         conn = connect(root_path)
