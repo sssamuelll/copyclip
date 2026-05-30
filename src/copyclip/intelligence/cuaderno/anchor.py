@@ -48,6 +48,42 @@ def read_file(
     }
 
 
+# Directories that only add noise when orienting in a project tree.
+_NOISE_DIRS: frozenset[str] = frozenset({
+    ".git", ".hg", ".svn", "node_modules", ".venv", "venv", "__pycache__",
+    "dist", "build", ".copyclip", ".next", ".turbo", ".pytest_cache",
+    ".mypy_cache", ".ruff_cache", "target", "coverage", ".idea", ".vscode",
+})
+
+
+def list_dir(project_root: str, path: str = ".", limit: int = 200) -> dict[str, Any]:
+    """List a project-relative directory's entries (dirs first, then files,
+    alpha within each). Skips noise dirs. Use this to orient before reading."""
+    resolved = _safe_resolve(project_root, path)
+    if resolved is None:
+        return {"error": "path_outside_root"}
+    if not resolved.exists() or not resolved.is_dir():
+        return {"error": "not_a_directory", "path": path}
+    dirs: list[str] = []
+    files: list[str] = []
+    try:
+        for entry in resolved.iterdir():
+            name = entry.name
+            if entry.is_dir():
+                if name in _NOISE_DIRS:
+                    continue
+                dirs.append(name)
+            else:
+                files.append(name)
+    except OSError as exc:
+        return {"error": "read_failed", "path": path, "detail": str(exc)}
+    entries = (
+        [{"name": n, "type": "dir"} for n in sorted(dirs)]
+        + [{"name": n, "type": "file"} for n in sorted(files)]
+    )
+    return {"path": path, "entries": entries[: max(1, int(limit or 200))]}
+
+
 def grep_symbols(
     conn: sqlite3.Connection,
     project_id: int,

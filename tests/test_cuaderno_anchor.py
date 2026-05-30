@@ -9,6 +9,7 @@ from copyclip.intelligence.cuaderno.anchor import (
     git_diff,
     git_log,
     grep_symbols,
+    list_dir,
     read_file,
 )
 from copyclip.intelligence.db import init_schema
@@ -56,6 +57,55 @@ def _seed_symbols(conn, project_id, rows):
              None, r.get("module", "x")),
         )
     conn.commit()
+
+
+def test_list_dir_lists_dirs_first_then_files_alpha(tmp_path: Path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "README.md").write_text("x", encoding="utf-8")
+    (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+
+    out = list_dir(str(tmp_path), ".")
+    assert out["path"] == "."
+    assert out["entries"] == [
+        {"name": "docs", "type": "dir"},
+        {"name": "src", "type": "dir"},
+        {"name": "README.md", "type": "file"},
+        {"name": "package.json", "type": "file"},
+    ]
+
+
+def test_list_dir_defaults_to_root(tmp_path: Path):
+    (tmp_path / "a.txt").write_text("x", encoding="utf-8")
+    out = list_dir(str(tmp_path))
+    assert {"name": "a.txt", "type": "file"} in out["entries"]
+
+
+def test_list_dir_skips_noise_dirs(tmp_path: Path):
+    (tmp_path / "node_modules").mkdir()
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "__pycache__").mkdir()
+    (tmp_path / "src").mkdir()
+
+    out = list_dir(str(tmp_path), ".")
+    names = [e["name"] for e in out["entries"]]
+    assert names == ["src"]
+
+
+def test_list_dir_rejects_path_escaping_root(tmp_path: Path):
+    out = list_dir(str(tmp_path), "../..")
+    assert out == {"error": "path_outside_root"}
+
+
+def test_list_dir_on_a_file_is_not_a_directory(tmp_path: Path):
+    (tmp_path / "x.py").write_text("hi", encoding="utf-8")
+    out = list_dir(str(tmp_path), "x.py")
+    assert out == {"error": "not_a_directory", "path": "x.py"}
+
+
+def test_list_dir_missing(tmp_path: Path):
+    out = list_dir(str(tmp_path), "nope")
+    assert out == {"error": "not_a_directory", "path": "nope"}
 
 
 def test_grep_symbols_by_name(tmp_path):
