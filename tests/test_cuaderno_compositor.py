@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from copyclip.intelligence.cuaderno.compositor import (
@@ -194,6 +195,65 @@ def test_compose_frame_wrapper_returns_terminal_frame(tmp_path: Path):
     assert isinstance(frame, Frame)
     assert frame.question == "q"
     assert frame.blocks[0].kind == "lead"
+
+
+def test_final_round_forces_an_answer(tmp_path: Path):
+    """A model that keeps researching gets one forced closing round: the last
+    round is offered ONLY the answer tools (emit_block/finish) plus a directive,
+    so it must compose an answer instead of exhausting the budget with reads."""
+    read_turn = [
+        _tool_stop("r1", "read_file", {"path": "README.md"}),
+        _msg_stop("tool_use", [_content("r1", "read_file", {"path": "README.md"})]),
+    ]
+    closing_turn = [
+        _tool_stop("b1", "emit_block", {"kind": "lead", "text": "it does X"}),
+        _tool_stop("f", "finish", {}),
+        _msg_stop("tool_use", [
+            _content("b1", "emit_block", {"kind": "lead", "text": "it does X"}),
+            _content("f", "finish", {}),
+        ]),
+    ]
+    (tmp_path / "README.md").write_text("# X\n", encoding="utf-8")
+    client = StubStream([read_turn, closing_turn])
+    events = list(iter_compose_events(
+        client=client, question="q", project_root=str(tmp_path),
+        project_id=1, conn=None, max_tool_rounds=2,
+    ))
+
+    # A real answer, not the budget-exhausted fallback.
+    frame = next(e for e in events if e["type"] == "frame")
+    assert frame["frame"]["blocks"] == [{"kind": "lead", "text": "it does X"}]
+
+    # The closing (2nd) round was offered ONLY the answer tools...
+    closing_call = client.calls[1]
+    closing_tool_names = {t["name"] for t in closing_call["tools"]}
+    assert closing_tool_names == {"emit_block", "finish"}
+
+    # ...and carried a directive telling the model to answer now.
+    flat = json.dumps(closing_call["messages"])
+    assert "emit_block" in flat and ("answer" in flat.lower() or "compose" in flat.lower())
+
+
+def test_non_final_rounds_keep_research_tools(tmp_path: Path):
+    """Only the LAST round is restricted; earlier rounds keep the full toolset
+    (including list_dir / read_file) so evidence-gathering still works."""
+    read_turn = [
+        _tool_stop("r1", "read_file", {"path": "README.md"}),
+        _msg_stop("tool_use", [_content("r1", "read_file", {"path": "README.md"})]),
+    ]
+    closing_turn = [
+        _tool_stop("f", "finish", {}),
+        _msg_stop("tool_use", [_content("f", "finish", {})]),
+    ]
+    (tmp_path / "README.md").write_text("# X\n", encoding="utf-8")
+    client = StubStream([read_turn, closing_turn])
+    list(iter_compose_events(
+        client=client, question="q", project_root=str(tmp_path),
+        project_id=1, conn=None, max_tool_rounds=2,
+    ))
+    first_call = client.calls[0]
+    first_tool_names = {t["name"] for t in first_call["tools"]}
+    assert "read_file" in first_tool_names and "list_dir" in first_tool_names
 
 
 def test_emit_block_across_two_turns_emits_once(tmp_path: Path):
