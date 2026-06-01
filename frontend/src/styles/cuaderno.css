@@ -188,6 +188,11 @@
   position: absolute; inset: 0;
   display: flex;
   justify-content: center;
+  /* flex-start (not the default `stretch`): a stretched item is clamped to the
+     scroller's height, which silently swallows .cua-frame's padding-bottom and
+     lets the final block (follow-ups) hide behind the composer until reload.
+     flex-start lets .cua-frame size to its content so the clearance works. */
+  align-items: flex-start;
   overflow-y: auto;
 }
 .cua-frame {
