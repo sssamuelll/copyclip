@@ -69,6 +69,19 @@ export function CuadernoPage({ onOpenDashboard }: { onOpenDashboard?: () => void
     setToolCalls([])
 
     let capturedSession = sessionId
+    // `frame` and `error` are the only legitimate terminals, and they are
+    // authored by the compositor — not by the transport. We unlock the composer
+    // on whichever arrives (the answer being sealed), never on the socket
+    // closing. A stream that ends with neither is itself a failure, surfaced as
+    // an error; we must never silently unlock, which would record a question
+    // with no answer and no error.
+    let terminal: 'frame' | 'error' | null = null
+
+    const settleIdle = () => {
+      setIsLoading(false)
+      setPartialBlocks([])
+      setToolCalls([])
+    }
 
     askStream(question, sessionId ?? undefined, {
       signal: ac.signal,
@@ -95,6 +108,7 @@ export function CuadernoPage({ onOpenDashboard }: { onOpenDashboard?: () => void
             setPartialBlocks((prev) => [...prev, e.block])
             break
           case 'frame': {
+            terminal = 'frame'
             const newQ: CuadernoQuestion = {
               position: e.position,
               question,
@@ -105,23 +119,27 @@ export function CuadernoPage({ onOpenDashboard }: { onOpenDashboard?: () => void
             }
             setQuestions((prev) => [...prev, newQ])
             setActivePosition(e.position)
+            settleIdle()
             break
           }
           case 'error':
+            terminal = 'error'
             setError(e.partial ? `${e.message} (partial answer saved)` : e.message)
+            settleIdle()
             break
         }
       },
     })
-      .catch((err) => {
-        if (ac.signal.aborted) return
-        setError(String(err))
+      .then(() => {
+        // Transport closed cleanly but the compositor never authored a terminal.
+        if (ac.signal.aborted || terminal !== null) return
+        setError('the answer stream ended without completing — please try again')
+        settleIdle()
       })
-      .finally(() => {
-        if (ac.signal.aborted) return
-        setIsLoading(false)
-        setPartialBlocks([])
-        setToolCalls([])
+      .catch((err) => {
+        if (ac.signal.aborted || terminal !== null) return
+        setError(String(err))
+        settleIdle()
       })
   }
 
