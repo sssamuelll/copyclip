@@ -69,7 +69,13 @@ def sse_response(handler, events) -> bool:
     handler.send_response(200)
     handler.send_header("Content-Type", "text/event-stream")
     handler.send_header("Cache-Control", "no-cache")
-    handler.send_header("Connection", "keep-alive")
+    # Finite stream: its body is delimited by the connection closing (there is no
+    # Content-Length, and the default HTTP/1.0 handler has no chunked framing).
+    # With keep-alive the socket stays open after the last event, so the browser's
+    # fetch reader never reaches `done` — the client treats the request as still
+    # in flight and the cuaderno composer stays disabled forever. Close it.
+    handler.send_header("Connection", "close")
+    handler.close_connection = True
     handler.end_headers()
     for ev in events:
         try:
