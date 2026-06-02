@@ -24,6 +24,7 @@ type Props = {
   onAsk: (question: string) => void
   onSelectFromHistory: (position: number) => void
   onSetGotIt: (position: number, value: 'got' | 'didnt') => void
+  questionLanguage?: string | null
 }
 
 export function Cuaderno({
@@ -41,6 +42,7 @@ export function Cuaderno({
   onAsk,
   onSelectFromHistory,
   onSetGotIt,
+  questionLanguage,
 }: Props) {
   const [sidePanelFor, setSidePanelFor] = useState<Citation | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -98,6 +100,7 @@ export function Cuaderno({
                 question={streamingQuestion || questions[questions.length - 1]?.question || '…'}
                 tools={toolCalls}
                 partial=""
+                language={questionLanguage}
               />
             )}
             {scene === 'writing' && (
@@ -105,6 +108,7 @@ export function Cuaderno({
                 frame={{ question: streamingQuestion, blocks: partialBlocks }}
                 onOpenCitation={setSidePanelFor}
                 onAsk={onAsk}
+                language={questionLanguage}
               />
             )}
             {scene === 'frame' && activeQuestion && (
@@ -113,6 +117,7 @@ export function Cuaderno({
                   frame={activeQuestion.frame}
                   onOpenCitation={setSidePanelFor}
                   onAsk={onAsk}
+                  language={questionLanguage}
                 />
                 {(!activeQuestion.frame.status ||
                   activeQuestion.frame.status === 'answer' ||
@@ -120,6 +125,7 @@ export function Cuaderno({
                   <GotItMarkers
                     value={activeQuestion.got_it}
                     onSet={(v) => onSetGotIt(activeQuestion.position, v)}
+                    language={activeQuestion.frame.question_language ?? questionLanguage}
                   />
                 )}
               </>

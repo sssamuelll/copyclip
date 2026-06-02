@@ -17,6 +17,7 @@ export function CuadernoPage({ onOpenDashboard }: { onOpenDashboard?: () => void
   const [streamingQuestion, setStreamingQuestion] = useState('')
   const [partialBlocks, setPartialBlocks] = useState<Block[]>([])
   const [toolCalls, setToolCalls] = useState<ToolRow[]>([])
+  const [currentQuestionLanguage, setCurrentQuestionLanguage] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
   // Abort an in-flight stream on unmount.
@@ -88,6 +89,9 @@ export function CuadernoPage({ onOpenDashboard }: { onOpenDashboard?: () => void
       onEvent: (e) => {
         switch (e.type) {
           case 'meta':
+            if (e.question_language !== undefined) {
+              setCurrentQuestionLanguage(e.question_language ?? null)
+            }
             if (!capturedSession) {
               capturedSession = e.session_id
               setSessionId(e.session_id)
@@ -198,6 +202,7 @@ export function CuadernoPage({ onOpenDashboard }: { onOpenDashboard?: () => void
         onAsk={onAsk}
         onSelectFromHistory={onSelectFromHistory}
         onSetGotIt={onSetGotIt}
+        questionLanguage={currentQuestionLanguage}
       />
     </>
   )
