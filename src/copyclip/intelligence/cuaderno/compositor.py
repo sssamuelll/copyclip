@@ -9,6 +9,8 @@ from .prompts import SYSTEM_PROMPT, GROUNDING_RETRY_DIRECTIVE, LANGUAGE_RETRY_DI
 from .read_ledger import ReadLedger
 from .quality import assess, cheap_verdict_dict
 from .judge import judge_verdict_dict
+from .language import detect_language
+from .i18n import tr
 from .schema import (
     Block, Frame, frame_from_dict, frame_to_dict, validate_block_dict,
     FRAME_STATUS_FALLBACK, FRAME_STATUS_ANSWER,
@@ -42,15 +44,12 @@ def _inject_directive(messages: list[dict[str, Any]], text: str) -> None:
 
 
 def _fallback_frame(question: str, reason: str) -> Frame:
+    lang = detect_language(question)
     return Frame(
         question=question,
-        blocks=[
-            Block.paragraph(
-                f"I couldn't finish this turn — {reason}. Try rephrasing, or "
-                "ask a narrower question (a specific file, function, or commit)."
-            ),
-        ],
+        blocks=[Block.paragraph(tr("fallback", lang, reason=reason))],
         status=FRAME_STATUS_FALLBACK,
+        question_language=lang,
     )
 
 
@@ -69,7 +68,8 @@ def _sealed_frame(question: str, emitted: list[Block], ledger: ReadLedger, judge
 
 
 def _seal(question: str, emitted: list[Block], status: str, verdict: dict) -> dict[str, Any]:
-    return frame_to_dict(Frame(question=question, blocks=emitted, status=status, verdict=verdict))
+    return frame_to_dict(Frame(question=question, blocks=emitted, status=status,
+                               verdict=verdict, question_language=detect_language(question)))
 
 
 def _judge_status(jv) -> str:

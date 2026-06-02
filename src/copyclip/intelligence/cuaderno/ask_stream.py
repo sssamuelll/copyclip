@@ -4,19 +4,21 @@ import sqlite3
 from typing import Any, Iterator, Optional
 
 from .compositor import iter_compose_events
+from .i18n import tr
+from .language import detect_language
 from .persistence import save_question
 from .schema import Block, Frame, FRAME_STATUS_PARTIAL, frame_from_dict
 
 
 def _persist_partial(conn, session_id: str, question: str, emitted: list[dict],
                      message: Optional[str] = None) -> None:
+    lang = detect_language(question)
     blocks = [Block.from_dict(b) for b in emitted]
     if not blocks:
-        # No surviving blocks (e.g. an error after a retry's reset cleared the
-        # buffer). Persist a marker so the turn is never silently lost.
-        reason = message or "the stream ended early"
-        blocks = [Block.paragraph(f"This turn was interrupted ({reason}). Re-ask to retry.")]
-    pframe = Frame(question=question, blocks=blocks, status=FRAME_STATUS_PARTIAL)
+        reason = message or tr("partial_default_reason", lang)
+        blocks = [Block.paragraph(tr("partial", lang, reason=reason))]
+    pframe = Frame(question=question, blocks=blocks, status=FRAME_STATUS_PARTIAL,
+                   question_language=lang)
     save_question(conn, session_id, question, pframe)
 
 
@@ -41,7 +43,8 @@ def iter_ask_events(
       arrives as GeneratorExit in the finally), persists the partial Frame from
       the blocks already emitted.
     """
-    yield {"type": "meta", "session_id": session_id}
+    yield {"type": "meta", "session_id": session_id,
+           "question_language": detect_language(question)}
     emitted: list[dict] = []
     persisted = False
     try:

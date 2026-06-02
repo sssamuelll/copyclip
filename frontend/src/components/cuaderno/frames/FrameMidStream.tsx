@@ -1,39 +1,35 @@
 import type { ToolRow } from '../../../types/api'
+import { t } from '../strings'
 
 type Props = {
   question: string
   tools: ToolRow[]
   partial: string
+  language?: string | null
 }
 
-export function FrameMidStream({ question, tools, partial }: Props) {
+export function FrameMidStream({ question, tools, partial, language }: Props) {
   return (
     <>
       <div className="cua-question">
-        <span className="label">you asked</span>
+        <span className="label">{t('you_asked', language)}</span>
         <span className="q">{question}</span>
       </div>
       <div className="toolcalls" aria-label="LLM tool calls">
-        {tools.map((t, i) => (
-          <div key={i} className={`row ${t.state}`}>
+        {tools.map((t_, i) => (
+          <div key={i} className={`row ${t_.state}`}>
             <span className="tag">
-              {t.state === 'done'
-                ? '✓'
-                : t.state === 'error'
-                ? '⨯'
-                : t.state === 'running'
-                ? '◐'
-                : '·'}
+              {t_.state === 'done' ? '✓' : t_.state === 'error' ? '⨯' : t_.state === 'running' ? '◐' : '·'}
             </span>
-            <span className="name">{t.name}</span>
-            <span className="args">{t.args}</span>
+            <span className="name">{t_.name}</span>
+            <span className="args">{t_.args}</span>
             <span className="meta">
-              {t.state === 'done'
-                ? `${t.ms ?? 0} ms`
-                : t.state === 'error'
+              {t_.state === 'done'
+                ? `${t_.ms ?? 0} ms`
+                : t_.state === 'error'
                 ? 'failed'
-                : t.state === 'running'
-                ? 'running…'
+                : t_.state === 'running'
+                ? t('running', language)
                 : 'queued'}
             </span>
           </div>

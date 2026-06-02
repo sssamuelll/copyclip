@@ -1,40 +1,36 @@
 import type { Block, Citation, Frame } from '../../../types/api'
 import { CitationChip } from '../CitationChip'
-
-const STATUS_BANNER: Partial<Record<NonNullable<Frame['status']>, { kicker: string; text: string }>> = {
-  ungrounded: {
-    kicker: 'not grounded',
-    text: 'This answer is not anchored to code the tutor actually read, so it may be invented. Either the project does not cover this, or the tutor answered too soon. Re-ask, or point at a specific file, function, or commit.',
-  },
-  off_target: {
-    kicker: 'off target',
-    text: 'This is grounded in the code, but it answers a different question than you asked. Re-ask to redirect it to what you meant.',
-  },
-  insufficient_evidence: {
-    kicker: 'insufficient evidence',
-    text: 'The tutor looked but the project does not contain enough to answer this confidently. What it would need is named above.',
-  },
-  partial: {
-    kicker: 'partial answer',
-    text: 'This answer was interrupted before it finished. It may be incomplete.',
-  },
-  fallback: {
-    kicker: 'no answer',
-    text: 'The tutor could not produce an answer for this question this time.',
-  },
-}
+import { t } from '../strings'
 import { GraphSubset } from '../widgets/GraphSubset'
 import { SequenceDiagram } from '../widgets/SequenceDiagram'
 import { CallersTree } from '../widgets/CallersTree'
+
+function statusBanner(
+  status: NonNullable<Frame['status']>,
+  lang?: string | null,
+): { kicker: string; text: string } | undefined {
+  const map: Partial<Record<NonNullable<Frame['status']>, string>> = {
+    ungrounded: 'ungrounded',
+    off_target: 'off_target',
+    insufficient_evidence: 'insufficient_evidence',
+    partial: 'partial',
+    fallback: 'fallback',
+  }
+  const k = map[status]
+  if (!k) return undefined
+  return { kicker: t(`banner_${k}_kicker`, lang), text: t(`banner_${k}_text`, lang) }
+}
 
 type Props = {
   frame: Frame
   onOpenCitation: (c: Citation) => void
   onAsk: (question: string) => void
+  language?: string | null
 }
 
-export function FrameDynamic({ frame, onOpenCitation, onAsk }: Props) {
-  const banner = frame.status ? STATUS_BANNER[frame.status] : undefined
+export function FrameDynamic({ frame, onOpenCitation, onAsk, language }: Props) {
+  const lang = frame.question_language ?? language
+  const banner = frame.status ? statusBanner(frame.status, lang) : undefined
   const isLegacy = frame.status === 'legacy'
   // An `answer` sealed before the verdict field existed (pre-Phase-2) is also
   // unverified provenance — distinguish it from a judged answer.
@@ -57,7 +53,7 @@ export function FrameDynamic({ frame, onOpenCitation, onAsk }: Props) {
   return (
     <>
       <div className="cua-question">
-        <span className="label">you asked</span>
+        <span className="label">{t('you_asked', lang)}</span>
         <span className="q">{frame.question}</span>
       </div>
       {banner ? (
@@ -80,12 +76,7 @@ export function FrameDynamic({ frame, onOpenCitation, onAsk }: Props) {
         </div>
       ) : null}
       {blocks.map((b, i) => (
-        <BlockRender
-          key={i}
-          block={b}
-          onOpenCitation={onOpenCitation}
-          onAsk={onAsk}
-        />
+        <BlockRender key={i} block={b} onOpenCitation={onOpenCitation} onAsk={onAsk} lang={lang} />
       ))}
     </>
   )
@@ -95,10 +86,12 @@ function BlockRender({
   block,
   onOpenCitation,
   onAsk,
+  lang,
 }: {
   block: Block
   onOpenCitation: (c: Citation) => void
   onAsk: (question: string) => void
+  lang?: string | null
 }) {
   switch (block.kind) {
     case 'lead':
@@ -196,7 +189,7 @@ function BlockRender({
     case 'followups':
       return (
         <div className="followups">
-          <div className="cap">go deeper</div>
+          <div className="cap">{t('go_deeper', lang)}</div>
           <div className="btns">
             {block.items.map((it, i) => (
               <button key={i} className="fu" onClick={() => onAsk(it.question)}>

@@ -1,18 +1,21 @@
+import { t } from './strings'
+
 type Props = {
   value: 'got' | 'didnt' | null
   onSet: (v: 'got' | 'didnt') => void
+  language?: string | null
 }
 
-export function GotItMarkers({ value, onSet }: Props) {
+export function GotItMarkers({ value, onSet, language }: Props) {
   if (value === null) {
     return (
       <div className="gotit">
-        <span className="ask">does this answer the question?</span>
+        <span className="ask">{t('gotit_prompt', language)}</span>
         <button className="gotit-btn" onClick={() => onSet('got')}>
-          <span style={{ color: 'var(--accent-2)' }}>✓</span> I got this
+          <span style={{ color: 'var(--accent-2)' }}>✓</span> {t('gotit_got', language)}
         </button>
         <button className="gotit-btn" onClick={() => onSet('didnt')}>
-          <span style={{ color: 'var(--accent)' }}>↻</span> I didn't
+          <span style={{ color: 'var(--accent)' }}>↻</span> {t('gotit_didnt', language)}
         </button>
       </div>
     )
@@ -20,19 +23,19 @@ export function GotItMarkers({ value, onSet }: Props) {
   if (value === 'got') {
     return (
       <div className="gotit">
-        <button className="gotit-btn is-got">✓ marked: got this</button>
+        <button className="gotit-btn is-got">{t('gotit_marked_got', language)}</button>
         <span className="gotit-msg">
-          saved to <span style={{ color: 'var(--ink)' }}>this matters</span>. ask anything else when ready.
+          {t('gotit_saved_pre', language)}
+          <span style={{ color: 'var(--ink)' }}>{t('gotit_saved_mid', language)}</span>
+          {t('gotit_saved_post', language)}
         </span>
       </div>
     )
   }
   return (
     <div className="gotit">
-      <button className="gotit-btn is-didnt">↻ marked: didn't</button>
-      <span className="gotit-msg">
-        where did it break? try a follow-up below or rephrase.
-      </span>
+      <button className="gotit-btn is-didnt">{t('gotit_marked_didnt', language)}</button>
+      <span className="gotit-msg">{t('gotit_didnt_msg', language)}</span>
     </div>
   )
 }
