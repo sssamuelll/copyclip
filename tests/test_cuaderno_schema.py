@@ -1,6 +1,8 @@
 from copyclip.intelligence.cuaderno.schema import (
     Citation, Block, Widget, Frame, frame_to_dict, frame_from_dict,
     KNOWN_BLOCK_KINDS, validate_block_dict,
+    FRAME_STATUS_ANSWER, FRAME_STATUS_UNGROUNDED, FRAME_STATUS_LEGACY,
+    KNOWN_FRAME_STATUSES,
 )
 
 
@@ -70,3 +72,32 @@ def test_known_block_kinds_matches_constructors():
         "lead", "paragraph", "ordered_list", "code_block", "ascii_block",
         "citation", "citation_stack", "callout", "widget", "followups",
     }
+
+
+def test_frame_defaults_to_answer_status():
+    f = Frame(question="q", blocks=[Block.lead("hi")])
+    assert f.status == FRAME_STATUS_ANSWER
+
+
+def test_frame_to_dict_includes_status():
+    f = Frame(question="q", blocks=[Block.lead("hi")], status=FRAME_STATUS_UNGROUNDED)
+    d = frame_to_dict(f)
+    assert d["status"] == FRAME_STATUS_UNGROUNDED
+    assert d["question"] == "q"
+    assert d["blocks"] == [{"kind": "lead", "text": "hi"}]
+
+
+def test_frame_from_dict_defaults_absent_status_to_legacy():
+    legacy = {"question": "q", "blocks": [{"kind": "lead", "text": "hi"}]}
+    f = frame_from_dict(legacy)
+    assert f.status == FRAME_STATUS_LEGACY
+
+
+def test_frame_status_round_trip():
+    f = Frame(question="q", blocks=[Block.paragraph("p")], status=FRAME_STATUS_UNGROUNDED)
+    assert frame_from_dict(frame_to_dict(f)).status == FRAME_STATUS_UNGROUNDED
+
+
+def test_known_frame_statuses_membership():
+    assert FRAME_STATUS_ANSWER in KNOWN_FRAME_STATUSES
+    assert FRAME_STATUS_LEGACY in KNOWN_FRAME_STATUSES

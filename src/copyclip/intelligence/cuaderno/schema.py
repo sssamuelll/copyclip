@@ -121,20 +121,40 @@ class Block:
         return Block(kind=kind, data=data)
 
 
+# Frame-level verdict about answer quality (see the answer-quality spec).
+FRAME_STATUS_ANSWER = "answer"                       # a normal, grounded answer
+FRAME_STATUS_INSUFFICIENT_EVIDENCE = "insufficient_evidence"  # World A: consulted, genuinely empty
+FRAME_STATUS_UNGROUNDED = "ungrounded"               # World B: never consulted the code
+FRAME_STATUS_PARTIAL = "partial"                     # interrupted mid-composition
+FRAME_STATUS_FALLBACK = "fallback"                   # no blocks / budget exhausted
+FRAME_STATUS_LEGACY = "legacy"                       # pre-existing frame with no recorded status
+
+KNOWN_FRAME_STATUSES: frozenset[str] = frozenset({
+    FRAME_STATUS_ANSWER, FRAME_STATUS_INSUFFICIENT_EVIDENCE, FRAME_STATUS_UNGROUNDED,
+    FRAME_STATUS_PARTIAL, FRAME_STATUS_FALLBACK, FRAME_STATUS_LEGACY,
+})
+
+
 @dataclass
 class Frame:
     question: str
     blocks: list[Block]
+    status: str = FRAME_STATUS_ANSWER
 
 
 def frame_to_dict(f: Frame) -> dict[str, Any]:
-    return {"question": f.question, "blocks": [b.to_dict() for b in f.blocks]}
+    return {
+        "question": f.question,
+        "blocks": [b.to_dict() for b in f.blocks],
+        "status": f.status,
+    }
 
 
 def frame_from_dict(d: dict[str, Any]) -> Frame:
     return Frame(
         question=d["question"],
         blocks=[Block.from_dict(b) for b in d["blocks"]],
+        status=d.get("status", FRAME_STATUS_LEGACY),
     )
 
 

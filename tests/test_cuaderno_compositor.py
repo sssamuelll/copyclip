@@ -64,6 +64,7 @@ def test_emits_blocks_then_frame_in_one_turn(tmp_path: Path):
         "question": "q",
         "blocks": [{"kind": "lead", "text": "hi"},
                    {"kind": "paragraph", "text": "body"}],
+        "status": "answer",
     }
 
 
