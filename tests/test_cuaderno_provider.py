@@ -68,3 +68,10 @@ def test_provider_key_status_is_non_raising(monkeypatch):
     assert status["deepseek"] is True
     assert status["anthropic"] is False
     assert status["openai"] is False
+
+
+def test_resolve_judge_model_defaults():
+    from copyclip.intelligence.cuaderno.provider import resolve_judge_model
+    assert resolve_judge_model("anthropic", "claude-sonnet-4-5", overlay=None) == "claude-haiku-4-5"
+    assert resolve_judge_model("deepseek", "deepseek-chat", overlay=None) == "deepseek-chat"
+    assert resolve_judge_model("anthropic", "claude-sonnet-4-5", overlay="claude-opus-4-8") == "claude-opus-4-8"
