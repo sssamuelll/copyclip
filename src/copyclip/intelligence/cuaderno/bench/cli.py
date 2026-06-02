@@ -128,6 +128,7 @@ def _print_scorecard(sc: dict, rollup: dict, out_path: str) -> None:
     print(f"  status: {sc['status_distribution']}")
     print(f"  axis rates: {sc['axis_rates']}")
     print(f"  abstention: {sc['abstention']}")
+    print(f"  inconclusive questions: {sc['n_inconclusive_questions']}")
     print(f"  latency ms: {sc['latency_ms']}")
     est = " (ESTIMATED)" if sc['cost_usd']['estimated'] else ""
     print(f"  cost usd: {sc['cost_usd']['total']}{est}")
