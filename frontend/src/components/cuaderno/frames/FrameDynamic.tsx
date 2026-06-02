@@ -6,6 +6,10 @@ const STATUS_BANNER: Partial<Record<NonNullable<Frame['status']>, { kicker: stri
     kicker: 'not grounded',
     text: 'This answer is not anchored to code the tutor actually read, so it may be invented. Either the project does not cover this, or the tutor answered too soon. Re-ask, or point at a specific file, function, or commit.',
   },
+  off_target: {
+    kicker: 'off target',
+    text: 'This is grounded in the code, but it answers a different question than you asked. Re-ask to redirect it to what you meant.',
+  },
   insufficient_evidence: {
     kicker: 'insufficient evidence',
     text: 'The tutor looked but the project does not contain enough to answer this confidently. What it would need is named above.',
