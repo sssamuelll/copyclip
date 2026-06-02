@@ -29,6 +29,8 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     banner_partial_text: 'This answer was interrupted before it finished. It may be incomplete.',
     banner_fallback_kicker: 'no answer',
     banner_fallback_text: 'The tutor could not produce an answer for this question this time.',
+    provenance_legacy: 'predates grounding checks — provenance not verified',
+    provenance_unjudged: 'the reviewer was unavailable — this answer was not checked for responsiveness',
   },
   es: {
     gotit_prompt: '¿esto responde tu pregunta?',
@@ -56,6 +58,8 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     banner_partial_text: 'Esta respuesta se interrumpió antes de terminar. Puede estar incompleta.',
     banner_fallback_kicker: 'sin respuesta',
     banner_fallback_text: 'El tutor no pudo responder esta pregunta esta vez.',
+    provenance_legacy: 'anterior a los chequeos de calidad, procedencia sin verificar',
+    provenance_unjudged: 'el revisor no estaba disponible: no se chequeó si la respuesta responde lo que preguntaste',
   },
 }
 
