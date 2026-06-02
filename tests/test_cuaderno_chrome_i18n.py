@@ -44,3 +44,34 @@ def test_seal_sets_question_language():
     fd = compositor._seal("¿qué es esto?", [Block.paragraph("respuesta")],
                           "answer", {"source": "cheap"})
     assert fd["question_language"] == "es"
+
+
+from copyclip.intelligence.cuaderno import ask_stream
+from tests.test_cuaderno_compositor import StubStream, _tool_stop, _content, _msg_stop
+
+
+def test_meta_event_carries_question_language(tmp_path):
+    # The meta event is yielded FIRST, before iter_compose_events runs or any
+    # save_question touches the DB — so pull just that event and close the
+    # generator (avoids save_question(conn=None) on the trailing frame event).
+    client = StubStream([_msg_stop("end_turn", [])])
+    gen = ask_stream.iter_ask_events(
+        client=client, question="¿cómo funciona esto?", project_root=str(tmp_path),
+        project_id=1, conn=None, session_id="s1", max_tool_rounds=1)
+    meta = next(gen)
+    gen.close()
+    assert meta["type"] == "meta"
+    assert meta["question_language"] == "es"
+
+
+def test_persist_partial_sets_language_and_localizes(tmp_path, monkeypatch):
+    saved = []
+    monkeypatch.setattr(ask_stream, "save_question",
+                        lambda conn, sid, q, frame: saved.append(frame))
+    ask_stream._persist_partial(None, "s1", "¿cómo?", [], message="boom")
+    assert saved[0].question_language == "es"
+    es_text = saved[0].blocks[0].data["text"]
+    saved.clear()
+    ask_stream._persist_partial(None, "s1", "how does it work?", [], message="boom")
+    assert saved[0].question_language == "en"
+    assert saved[0].blocks[0].data["text"] != es_text  # localized

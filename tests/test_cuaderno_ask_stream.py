@@ -72,7 +72,7 @@ def test_meta_is_first_and_frame_carries_position(tmp_path: Path):
         client=StubStream(_read_then_answer()), question="q",
         project_root=str(tmp_path), project_id=1, conn=conn, session_id=sid,
     ))
-    assert events[0] == {"type": "meta", "session_id": sid}
+    assert events[0] == {"type": "meta", "session_id": sid, "question_language": "unknown"}
     frame_ev = next(e for e in events if e["type"] == "frame")
     assert frame_ev["position"] == 1
     rows = list_questions(conn, sid)
