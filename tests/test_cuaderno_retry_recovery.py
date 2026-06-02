@@ -71,3 +71,32 @@ def test_grounding_retry_produces_api_valid_messages(tmp_path):
     retry_messages = client.message_snapshots[1]
     oai, _ = _to_openai_request(None, None, retry_messages)
     _assert_openai_tool_calls_answered(oai)
+
+
+def test_turn_persisted_when_retry_restream_errors(tmp_path, monkeypatch):
+    """The turn must never be silently lost. When a retry's re-stream errors with
+    no surviving blocks (the buffer was cleared on reset), the question must still
+    be persisted — previously nothing was saved and the conversation lost it."""
+    from copyclip.intelligence.cuaderno import ask_stream
+
+    saved = []
+
+    def _spy(conn, session_id, question, frame):
+        saved.append((session_id, question, frame))
+        return len(saved)
+
+    monkeypatch.setattr(ask_stream, "save_question", _spy)
+
+    # One ungrounded turn -> grounding retry -> reset; the retry re-stream then
+    # fails (StubStream is out of turns -> RuntimeError, standing in for the 400).
+    client = StubStream([_ungrounded_turn("b1", "f1", "ungrounded")])
+    events = list(ask_stream.iter_ask_events(
+        client=client, question="how does X work?", project_root=str(tmp_path),
+        project_id=1, conn=None, session_id="s1", max_tool_rounds=8))
+
+    assert any(e["type"] == "error" for e in events), "expected a terminal error"
+    assert len(saved) == 1, f"turn must be persisted once, got {len(saved)}"
+    _, question, frame = saved[0]
+    assert question == "how does X work?"
+    assert frame.status == "partial"
+    assert frame.blocks, "a persisted partial must carry at least a marker block"
