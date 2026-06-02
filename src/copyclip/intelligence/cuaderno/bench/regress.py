@@ -70,11 +70,28 @@ def paired_property_diff(baseline: list[QuestionRecord],
     }
 
 
-# Scope-A honesty banner: without a measured noise floor (Phase B), small deltas
-# are not resolvable. Reports embed this so a small green/red is never read as
-# significant.
+# Scope-A honesty banners. The regression report is RAW OBSERVATION, not a
+# resolved verdict: with no measured noise floor (Phase B) the dominant source of
+# variance — the LLM's own run-to-run nondeterminism on a single run per build —
+# is uncharacterized, so a McNemar p is computed but UNINTERPRETABLE until B.
+# Build the noise floor before trusting any delta.
 SCOPE_A_CAVEAT = (
-    "Scope A: single run per build, no measured noise floor. Only large, "
-    "consistent shifts are resolvable; treat a small delta (or a McNemar p that "
-    "is not decisive) as NOT a real regression until Phase B measures the floor."
+    "Scope A is OBSERVATION, not a resolved regression: one run per build, no "
+    "measured noise floor. The dominant variance (the LLM's run-to-run "
+    "nondeterminism) is uncharacterized, so the McNemar p below is INDICATIVE "
+    "ONLY and uninterpretable until Phase B measures the floor. Do not ship a "
+    "decision on a single-run delta."
+)
+
+# The harvested-verdict oracle grades the answer with the cuaderno's OWN judge.
+# When judge and answer model share a family, a prompt change that makes the
+# answer more persuasive to its sibling judge scores as an "improvement"
+# (self-enhancement bias, Panickssery 2024) — biasing regression toward false
+# positives in exactly the direction a prompt-tuner pushes. The independent
+# cross-family judge that breaks this is Phase C.
+FAMILY_BIAS_CAVEAT = (
+    "Oracle = the cuaderno's OWN judge. If judge and answer model share a family "
+    "(default: haiku judge / sonnet answer), an 'improvement' may be the answer "
+    "flattering its sibling judge (self-enhancement bias), not a real gain. The "
+    "independent cross-family judge is Phase C."
 )

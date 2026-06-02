@@ -99,15 +99,21 @@ def run_bench(*, project_root: str, corpus_path: str, baseline: Optional[str] = 
     result = {"run_id": run_id, "scorecard": sc, "artifact_path": out_path}
 
     if baseline:
-        from .regress import paired_property_diff, SCOPE_A_CAVEAT
+        from .regress import paired_property_diff, SCOPE_A_CAVEAT, FAMILY_BIAS_CAVEAT
         base_art = read_artifact(default_run_path(project_root, baseline))
-        print("\n=== REGRESSION vs", baseline, "===")
+        print("\n=== OBSERVED CHANGE vs", baseline, "(NOT a resolved regression) ===")
+        print("  " + SCOPE_A_CAVEAT)
+        print("  " + FAMILY_BIAS_CAVEAT)
+        if base_art.corpus_sha != csha:
+            print(f"  WARNING: corpus changed since the baseline "
+                  f"({base_art.corpus_sha} -> {csha}); the two runs are NOT comparable. "
+                  f"Re-run the baseline on the current corpus before comparing.")
+        print("  ---")
         for axis in ("grounded", "responsive", "language_ok"):
             d = paired_property_diff(base_art.items, records, axis=axis)
             print(f"  {axis}: {d['baseline_rate']} -> {d['candidate_rate']} "
-                  f"(improved={d['improved']} regressed={d['regressed']} "
-                  f"p={d['mcnemar']['p']} via {d['mcnemar']['method']})")
-        print("\n  " + SCOPE_A_CAVEAT)
+                  f"observed (improved={d['improved']} regressed={d['regressed']}; "
+                  f"McNemar p={d['mcnemar']['p']} indicative only)")
         result["baseline"] = baseline
     return result
 

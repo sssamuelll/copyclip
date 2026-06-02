@@ -172,15 +172,16 @@ items: [
 - **Cost/latency rollup:** total and per-`category`, per-`answer_model` — sum tokens, derive $, report latency **median + p90** (latency is skewed; mean lies). Latency is real; cost is shown with an `estimated` marker in A (§11) so a fictional number is never read as truth.
 - **Inconclusive count:** questions where a harvested axis was `None` — surfaced, never silently green.
 
-## 10. Regression report (paired)
+## 10. Regression report (paired) — OBSERVATION, not a resolved verdict at Scope A
 
-`copyclip bench --baseline <run_id>` runs the corpus on the current build and diffs against a stored baseline artifact, **paired by question id**:
+`copyclip bench --baseline <run_id>` runs the corpus on the current build and diffs a stored baseline artifact, **paired by question id**. **At Scope A this is raw observation, not a resolved regression** (see §13 and the reprioritization in §15). The report is rendered to make that unmistakable — the deltas never lead:
 
-- **Per-property green/red** with improvement/regression counts, sortable by biggest drop (Braintrust-style UX, terminal table).
-- **Significance:** for each binary rate (grounded-rate, language-ok-rate, abstention-correct-rate, per-assert pass-rate), report **McNemar** on the discordant pairs: χ² = (b − c)² / (b + c), with an exact/mid-p variant when discordant counts are small. Paired + McNemar exploits same-question difficulty — far cheaper than independent samples, the right lever for a solo budget.
-- **The Scope-A caveat, rendered in the report itself:** a banner stating that without a measured noise floor (Phase B), a delta below an unmeasured threshold is *not resolvable* — only large, consistent shifts are called. The report must not present a small green/red as significant when it cannot know.
+- **Caveats first.** The Scope-A caveat and the **family-bias caveat** print *above* the numbers, and the report **warns and declares the runs not-comparable when the baseline's `corpus_sha` differs from the current corpus** (a re-pin changes the corpus; cross-corpus baselines are meaningless — §16).
+- **Per-property observed change**, framed as observation: per axis, `baseline_rate -> candidate_rate observed (improved=… regressed=…)`. Never "green/significant."
+- **McNemar is computed but labelled "indicative only."** For each discordant-pair count, χ² = (b − c)² / (b + c) (exact two-sided binomial when discordant counts are small). It is **uninterpretable until Phase B** measures the noise floor: a single run per build leaves the dominant variance — the LLM's own run-to-run nondeterminism — uncharacterized, so the p-value's *form* overstates its epistemic content. The arithmetic is deterministic; the *inference* is not licensed until B gates it.
+- **The family-bias hazard is named in the report, not buried.** The harvested-verdict oracle grades the answer with the cuaderno's own judge; when judge and answer model share a family (default haiku/sonnet), a prompt change that flatters the sibling judge scores as an "improvement" (self-enhancement bias). The independent cross-family judge is Phase C.
 
-Comparison arithmetic is fully deterministic even though the underlying answers are not.
+What *is* honestly usable on a single run is the **calibration scorecard** (§9) — status distribution, abstention confusion matrix, axis rates, and the deterministic property-assertion failures (zero-read, fabricated citation, out-of-EOF, language) need no noise floor. The McNemar regression *becomes* a trustworthy verdict only once Phase B gates it; until then it is an observation log.
 
 ## 11. `metrics.py` fix (precondition for the cost axis)
 
@@ -225,7 +226,9 @@ Plus: add a **per-run / per-question-type / per-model rollup** API the scorecard
 
 ## 15. Suggested phases
 
-- **Phase A (this spec):** corpus + runner (with the `ledger` injection) + assertion engine + artifact + scorecard + paired regression (McNemar, large-delta) + `metrics.py` bug fix + `cited_lines_within_eof`. Deterministic and harvested-verdict oracles only. Single run per build. **Cost is a flagged estimate; latency is real.**
+> **Reprioritized after PR #127 review (Richter):** a regression verdict is only as honest as the variance underneath it. **Phase B (the noise floor) is the *prerequisite* for trusting any regression delta, not a later nice-to-have.** Phase A ships the regression as **observation only** (§10); a single-run delta must not be acted on as a decision until B is built. The list below keeps A first because it shipped first, but **B is the gate.** The order to *build for trust* is: A's calibration scorecard (usable now) → B (makes regression a verdict) → C (independent oracle + correctness).
+
+- **Phase A (this spec):** corpus + runner (with the `ledger` injection) + assertion engine + artifact + scorecard + paired regression (McNemar, **observation-only**, large-delta) + `metrics.py` bug fix + `cited_lines_within_eof`. Deterministic and harvested-verdict oracles only. Single run per build. **Cost is a flagged estimate; latency is real. The regression is an observation log, not a verdict (§10).**
   - *Delivered:* paired McNemar over the three harvested verdict axes (`grounded`/`responsive`/`language_ok`); the scorecard's status distribution, abstention confusion matrix, axis rates, total cost (flagged), latency median/p90, and surfaced inconclusive count.
   - *Deferred within A (additive follow-ups, no behavior change):* paired McNemar over the **abstention-correct rate** and **per-assert pass-rate** (§10 names these; the harness pairs verdict-axis booleans today — extending to the abstention/per-assert extractors is purely additive); the **per-category / per-answer-model** cost-and-latency breakdown in the scorecard (§9 names it; the total is delivered and the per-model split rides in the artifact's `metrics_rollup`, which is empty until Phase A.5 logs real usage).
 - **Phase A.5 (real cost — small, deferred from A):** capture real `usage` in both cuaderno adapters (Anthropic `.usage`; OpenAI `stream_options={"include_usage": True}` + final-chunk usage), surface it in the `message_stop` event, and have the runner log it via the already-extended `log_llm_call`; flip the artifact's `cost_estimated` to `False`. Makes the cost axis real without re-touching the bench.
@@ -235,6 +238,14 @@ Plus: add a **per-run / per-question-type / per-model rollup** API the scorecard
 ## 16. Open questions
 
 None blocking. Deferred by decision: bench package location (`cuaderno/bench/` vs top-level `bench/`) — an implementation-plan call; weighted assert rollup vs all-pass (start all-pass); promoting fixture questions into the answer corpus; the noise floor and everything in Phases B/C. Flagged risk carried forward: the in-system judge (`claude-haiku-4-5`) and the answer model (`claude-sonnet-4-5`) are the **same family** — harvested-verdict axes carry self-preference exposure; the independent grader that dodges it is Phase C.
+
+### Corpus re-pin policy (operationalized after PR #127 review)
+
+The corpus pins every row to a `commit_sha` so a regression isolates *the model/prompt change* from *code drift* (§6). But a frozen pin measures the tutor against a frozen past while the author asks about the present — relevance rots as the code moves. Policy:
+
+- **Who/when re-pins:** the author, deliberately, when the pinned snapshot has drifted far enough from `HEAD` that the corpus no longer exercises code the author cares about (e.g. a subsystem the questions target was substantially rewritten). A re-pin is a manual, reviewed act — never automatic, never silent.
+- **What a re-pin costs:** re-pinning bumps `commit_sha` on the affected rows and re-validates their assertions against the new revision (cited paths still exist, symbols still present, must-abstain subjects still genuinely absent). It changes the corpus content → its `corpus_sha` changes.
+- **Baseline comparability:** the run artifact records `corpus_sha`. A regression across two runs whose `corpus_sha` differs is **invalid** and `copyclip bench --baseline` refuses it (warns and declares the runs not-comparable, §10). After a re-pin, the baseline must be re-run on the new corpus before any comparison.
 
 ---
 
