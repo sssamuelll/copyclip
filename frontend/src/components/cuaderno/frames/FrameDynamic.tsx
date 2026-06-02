@@ -4,7 +4,7 @@ import { CitationChip } from '../CitationChip'
 const STATUS_BANNER: Partial<Record<NonNullable<Frame['status']>, { kicker: string; text: string }>> = {
   ungrounded: {
     kicker: 'not grounded',
-    text: 'This answer was not anchored to the code — the tutor answered without reading enough evidence. Re-ask, or rephrase to point at a specific file, function, or commit.',
+    text: 'This answer is not anchored to code the tutor actually read, so it may be invented. Either the project does not cover this, or the tutor answered too soon. Re-ask, or point at a specific file, function, or commit.',
   },
   insufficient_evidence: {
     kicker: 'insufficient evidence',
@@ -31,6 +31,7 @@ type Props = {
 
 export function FrameDynamic({ frame, onOpenCitation, onAsk }: Props) {
   const banner = frame.status ? STATUS_BANNER[frame.status] : undefined
+  const isLegacy = frame.status === 'legacy'
   return (
     <>
       <div className="cua-question">
@@ -41,6 +42,19 @@ export function FrameDynamic({ frame, onOpenCitation, onAsk }: Props) {
         <div className="callout" role="status">
           <div className="kicker">{banner.kicker}</div>
           <p>{banner.text}</p>
+        </div>
+      ) : null}
+      {isLegacy ? (
+        <div
+          style={{
+            fontFamily: 'var(--font-ui)',
+            fontSize: 11,
+            letterSpacing: '0.04em',
+            color: 'var(--ink-4)',
+            marginBottom: 12,
+          }}
+        >
+          predates grounding checks — provenance not verified
         </div>
       ) : null}
       {frame.blocks.map((b, i) => (

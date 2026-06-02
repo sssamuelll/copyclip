@@ -107,6 +107,12 @@ export function CuadernoPage({ onOpenDashboard }: { onOpenDashboard?: () => void
           case 'block':
             setPartialBlocks((prev) => [...prev, e.block])
             break
+          case 'reset':
+            // The compositor discarded the provisional answer (grounding /
+            // language retry). Drop the streamed blocks so the corrected answer
+            // replaces them rather than appending.
+            setPartialBlocks([])
+            break
           case 'frame': {
             terminal = 'frame'
             const newQ: CuadernoQuestion = {

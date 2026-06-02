@@ -869,6 +869,7 @@ export type CuadernoStreamEvent =
       ms: number | null
     }
   | { type: 'block'; block: Block }
+  | { type: 'reset' }
   | { type: 'frame'; position: number; frame: Frame }
   | { type: 'error'; message: string; partial: boolean }
 
