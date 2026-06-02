@@ -154,7 +154,7 @@ items: [
     status, verdict (full multi-axis dict),
     cited_paths, citations (path/commit/line range), content_bearing_count,
     answer_lang, blocks (text only, for mentions/inspection),
-    latency_ms, input_tokens, output_tokens, cost_usd,   # REAL, post-§11
+    latency_ms, input_tokens, output_tokens, cost_usd, cost_estimated,  # latency REAL; tokens/cost are FLAGGED ESTIMATES in A (real-usage deferred, §11)
     asserts: [ { type, pass, score, reason } ],
     question_rollup: { all_pass: bool, n_pass, n_fail, n_inconclusive } }
 ]
@@ -169,7 +169,7 @@ items: [
 - **Per-axis rates:** grounded-rate, responsive-rate, language-ok-rate (over the questions where the axis is conclusive), and overall question all-pass rate.
 - **Status distribution:** counts of `answer` / `ungrounded` / `insufficient_evidence` / `off_target` / `partial` / `fallback` per run.
 - **Abstention confusion matrix:** over the `must_abstain` + `must_not_fabricate` + answerable categories, a 2×2 of {should-answer, should-abstain} × {answered, abstained} → **false-answer rate** (fabricated when it should have declined) and **false-abstention rate** (declined when it should have answered). CopyClip has the richest abstention *typing* in the field but has never measured the *rate*; this turns honesty into a tracked number.
-- **Cost/latency rollup:** total and per-`category`, per-`answer_model` — sum tokens, derive $, report latency **median + p90** (latency is skewed; mean lies). Depends on §11.
+- **Cost/latency rollup:** total and per-`category`, per-`answer_model` — sum tokens, derive $, report latency **median + p90** (latency is skewed; mean lies). Latency is real; cost is shown with an `estimated` marker in A (§11) so a fictional number is never read as truth.
 - **Inconclusive count:** questions where a harvested axis was `None` — surfaced, never silently green.
 
 ## 10. Regression report (paired)
@@ -186,11 +186,11 @@ Comparison arithmetic is fully deterministic even though the underlying answers 
 
 `src/copyclip/llm/metrics.py` has three confirmed bugs that make cost a fiction:
 
-1. **Word-count token proxy** (`len(text.split()) * 1.3`, lines 34–35) instead of the real `usage` the provider returns. Fix: extend `log_llm_call` to accept real `input_tokens`/`output_tokens` and thread them from the adapters (`anthropic_client.py` / `openai_client.py` already receive a usage object); keep the word-count path only as a labeled fallback when usage is genuinely absent.
+1. **Word-count token proxy** (`len(text.split()) * 1.3`, lines 34–35) instead of real token counts. **Correction to an earlier draft:** the cuaderno adapters (`anthropic_client.py` / `openai_client.py`) do **not** capture a `usage` object today and do **not** call `log_llm_call` at all — the 12 `log_llm_call` sites live in the legacy `llm_client.py` (the minimization path), not the cuaderno. Capturing real usage is therefore *new* work (touch both adapters; OpenAI streaming additionally needs `stream_options={"include_usage": True}`). **Scope-A decision (slim):** extend `log_llm_call` to *accept* optional real `input_tokens`/`output_tokens` (used when present) and add an honest `estimated: bool` field on the row; in A the bench logs the word-count **estimate** (flagged `estimated=True`), while **latency is real** (`perf_counter` around the loop). Capturing real usage in the adapters is **deferred to the next increment** (§15) — cost was the least-urgent of the three goals and is honestly labeled until then.
 2. **Stale price table** (lines 71–80): `anthropic` lists only `claude-3-5-sonnet`; the models actually in use (`claude-sonnet-4-5`, `claude-haiku-4-5`) and per-model DeepSeek fall through to `{'input': 0, 'output': 0}` → **cost silently computes to 0 for the cuaderno's real models.** Fix: refresh the table to the models in use; make an unknown model log a visible warning rather than silently cost 0.
 3. **Missing `import sys`** (lines 65, 103–129 use `file=sys.stderr`): `print_summary()` and the debug print raise `NameError`. Fix: `import sys`.
 
-Plus: add a **per-run / per-question-type / per-model rollup** API the scorecard consumes (the collector is a module-global singleton today; the bench needs to scope metrics to one run — give the collector a way to snapshot/reset per run, or have the runner read the per-call rows it just produced). The `metrics.py` fix plus the real-usage threading in the two adapters are the only production code the bench requires changing outside its own package; everything else it touches it only reads.
+Plus: add a **per-run / per-question-type / per-model rollup** API the scorecard consumes (the collector is a module-global singleton today; the bench needs to scope metrics to one run — give the collector a way to snapshot/reset per run, or have the runner read the per-call rows it just produced). At Scope A the **only** production code the bench changes outside its own package is `metrics.py` (§11) and a **2-line backward-compatible `ledger` injection parameter** on `compositor.iter_compose_events` (so the runner owns the `ReadLedger` and can read `content_bearing_count`/`read_paths` after draining — these are internal today and surfaced in no event; default `None` preserves current behavior exactly). No adapter changes in A. Everything else the bench touches it only reads.
 
 ## 12. Components / file structure
 
@@ -203,12 +203,12 @@ Plus: add a **per-run / per-question-type / per-model rollup** API the scorecard
   - `artifact.py` — read/write the run artifact (§8).
 - **New** `corpus/cuaderno-bench.jsonl` (or under `tests/fixtures/`) — the corpus itself.
 - **New CLI wiring:** `copyclip bench [--baseline <run_id>] [--corpus <path>] [--limit N]` in the existing CLI entrypoint.
-- **Modified:** `src/copyclip/llm/metrics.py` (§11) and the two adapters to thread real usage.
-- **Read-only consumers** (unchanged): `compositor.iter_compose_events`, `quality.assess`, `read_ledger.ReadLedger`, `schema.Frame`/`frame_to_dict`, `judge.JudgeVerdict`, `language` detection.
+- **Modified:** `src/copyclip/llm/metrics.py` (§11) and a 2-line backward-compatible `ledger: Optional[ReadLedger] = None` parameter on `compositor.iter_compose_events` (line 153: `ledger = ledger if ledger is not None else ReadLedger()`). **No adapter changes in A** (real-usage capture deferred, §11/§15).
+- **Read-only consumers** (unchanged): `quality.assess`, `read_ledger.ReadLedger` (constructed by the runner, passed in), `schema.Frame`/`frame_to_dict`/`frame_from_dict`, `judge.judge_answer`, `language.detect_language`, `provider.resolve_cuaderno_provider`/`build_cuaderno_client`/`resolve_judge_model`.
 
 ## 13. What is GUARANTEED vs HOPED (Scope A)
 
-- **Guaranteed (deterministic):** the assertion engine's verdicts are pure functions of the captured record — given a fixed record, every `status_*` / `cites_*` / `language_is` / `min_content_bearing_reads` / `no_unread_citations` / `cited_lines_within_eof` assert is reproducible; the scorecard rates and the McNemar arithmetic are deterministic; cost/latency numbers are real (post-§11); no harvested-axis `None` is ever counted as a pass.
+- **Guaranteed (deterministic):** the assertion engine's verdicts are pure functions of the captured record — given a fixed record, every `status_*` / `cites_*` / `language_is` / `min_content_bearing_reads` / `no_unread_citations` / `cited_lines_within_eof` assert is reproducible; the scorecard rates and the McNemar arithmetic are deterministic; **latency is real**, and **cost is an honestly-flagged estimate in A** (`estimated=True`; real token capture deferred, §11); no harvested-axis `None` is ever counted as a pass.
 - **Hoped / limited (named, not hidden):**
   - **Regression resolves only large deltas.** Single-run-per-build conflates the change with sampling luck for any delta smaller than the (unmeasured) noise floor. The report says so. Phase B fixes it.
   - **Harvested-verdict axes are the in-system judge's opinion**, not an independent oracle — a `harvested_responsive` assert inherits the judge's fallibility and its self-preference exposure (judge and answer model are the same family, §16). At Scope A this is a *measurement of what the system believes about itself*, useful for regression of the answer model against a fixed judge, circular for judging the judge. Phase C adds the independent grader.
@@ -225,7 +225,8 @@ Plus: add a **per-run / per-question-type / per-model rollup** API the scorecard
 
 ## 15. Suggested phases
 
-- **Phase A (this spec):** corpus + runner + assertion engine + artifact + scorecard + paired regression (McNemar, large-delta) + `metrics.py` fix + `cited_lines_within_eof`. Deterministic and harvested-verdict oracles only. Single run per build.
+- **Phase A (this spec):** corpus + runner (with the `ledger` injection) + assertion engine + artifact + scorecard + paired regression (McNemar, large-delta) + `metrics.py` bug fix + `cited_lines_within_eof`. Deterministic and harvested-verdict oracles only. Single run per build. **Cost is a flagged estimate; latency is real.**
+- **Phase A.5 (real cost — small, deferred from A):** capture real `usage` in both cuaderno adapters (Anthropic `.usage`; OpenAI `stream_options={"include_usage": True}` + final-chunk usage), surface it in the `message_stop` event, and have the runner log it via the already-extended `log_llm_call`; flip the artifact's `cost_estimated` to `False`. Makes the cost axis real without re-touching the bench.
 - **Phase B (noise floor — makes regression trustworthy):** run the corpus N times (N≈5) on an unchanged build; per question compute modal-share + normalized entropy for categorical signals (status, judge decision, question_kind, language), mean pairwise **Jaccard** over cited-path sets, CV/IQR for latency+cost; document the resolvable floor; gate regression only on deltas exceeding it; report pass^k. Adds bounded, on-demand LLM cost.
 - **Phase C (semantic + independent oracles):** external regression judge (different model family, pairwise A/B with position-swap, authorship obfuscated); fact-decomposition scoring (curated essential facts → Essential Recall + lie-penalized helpfulness); judge calibration set with Cohen's kappa; optional SEU (1 − mean pairwise cosine of N answer-body embeddings) for free-text semantic dispersion.
 
