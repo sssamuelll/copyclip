@@ -13,7 +13,7 @@ _STRINGS = {
         "partial_default_reason": "the stream ended early",
     },
     "es": {
-        "fallback": ("No pude terminar este turno — {reason}. Reformula, o haz una "
+        "fallback": ("No pude terminar este turno: {reason}. Reformula, o haz una "
                      "pregunta más acotada (un archivo, función o commit específico)."),
         "partial": "Este turno se interrumpió ({reason}). Vuelve a preguntar para reintentar.",
         "partial_default_reason": "el stream se cortó temprano",

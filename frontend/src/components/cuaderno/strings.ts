@@ -31,7 +31,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     banner_fallback_text: 'The tutor could not produce an answer for this question this time.',
   },
   es: {
-    gotit_prompt: '¿esto responde la pregunta?',
+    gotit_prompt: '¿esto responde tu pregunta?',
     gotit_got: 'lo capté',
     gotit_didnt: 'no lo capté',
     gotit_marked_got: '✓ marcado: lo capté',
@@ -41,7 +41,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     gotit_marked_didnt: '↻ marcado: no lo capté',
     gotit_didnt_msg: '¿dónde se rompió? prueba un seguimiento abajo o reformula.',
     you_asked: 'preguntaste',
-    go_deeper: 'profundiza',
+    go_deeper: 'más a fondo',
     running: 'corriendo…',
     banner_ungrounded_kicker: 'sin fundamento',
     banner_ungrounded_text:
@@ -55,7 +55,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     banner_partial_kicker: 'respuesta parcial',
     banner_partial_text: 'Esta respuesta se interrumpió antes de terminar. Puede estar incompleta.',
     banner_fallback_kicker: 'sin respuesta',
-    banner_fallback_text: 'El tutor no pudo producir una respuesta para esta pregunta esta vez.',
+    banner_fallback_text: 'El tutor no pudo responder esta pregunta esta vez.',
   },
 }
 
