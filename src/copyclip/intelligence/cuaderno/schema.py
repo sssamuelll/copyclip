@@ -143,6 +143,7 @@ class Frame:
     blocks: list[Block]
     status: str = FRAME_STATUS_ANSWER
     verdict: Optional[dict[str, Any]] = None
+    question_language: Optional[str] = None
 
 
 def frame_to_dict(f: Frame) -> dict[str, Any]:
@@ -151,6 +152,7 @@ def frame_to_dict(f: Frame) -> dict[str, Any]:
         "blocks": [b.to_dict() for b in f.blocks],
         "status": f.status,
         "verdict": f.verdict,
+        "question_language": f.question_language,
     }
 
 
@@ -160,6 +162,7 @@ def frame_from_dict(d: dict[str, Any]) -> Frame:
         blocks=[Block.from_dict(b) for b in d["blocks"]],
         status=d.get("status", FRAME_STATUS_LEGACY),
         verdict=d.get("verdict"),
+        question_language=d.get("question_language"),
     )
 
 
