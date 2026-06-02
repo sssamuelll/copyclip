@@ -73,7 +73,7 @@ class OpenAICompatAdapter:
             from openai import OpenAI
             self._client = OpenAI(api_key=api_key, base_url=base_url)
 
-    def _create(self, *, model, oai_messages, oai_tools, max_tokens, stream):
+    def _create(self, *, model, oai_messages, oai_tools, max_tokens, stream, timeout=None):
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": oai_messages,
@@ -82,6 +82,8 @@ class OpenAICompatAdapter:
         }
         if oai_tools:
             kwargs["tools"] = oai_tools
+        if timeout is not None:
+            kwargs["timeout"] = timeout
         return self._client.chat.completions.create(**kwargs)
 
     @staticmethod
@@ -155,10 +157,11 @@ class OpenAICompatAdapter:
         }
 
     def messages_create(self, *, model, messages, system=None, tools=None,
-                        max_tokens=8192, **_ignored) -> dict[str, Any]:
+                        max_tokens=8192, timeout=None, **_ignored) -> dict[str, Any]:
         oai_messages, oai_tools = _to_openai_request(system, tools, messages)
         resp = self._create(model=model, oai_messages=oai_messages,
-                           oai_tools=oai_tools, max_tokens=max_tokens, stream=False)
+                           oai_tools=oai_tools, max_tokens=max_tokens, stream=False,
+                           timeout=timeout)
         choice = resp.choices[0]
         msg = choice.message
         content: list[dict[str, Any]] = []

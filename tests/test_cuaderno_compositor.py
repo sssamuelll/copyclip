@@ -675,3 +675,24 @@ def test_grounding_and_responsiveness_retries_are_non_fungible(tmp_path: Path):
     assert len(resets) == 2
     frame = next(e for e in events if e["type"] == "frame")["frame"]
     assert frame["status"] == "answer"
+
+
+def test_budget_tail_would_be_answer_is_judged(tmp_path: Path):
+    """A would-be-answer reached via budget exhaustion is STILL judged (Option A):
+    a judge retry there cannot retry (loop is over) -> off_target."""
+    (tmp_path / "README.md").write_text("# X\n", encoding="utf-8")
+    read = [_tool_stop("r", "read_file", {"path": "README.md"}),
+            _msg_stop("tool_use", [_content("r", "read_file", {"path": "README.md"})])]
+    emit_no_finish = [
+        _tool_stop("b", "emit_block", {"kind": "lead", "text": "It walks the AST."}),
+        _msg_stop("tool_use", [_content("b", "emit_block", {"kind": "lead", "text": "It walks the AST."})]),
+    ]
+    client = StubStream([read, emit_no_finish, emit_no_finish])
+    jv = JudgeVerdict("code_comprehension", True, False, True, "retry", None, "redo", "off")
+    events = list(iter_compose_events(
+        client=client, question="how does it work?", project_root=str(tmp_path),
+        project_id=1, conn=None, judge=_judge_returning(jv), max_tool_rounds=3,
+    ))
+    frame = next(e for e in events if e["type"] == "frame")["frame"]
+    assert frame["status"] == "off_target"
+    assert frame["verdict"]["source"] == "judge"

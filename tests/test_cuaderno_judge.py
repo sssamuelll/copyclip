@@ -106,3 +106,27 @@ def test_judge_answer_fails_open_on_unhashable_decision():
     v = judge_answer(client=client, question="how?", blocks=[Block.lead("x")],
                      ledger=_ledger(), model="m")
     assert v.decision == "ok"
+
+
+def test_failopen_verdict_is_recorded_as_unjudged():
+    # A judge outage must NOT forge "the judge checked it and it's responsive".
+    client = _StubClient(raises=True)
+    v = judge_answer(client=client, question="how?", blocks=[Block.lead("x")],
+                     ledger=_ledger(), model="m")
+    assert v.judged is False
+    d = judge_verdict_dict(v)
+    assert d["source"] == "unjudged"
+    assert d["responsive"] is None and d["grounded"] is None and d["language_ok"] is None
+
+
+def test_parse_omitted_axes_stay_none_not_true():
+    # An omitted assessment axis stays None (unknown), never defaults to True.
+    v = parse_judge_verdict('{"decision":"retry"}')
+    assert v is not None and v.decision == "retry"
+    assert v.responsive is None and v.grounded is None and v.language_ok is None
+    assert v.judged is True  # it WAS judged; the model just omitted the axes
+
+
+def test_real_judge_verdict_is_source_judge():
+    v = parse_judge_verdict('{"decision":"ok","responsive":true,"grounded":true,"language_ok":true}')
+    assert judge_verdict_dict(v)["source"] == "judge"

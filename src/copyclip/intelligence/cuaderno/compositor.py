@@ -54,9 +54,18 @@ def _fallback_frame(question: str, reason: str) -> Frame:
     )
 
 
-def _sealed_frame(question: str, emitted: list[Block], ledger: ReadLedger) -> dict[str, Any]:
+def _sealed_frame(question: str, emitted: list[Block], ledger: ReadLedger, judge=None) -> dict[str, Any]:
+    """Seal a terminal that cannot retry (the budget-exhausted tail). A
+    would-be-`answer` is still judged here (Option A — no `answer` escapes the
+    judge); a judge `retry` cannot retry (the loop is over) so it seals
+    `off_target`."""
     verdict = assess(question=question, blocks=emitted, ledger=ledger)
-    return _seal(question, emitted, verdict.status, cheap_verdict_dict(verdict))
+    if verdict.status != FRAME_STATUS_ANSWER:
+        return _seal(question, emitted, verdict.status, cheap_verdict_dict(verdict))
+    if judge is not None:
+        jv = judge(question, emitted, ledger)
+        return _seal(question, emitted, _judge_status(jv), judge_verdict_dict(jv))
+    return _seal(question, emitted, FRAME_STATUS_ANSWER, cheap_verdict_dict(verdict))
 
 
 def _seal(question: str, emitted: list[Block], status: str, verdict: dict) -> dict[str, Any]:
@@ -290,7 +299,7 @@ def iter_compose_events(
 
     # Budget exhausted → fallback frame (terminal; parity with the wrapper below).
     if emitted:
-        yield {"type": "frame", "frame": _sealed_frame(question, emitted, ledger)}
+        yield {"type": "frame", "frame": _sealed_frame(question, emitted, ledger, judge=judge)}
     else:
         yield {"type": "frame",
                "frame": frame_to_dict(_fallback_frame(question, "tool-call budget exhausted"))}
