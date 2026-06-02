@@ -21,7 +21,8 @@ def test_prompt_does_not_assume_project_is_analyzed():
 
 def test_prompt_pushes_to_answer_rather_than_over_explore():
     low = SYSTEM_PROMPT.lower()
-    assert "stop reading" in low or "stop exploring" in low or "read before you answer" in low
+    # The prompt must discourage endless exploration once enough is read.
+    assert "stop reading" in low or "stop exploring" in low or "do not keep exploring" in low
 
 
 def test_prompt_requires_language_mirroring():
