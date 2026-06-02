@@ -164,12 +164,19 @@ def iter_compose_events(
         if finish_seen or stop_reason != "tool_use":
             if emitted:
                 verdict = assess(question=question, blocks=emitted, ledger=ledger)
-                rounds_left = round_i < max_tool_rounds - 1
+                # Only retry if the NEXT round would still be a normal round. The
+                # closing round (round_i == max_tool_rounds - 1) strips the
+                # research tools, so a grounding retry landing there could not read
+                # and would only stack a directive contradicting CLOSING_DIRECTIVE.
+                can_retry = round_i < max_tool_rounds - 2
                 if (verdict.status != FRAME_STATUS_ANSWER
-                        and not grounding_retry_used and rounds_left):
-                    # Refuse the close: inject a grounding directive, KEEP tools,
-                    # spend one more normal round. Fires at most once.
+                        and not grounding_retry_used and can_retry):
+                    # Refuse the close: DISCARD the ungrounded blocks, inject a
+                    # grounding directive, KEEP tools, and spend one more normal
+                    # round so the corrected answer REPLACES the ungrounded one
+                    # instead of appending to it. Fires at most once.
                     grounding_retry_used = True
+                    emitted.clear()
                     _inject_directive(messages, GROUNDING_RETRY_DIRECTIVE)
                     continue
                 yield {"type": "frame",

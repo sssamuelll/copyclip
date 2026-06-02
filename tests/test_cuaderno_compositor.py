@@ -383,6 +383,33 @@ def test_ungrounded_finish_triggers_one_grounding_retry(tmp_path: Path):
     retry_call = client.calls[1]
     retry_names = {t["name"] for t in retry_call["tools"]}
     assert "read_file" in retry_names
+    # The corrected answer REPLACES the ungrounded one — the hallucinated block
+    # must not survive inside a frame sealed as a confident answer.
+    texts = " ".join(b.get("text", "") for b in frame["frame"]["blocks"])
+    assert "It does X per README.md." in texts
+    assert "It is a CLI." not in texts
+
+
+def test_grounding_retry_suppressed_when_next_round_is_closing(tmp_path: Path):
+    """With a tiny budget, an ungrounded finish whose retry round would BE the
+    closing round (research tools stripped) must NOT retry — it seals ungrounded
+    directly in a single stream call, avoiding the closing-round collision."""
+    ungrounded_turn = [
+        _tool_stop("b1", "emit_block", {"kind": "lead", "text": "It is a CLI."}),
+        _tool_stop("f", "finish", {}),
+        _msg_stop("tool_use", [
+            _content("b1", "emit_block", {"kind": "lead", "text": "It is a CLI."}),
+            _content("f", "finish", {}),
+        ]),
+    ]
+    client = StubStream([ungrounded_turn, ungrounded_turn])
+    events = list(iter_compose_events(
+        client=client, question="how does it work?",
+        project_root=str(tmp_path), project_id=1, conn=None, max_tool_rounds=2,
+    ))
+    frame = next(e for e in events if e["type"] == "frame")
+    assert frame["frame"]["status"] == "ungrounded"
+    assert len(client.calls) == 1
 
 
 def test_grounding_retry_fires_at_most_once(tmp_path: Path):
