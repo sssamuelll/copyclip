@@ -5,11 +5,15 @@ from typing import Any, Iterator, Optional
 
 from .compositor import iter_compose_events
 from .persistence import save_question
-from .schema import Block, Frame, frame_from_dict
+from .schema import Block, Frame, FRAME_STATUS_PARTIAL, frame_from_dict
 
 
 def _persist_partial(conn, session_id: str, question: str, emitted: list[dict]) -> None:
-    pframe = Frame(question=question, blocks=[Block.from_dict(b) for b in emitted])
+    pframe = Frame(
+        question=question,
+        blocks=[Block.from_dict(b) for b in emitted],
+        status=FRAME_STATUS_PARTIAL,
+    )
     save_question(conn, session_id, question, pframe)
 
 

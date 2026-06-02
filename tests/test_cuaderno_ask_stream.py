@@ -102,3 +102,18 @@ def test_disconnect_persists_partial(tmp_path: Path):
     rows = list_questions(conn, sid)
     assert len(rows) == 1
     assert rows[0]["frame"]["blocks"][0]["kind"] == "lead"
+
+
+def test_disconnect_persists_partial_with_status_partial(tmp_path: Path):
+    conn = _conn()
+    sid = create_session(conn, project_root=str(tmp_path))
+    gen = iter_ask_events(
+        client=StubStream(_one_block_finish()), question="q",
+        project_root=str(tmp_path), project_id=1, conn=conn, session_id=sid,
+    )
+    assert next(gen)["type"] == "meta"
+    assert next(gen)["type"] == "block"   # the lead block
+    gen.close()                            # simulate client disconnect mid-stream
+    rows = list_questions(conn, sid)
+    assert len(rows) == 1
+    assert rows[0]["frame"]["status"] == "partial"
