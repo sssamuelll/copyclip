@@ -64,7 +64,7 @@ def test_emits_blocks_then_frame_in_one_turn(tmp_path: Path):
         "question": "q",
         "blocks": [{"kind": "lead", "text": "hi"},
                    {"kind": "paragraph", "text": "body"}],
-        "status": "answer",
+        "status": "ungrounded",
     }
 
 
@@ -284,3 +284,63 @@ def test_emit_block_across_two_turns_emits_once(tmp_path: Path):
     assert frame["frame"]["blocks"] == [{"kind": "lead", "text": "hi"}]
     # The second turn must have been driven (ack fed back) → two stream calls.
     assert len(client.calls) == 2
+
+
+def test_pyrrhic_answer_is_sealed_ungrounded(tmp_path: Path):
+    """Zero reads + a confident code answer -> status ungrounded (the incident)."""
+    turn = [
+        _tool_stop("b1", "emit_block",
+                   {"kind": "lead", "text": "CopyClip is a local-first CLI."}),
+        _tool_stop("f", "finish", {}),
+        _msg_stop("tool_use", [
+            _content("b1", "emit_block",
+                     {"kind": "lead", "text": "CopyClip is a local-first CLI."}),
+            _content("f", "finish", {}),
+        ]),
+    ]
+    client = StubStream([turn])
+    events = list(iter_compose_events(
+        client=client, question="how does it work?",
+        project_root=str(tmp_path), project_id=1, conn=None,
+    ))
+    frame = next(e for e in events if e["type"] == "frame")
+    assert frame["frame"]["status"] == "ungrounded"
+
+
+def test_grounded_answer_is_sealed_answer(tmp_path: Path):
+    (tmp_path / "README.md").write_text("# X\n", encoding="utf-8")
+    turns = [
+        [
+            _tool_stop("r1", "read_file", {"path": "README.md"}),
+            _msg_stop("tool_use", [_content("r1", "read_file", {"path": "README.md"})]),
+        ],
+        [
+            _tool_stop("b1", "emit_block", {"kind": "lead", "text": "It does X per README.md."}),
+            _tool_stop("f", "finish", {}),
+            _msg_stop("tool_use", [
+                _content("b1", "emit_block", {"kind": "lead", "text": "It does X per README.md."}),
+                _content("f", "finish", {}),
+            ]),
+        ],
+    ]
+    client = StubStream(turns)
+    events = list(iter_compose_events(
+        client=client, question="how does it work?",
+        project_root=str(tmp_path), project_id=1, conn=None,
+    ))
+    frame = next(e for e in events if e["type"] == "frame")
+    assert frame["frame"]["status"] == "answer"
+
+
+def test_fallback_frames_are_status_fallback(tmp_path: Path):
+    turn = [
+        _tool_stop("f", "finish", {}),
+        _msg_stop("tool_use", [_content("f", "finish", {})]),
+    ]
+    client = StubStream([turn])
+    events = list(iter_compose_events(
+        client=client, question="q", project_root=str(tmp_path),
+        project_id=1, conn=None,
+    ))
+    frame = next(e for e in events if e["type"] == "frame")
+    assert frame["frame"]["status"] == "fallback"

@@ -6,7 +6,12 @@ import time
 from typing import Any, Iterator, Optional
 
 from .prompts import SYSTEM_PROMPT
-from .schema import Block, Frame, frame_from_dict, frame_to_dict, validate_block_dict
+from .read_ledger import ReadLedger
+from .quality import assess
+from .schema import (
+    Block, Frame, frame_from_dict, frame_to_dict, validate_block_dict,
+    FRAME_STATUS_FALLBACK,
+)
 from .tool_catalog import ANSWER_TOOLS, build_tool_definitions, dispatch_tool
 
 CLOSING_DIRECTIVE = (
@@ -43,7 +48,13 @@ def _fallback_frame(question: str, reason: str) -> Frame:
                 "ask a narrower question (a specific file, function, or commit)."
             ),
         ],
+        status=FRAME_STATUS_FALLBACK,
     )
+
+
+def _sealed_frame(question: str, emitted: list[Block], ledger: ReadLedger) -> dict[str, Any]:
+    verdict = assess(question=question, blocks=emitted, ledger=ledger)
+    return frame_to_dict(Frame(question=question, blocks=emitted, status=verdict.status))
 
 
 def _ack(tool_use_id: str, payload: dict, *, is_error: bool = False) -> dict[str, Any]:
@@ -99,6 +110,7 @@ def iter_compose_events(
     answer_only = [t for t in tools if t["name"] in ANSWER_TOOLS]
     messages: list[dict[str, Any]] = [{"role": "user", "content": question}]
     emitted: list[Block] = []
+    ledger = ReadLedger()
 
     for round_i in range(max_tool_rounds):
         # Final round: take the research tools away and force an answer, so a
@@ -150,8 +162,7 @@ def iter_compose_events(
         # Terminal: explicit finish, or a non-tool stop reason (implicit finish).
         if finish_seen or stop_reason != "tool_use":
             if emitted:
-                yield {"type": "frame",
-                       "frame": frame_to_dict(Frame(question=question, blocks=emitted))}
+                yield {"type": "frame", "frame": _sealed_frame(question, emitted, ledger)}
             else:
                 yield {"type": "frame",
                        "frame": frame_to_dict(
@@ -188,6 +199,7 @@ def iter_compose_events(
                     name, args, project_root=project_root,
                     project_id=project_id, conn=conn,
                 )
+                ledger.record(name, result)
                 ms = int((time.perf_counter() - t0) * 1000)
                 tool_results.append(_ack(tuid, result))
                 yield {"type": "tool", "id": tuid, "name": name, "args": args_str,
@@ -203,8 +215,7 @@ def iter_compose_events(
 
     # Budget exhausted → fallback frame (terminal; parity with the wrapper below).
     if emitted:
-        yield {"type": "frame",
-               "frame": frame_to_dict(Frame(question=question, blocks=emitted))}
+        yield {"type": "frame", "frame": _sealed_frame(question, emitted, ledger)}
     else:
         yield {"type": "frame",
                "frame": frame_to_dict(_fallback_frame(question, "tool-call budget exhausted"))}
