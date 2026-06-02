@@ -133,6 +133,7 @@ def iter_compose_events(
     max_tool_rounds: int = 8,
     max_tokens: int = 8192,
     judge: Any = None,  # Optional (question, blocks, ledger) -> JudgeVerdict
+    ledger: Optional[ReadLedger] = None,
 ) -> Iterator[dict[str, Any]]:
     """Run the agentic loop as a generator of events.
 
@@ -150,7 +151,7 @@ def iter_compose_events(
     answer_only = [t for t in tools if t["name"] in ANSWER_TOOLS]
     messages: list[dict[str, Any]] = [{"role": "user", "content": question}]
     emitted: list[Block] = []
-    ledger = ReadLedger()
+    ledger = ledger if ledger is not None else ReadLedger()
     grounding_retry_used = False
     responsiveness_retry_used = False
 
