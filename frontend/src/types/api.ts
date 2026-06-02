@@ -837,6 +837,7 @@ export type Frame = {
   blocks: Block[]
   status?: FrameStatus
   verdict?: Record<string, unknown> | null
+  question_language?: string | null
 }
 
 export type CuadernoQuestion = {
@@ -861,7 +862,7 @@ export type ToolRow = {
 }
 
 export type CuadernoStreamEvent =
-  | { type: 'meta'; session_id: string }
+  | { type: 'meta'; session_id: string; question_language?: string | null }
   | {
       type: 'tool'
       id: string
