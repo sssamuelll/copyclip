@@ -5,12 +5,14 @@ import sqlite3
 import time
 from typing import Any, Iterator, Optional
 
-from .prompts import SYSTEM_PROMPT, GROUNDING_RETRY_DIRECTIVE, LANGUAGE_RETRY_DIRECTIVE
+from .prompts import SYSTEM_PROMPT, GROUNDING_RETRY_DIRECTIVE, LANGUAGE_RETRY_DIRECTIVE, RESPONSIVENESS_RETRY_FALLBACK
 from .read_ledger import ReadLedger
-from .quality import assess
+from .quality import assess, cheap_verdict_dict
+from .judge import judge_verdict_dict
 from .schema import (
     Block, Frame, frame_from_dict, frame_to_dict, validate_block_dict,
     FRAME_STATUS_FALLBACK, FRAME_STATUS_ANSWER,
+    FRAME_STATUS_UNGROUNDED, FRAME_STATUS_INSUFFICIENT_EVIDENCE, FRAME_STATUS_OFF_TARGET,
 )
 from .tool_catalog import ANSWER_TOOLS, build_tool_definitions, dispatch_tool
 
@@ -54,7 +56,20 @@ def _fallback_frame(question: str, reason: str) -> Frame:
 
 def _sealed_frame(question: str, emitted: list[Block], ledger: ReadLedger) -> dict[str, Any]:
     verdict = assess(question=question, blocks=emitted, ledger=ledger)
-    return frame_to_dict(Frame(question=question, blocks=emitted, status=verdict.status))
+    return _seal(question, emitted, verdict.status, cheap_verdict_dict(verdict))
+
+
+def _seal(question: str, emitted: list[Block], status: str, verdict: dict) -> dict[str, Any]:
+    return frame_to_dict(Frame(question=question, blocks=emitted, status=status, verdict=verdict))
+
+
+def _judge_status(jv) -> str:
+    if jv.decision == "ok":
+        return FRAME_STATUS_ANSWER
+    if jv.decision == "insufficient":
+        return (FRAME_STATUS_INSUFFICIENT_EVIDENCE
+                if jv.world == "consulted_empty" else FRAME_STATUS_UNGROUNDED)
+    return FRAME_STATUS_OFF_TARGET   # retry with the responsiveness latch spent
 
 
 _LANGUAGE_NAMES = {"es": "Spanish", "en": "English"}
@@ -108,6 +123,7 @@ def iter_compose_events(
     model: str = "claude-sonnet-4-5",
     max_tool_rounds: int = 8,
     max_tokens: int = 8192,
+    judge: Any = None,  # Optional (question, blocks, ledger) -> JudgeVerdict
 ) -> Iterator[dict[str, Any]]:
     """Run the agentic loop as a generator of events.
 
@@ -127,6 +143,7 @@ def iter_compose_events(
     emitted: list[Block] = []
     ledger = ReadLedger()
     grounding_retry_used = False
+    responsiveness_retry_used = False
 
     for round_i in range(max_tool_rounds):
         # Final round: take the research tools away and force an answer, so a
@@ -179,14 +196,14 @@ def iter_compose_events(
         if finish_seen or stop_reason != "tool_use":
             if emitted:
                 verdict = assess(question=question, blocks=emitted, ledger=ledger)
-                needs_retry = (verdict.status != FRAME_STATUS_ANSWER
-                               or verdict.language_mismatch)
+                cheap_needs_retry = (verdict.status != FRAME_STATUS_ANSWER
+                                     or verdict.language_mismatch)
                 # Only retry if the NEXT round would still be a normal round. The
                 # closing round (round_i == max_tool_rounds - 1) strips the
                 # research tools, so a grounding retry landing there could not read
                 # and would only stack a directive contradicting CLOSING_DIRECTIVE.
                 can_retry = round_i < max_tool_rounds - 2
-                if needs_retry and not grounding_retry_used and can_retry:
+                if cheap_needs_retry and not grounding_retry_used and can_retry:
                     # Refuse the close: DISCARD the unsound blocks so the corrected
                     # answer REPLACES them, and emit a `reset` so downstream
                     # consumers (the HTTP wrapper's own block buffer, the client's
@@ -198,9 +215,29 @@ def iter_compose_events(
                     _inject_directive(messages, _retry_directive(verdict))
                     yield {"type": "reset"}
                     continue
+                if verdict.status != FRAME_STATUS_ANSWER:
+                    yield {"type": "frame",
+                           "frame": _seal(question, emitted, verdict.status,
+                                          cheap_verdict_dict(verdict))}
+                    return
+                if judge is not None:
+                    jv = judge(question, emitted, ledger)
+                    if (jv.decision == "retry" and not responsiveness_retry_used
+                            and can_retry):
+                        responsiveness_retry_used = True
+                        emitted.clear()
+                        _inject_directive(
+                            messages, jv.retry_directive or RESPONSIVENESS_RETRY_FALLBACK)
+                        yield {"type": "reset"}
+                        continue
+                    yield {"type": "frame",
+                           "frame": _seal(question, emitted, _judge_status(jv),
+                                          judge_verdict_dict(jv))}
+                    return
                 yield {"type": "frame",
-                       "frame": frame_to_dict(
-                           Frame(question=question, blocks=emitted, status=verdict.status))}
+                       "frame": _seal(question, emitted, FRAME_STATUS_ANSWER,
+                                      cheap_verdict_dict(verdict))}
+                return
             else:
                 yield {"type": "frame",
                        "frame": frame_to_dict(

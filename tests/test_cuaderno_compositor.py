@@ -60,13 +60,13 @@ def test_emits_blocks_then_frame_in_one_turn(tmp_path: Path):
     assert kinds == ["block", "block", "frame"]
     assert events[0]["block"] == {"kind": "lead", "text": "hi"}
     assert events[1]["block"] == {"kind": "paragraph", "text": "body"}
-    assert events[2]["frame"] == {
-        "question": "q",
-        "blocks": [{"kind": "lead", "text": "hi"},
-                   {"kind": "paragraph", "text": "body"}],
-        "status": "ungrounded",
-        "verdict": None,
-    }
+    frame = events[2]["frame"]
+    assert frame["question"] == "q"
+    assert frame["blocks"] == [{"kind": "lead", "text": "hi"},
+                                {"kind": "paragraph", "text": "body"}]
+    assert frame["status"] == "ungrounded"
+    assert frame["verdict"]["source"] == "cheap"
+    assert frame["verdict"]["grounded"] is False
 
 
 def test_read_tool_then_compose(tmp_path: Path):
@@ -502,3 +502,176 @@ def test_language_mismatch_triggers_retry(tmp_path: Path):
     assert frame["frame"]["status"] == "answer"
     texts = " ".join(b.get("text", "") for b in frame["frame"]["blocks"])
     assert "sistema" in texts and "It walks" not in texts
+
+
+# ---------------------------------------------------------------------------
+# Task 6 — judge integration
+# ---------------------------------------------------------------------------
+
+from copyclip.intelligence.cuaderno.judge import JudgeVerdict
+
+
+def _grounded_answer_turns(text="It walks the AST in analyzer.py."):
+    read_turn = [
+        _tool_stop("r1", "read_file", {"path": "README.md"}),
+        _msg_stop("tool_use", [_content("r1", "read_file", {"path": "README.md"})]),
+    ]
+    answer_turn = [
+        _tool_stop("b1", "emit_block", {"kind": "lead", "text": text}),
+        _tool_stop("f", "finish", {}),
+        _msg_stop("tool_use", [
+            _content("b1", "emit_block", {"kind": "lead", "text": text}),
+            _content("f", "finish", {}),
+        ]),
+    ]
+    return [read_turn, answer_turn]
+
+
+def _judge_returning(verdict):
+    def _judge(question, blocks, ledger):
+        return verdict
+    return _judge
+
+
+def test_judge_ok_seals_answer_with_judge_verdict(tmp_path: Path):
+    (tmp_path / "README.md").write_text("# X\n", encoding="utf-8")
+    client = StubStream(_grounded_answer_turns())
+    jv = JudgeVerdict("code_comprehension", True, True, True, "ok", None, None, "good")
+    events = list(iter_compose_events(
+        client=client, question="how does it work?", project_root=str(tmp_path),
+        project_id=1, conn=None, judge=_judge_returning(jv),
+    ))
+    frame = next(e for e in events if e["type"] == "frame")["frame"]
+    assert frame["status"] == "answer"
+    assert frame["verdict"]["source"] == "judge" and frame["verdict"]["responsive"] is True
+
+
+def test_judge_insufficient_consulted_empty_seals_insufficient_evidence(tmp_path: Path):
+    (tmp_path / "README.md").write_text("# X\n", encoding="utf-8")
+    client = StubStream(_grounded_answer_turns())
+    jv = JudgeVerdict("code_comprehension", False, True, True, "insufficient", "consulted_empty", None, "empty")
+    events = list(iter_compose_events(
+        client=client, question="how does it work?", project_root=str(tmp_path),
+        project_id=1, conn=None, judge=_judge_returning(jv),
+    ))
+    frame = next(e for e in events if e["type"] == "frame")["frame"]
+    assert frame["status"] == "insufficient_evidence"
+
+
+def test_judge_insufficient_not_consulted_seals_ungrounded(tmp_path: Path):
+    (tmp_path / "README.md").write_text("# X\n", encoding="utf-8")
+    client = StubStream(_grounded_answer_turns())
+    jv = JudgeVerdict("code_comprehension", False, True, True, "insufficient", "not_consulted", None, "lazy")
+    events = list(iter_compose_events(
+        client=client, question="how does it work?", project_root=str(tmp_path),
+        project_id=1, conn=None, judge=_judge_returning(jv),
+    ))
+    frame = next(e for e in events if e["type"] == "frame")["frame"]
+    assert frame["status"] == "ungrounded"
+
+
+def test_no_judge_seals_answer_with_cheap_verdict(tmp_path: Path):
+    (tmp_path / "README.md").write_text("# X\n", encoding="utf-8")
+    client = StubStream(_grounded_answer_turns())
+    events = list(iter_compose_events(
+        client=client, question="how does it work?", project_root=str(tmp_path),
+        project_id=1, conn=None,
+    ))
+    frame = next(e for e in events if e["type"] == "frame")["frame"]
+    assert frame["status"] == "answer" and frame["verdict"]["source"] == "cheap"
+
+
+# ---------------------------------------------------------------------------
+# Task 7 — harder paths (retry loops, non-fungibility)
+# ---------------------------------------------------------------------------
+
+def test_judge_retry_then_ok_seals_corrected_answer(tmp_path: Path):
+    (tmp_path / "README.md").write_text("# X\n", encoding="utf-8")
+    read = [_tool_stop("r1", "read_file", {"path": "README.md"}),
+            _msg_stop("tool_use", [_content("r1", "read_file", {"path": "README.md"})])]
+    bad = [_tool_stop("b1", "emit_block", {"kind": "lead", "text": "It is a CLI."}),
+           _tool_stop("f", "finish", {}),
+           _msg_stop("tool_use", [_content("b1", "emit_block", {"kind": "lead", "text": "It is a CLI."}),
+                                  _content("f", "finish", {})])]
+    good = [_tool_stop("b2", "emit_block", {"kind": "lead", "text": "It walks the AST, dispatching per node."}),
+            _tool_stop("f2", "finish", {}),
+            _msg_stop("tool_use", [_content("b2", "emit_block", {"kind": "lead", "text": "It walks the AST, dispatching per node."}),
+                                   _content("f2", "finish", {})])]
+    client = StubStream([read, bad, good])
+    verdicts = iter([
+        JudgeVerdict("code_comprehension", True, False, True, "retry", None, "explain the mechanism", "what not how"),
+        JudgeVerdict("code_comprehension", True, True, True, "ok", None, None, "good now"),
+    ])
+    def _judge(q, b, l): return next(verdicts)
+    events = list(iter_compose_events(
+        client=client, question="how does it work?", project_root=str(tmp_path),
+        project_id=1, conn=None, judge=_judge,
+    ))
+    assert any(e["type"] == "reset" for e in events)
+    frame = next(e for e in events if e["type"] == "frame")["frame"]
+    assert frame["status"] == "answer"
+    assert "It is a CLI." not in " ".join(b.get("text", "") for b in frame["blocks"])
+
+
+def test_judge_retry_still_non_responsive_seals_off_target(tmp_path: Path):
+    (tmp_path / "README.md").write_text("# X\n", encoding="utf-8")
+    read = [_tool_stop("r1", "read_file", {"path": "README.md"}),
+            _msg_stop("tool_use", [_content("r1", "read_file", {"path": "README.md"})])]
+    bad = [_tool_stop("b1", "emit_block", {"kind": "lead", "text": "It is a CLI."}),
+           _tool_stop("f", "finish", {}),
+           _msg_stop("tool_use", [_content("b1", "emit_block", {"kind": "lead", "text": "It is a CLI."}),
+                                  _content("f", "finish", {})])]
+    client = StubStream([read, bad, bad])
+    jv = JudgeVerdict("code_comprehension", True, False, True, "retry", None, "explain the mechanism", "still what not how")
+    def _judge(q, b, l): return jv
+    events = list(iter_compose_events(
+        client=client, question="how does it work?", project_root=str(tmp_path),
+        project_id=1, conn=None, judge=_judge,
+    ))
+    frame = next(e for e in events if e["type"] == "frame")["frame"]
+    assert frame["status"] == "off_target"
+    assert frame["verdict"]["responsive"] is False
+
+
+def test_judge_failure_fails_open_to_answer(tmp_path: Path):
+    (tmp_path / "README.md").write_text("# X\n", encoding="utf-8")
+    client = StubStream(_grounded_answer_turns())
+    ok = JudgeVerdict("code_comprehension", True, True, True, "ok", None, None, "judge unavailable: x")
+    events = list(iter_compose_events(
+        client=client, question="how does it work?", project_root=str(tmp_path),
+        project_id=1, conn=None, judge=_judge_returning(ok),
+    ))
+    frame = next(e for e in events if e["type"] == "frame")["frame"]
+    assert frame["status"] == "answer"
+
+
+def test_grounding_and_responsiveness_retries_are_non_fungible(tmp_path: Path):
+    (tmp_path / "README.md").write_text("# X\n", encoding="utf-8")
+    ungrounded = [_tool_stop("b1", "emit_block", {"kind": "lead", "text": "It is a CLI."}),
+                  _tool_stop("f", "finish", {}),
+                  _msg_stop("tool_use", [_content("b1", "emit_block", {"kind": "lead", "text": "It is a CLI."}),
+                                         _content("f", "finish", {})])]
+    read = [_tool_stop("r1", "read_file", {"path": "README.md"}),
+            _msg_stop("tool_use", [_content("r1", "read_file", {"path": "README.md"})])]
+    grounded_but_off = [_tool_stop("b2", "emit_block", {"kind": "lead", "text": "It is, per README.md, a CLI."}),
+                        _tool_stop("f2", "finish", {}),
+                        _msg_stop("tool_use", [_content("b2", "emit_block", {"kind": "lead", "text": "It is, per README.md, a CLI."}),
+                                               _content("f2", "finish", {})])]
+    fixed = [_tool_stop("b3", "emit_block", {"kind": "lead", "text": "It walks the AST node by node."}),
+             _tool_stop("f3", "finish", {}),
+             _msg_stop("tool_use", [_content("b3", "emit_block", {"kind": "lead", "text": "It walks the AST node by node."}),
+                                    _content("f3", "finish", {})])]
+    client = StubStream([ungrounded, read, grounded_but_off, fixed])
+    verdicts = iter([
+        JudgeVerdict("code_comprehension", True, False, True, "retry", None, "mechanism please", "off"),
+        JudgeVerdict("code_comprehension", True, True, True, "ok", None, None, "good"),
+    ])
+    def _judge(q, b, l): return next(verdicts)
+    events = list(iter_compose_events(
+        client=client, question="how does it work?", project_root=str(tmp_path),
+        project_id=1, conn=None, judge=_judge, max_tool_rounds=8,
+    ))
+    resets = [e for e in events if e["type"] == "reset"]
+    assert len(resets) == 2
+    frame = next(e for e in events if e["type"] == "frame")["frame"]
+    assert frame["status"] == "answer"
