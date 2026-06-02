@@ -114,10 +114,14 @@ export function Cuaderno({
                   onOpenCitation={setSidePanelFor}
                   onAsk={onAsk}
                 />
-                <GotItMarkers
-                  value={activeQuestion.got_it}
-                  onSet={(v) => onSetGotIt(activeQuestion.position, v)}
-                />
+                {(!activeQuestion.frame.status ||
+                  activeQuestion.frame.status === 'answer' ||
+                  activeQuestion.frame.status === 'legacy') && (
+                  <GotItMarkers
+                    value={activeQuestion.got_it}
+                    onSet={(v) => onSetGotIt(activeQuestion.position, v)}
+                  />
+                )}
               </>
             )}
           </div>

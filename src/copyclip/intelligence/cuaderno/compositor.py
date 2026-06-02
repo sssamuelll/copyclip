@@ -5,8 +5,13 @@ import sqlite3
 import time
 from typing import Any, Iterator, Optional
 
-from .prompts import SYSTEM_PROMPT
-from .schema import Block, Frame, frame_from_dict, frame_to_dict, validate_block_dict
+from .prompts import SYSTEM_PROMPT, GROUNDING_RETRY_DIRECTIVE, LANGUAGE_RETRY_DIRECTIVE
+from .read_ledger import ReadLedger
+from .quality import assess
+from .schema import (
+    Block, Frame, frame_from_dict, frame_to_dict, validate_block_dict,
+    FRAME_STATUS_FALLBACK, FRAME_STATUS_ANSWER,
+)
 from .tool_catalog import ANSWER_TOOLS, build_tool_definitions, dispatch_tool
 
 CLOSING_DIRECTIVE = (
@@ -43,7 +48,28 @@ def _fallback_frame(question: str, reason: str) -> Frame:
                 "ask a narrower question (a specific file, function, or commit)."
             ),
         ],
+        status=FRAME_STATUS_FALLBACK,
     )
+
+
+def _sealed_frame(question: str, emitted: list[Block], ledger: ReadLedger) -> dict[str, Any]:
+    verdict = assess(question=question, blocks=emitted, ledger=ledger)
+    return frame_to_dict(Frame(question=question, blocks=emitted, status=verdict.status))
+
+
+_LANGUAGE_NAMES = {"es": "Spanish", "en": "English"}
+
+
+def _retry_directive(verdict) -> str:
+    """Compose the one corrective round's directive from whatever the verdict
+    flagged: grounding (unsound answer) and/or language (wrong language)."""
+    parts: list[str] = []
+    if verdict.status != FRAME_STATUS_ANSWER:
+        parts.append(GROUNDING_RETRY_DIRECTIVE)
+    if verdict.language_mismatch:
+        lang = _LANGUAGE_NAMES.get(verdict.question_language, verdict.question_language)
+        parts.append(LANGUAGE_RETRY_DIRECTIVE.format(language=lang))
+    return " ".join(parts) if parts else GROUNDING_RETRY_DIRECTIVE
 
 
 def _ack(tool_use_id: str, payload: dict, *, is_error: bool = False) -> dict[str, Any]:
@@ -99,6 +125,8 @@ def iter_compose_events(
     answer_only = [t for t in tools if t["name"] in ANSWER_TOOLS]
     messages: list[dict[str, Any]] = [{"role": "user", "content": question}]
     emitted: list[Block] = []
+    ledger = ReadLedger()
+    grounding_retry_used = False
 
     for round_i in range(max_tool_rounds):
         # Final round: take the research tools away and force an answer, so a
@@ -150,8 +178,29 @@ def iter_compose_events(
         # Terminal: explicit finish, or a non-tool stop reason (implicit finish).
         if finish_seen or stop_reason != "tool_use":
             if emitted:
+                verdict = assess(question=question, blocks=emitted, ledger=ledger)
+                needs_retry = (verdict.status != FRAME_STATUS_ANSWER
+                               or verdict.language_mismatch)
+                # Only retry if the NEXT round would still be a normal round. The
+                # closing round (round_i == max_tool_rounds - 1) strips the
+                # research tools, so a grounding retry landing there could not read
+                # and would only stack a directive contradicting CLOSING_DIRECTIVE.
+                can_retry = round_i < max_tool_rounds - 2
+                if needs_retry and not grounding_retry_used and can_retry:
+                    # Refuse the close: DISCARD the unsound blocks so the corrected
+                    # answer REPLACES them, and emit a `reset` so downstream
+                    # consumers (the HTTP wrapper's own block buffer, the client's
+                    # provisional render) drop the discarded blocks too. Inject a
+                    # composed grounding/language directive, KEEP tools, spend one
+                    # more normal round. Fires at most once.
+                    grounding_retry_used = True
+                    emitted.clear()
+                    _inject_directive(messages, _retry_directive(verdict))
+                    yield {"type": "reset"}
+                    continue
                 yield {"type": "frame",
-                       "frame": frame_to_dict(Frame(question=question, blocks=emitted))}
+                       "frame": frame_to_dict(
+                           Frame(question=question, blocks=emitted, status=verdict.status))}
             else:
                 yield {"type": "frame",
                        "frame": frame_to_dict(
@@ -188,6 +237,7 @@ def iter_compose_events(
                     name, args, project_root=project_root,
                     project_id=project_id, conn=conn,
                 )
+                ledger.record(name, result)
                 ms = int((time.perf_counter() - t0) * 1000)
                 tool_results.append(_ack(tuid, result))
                 yield {"type": "tool", "id": tuid, "name": name, "args": args_str,
@@ -203,8 +253,7 @@ def iter_compose_events(
 
     # Budget exhausted → fallback frame (terminal; parity with the wrapper below).
     if emitted:
-        yield {"type": "frame",
-               "frame": frame_to_dict(Frame(question=question, blocks=emitted))}
+        yield {"type": "frame", "frame": _sealed_frame(question, emitted, ledger)}
     else:
         yield {"type": "frame",
                "frame": frame_to_dict(_fallback_frame(question, "tool-call budget exhausted"))}

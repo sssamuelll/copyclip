@@ -823,9 +823,18 @@ export type Block =
       items: Array<{ label: string; question: string }>
     }
 
+export type FrameStatus =
+  | 'answer'
+  | 'insufficient_evidence'
+  | 'ungrounded'
+  | 'partial'
+  | 'fallback'
+  | 'legacy'
+
 export type Frame = {
   question: string
   blocks: Block[]
+  status?: FrameStatus
 }
 
 export type CuadernoQuestion = {
@@ -860,6 +869,7 @@ export type CuadernoStreamEvent =
       ms: number | null
     }
   | { type: 'block'; block: Block }
+  | { type: 'reset' }
   | { type: 'frame'; position: number; frame: Frame }
   | { type: 'error'; message: string; partial: boolean }
 

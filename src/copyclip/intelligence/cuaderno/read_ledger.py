@@ -1,0 +1,41 @@
+from __future__ import annotations
+
+from typing import Any
+
+from .tool_catalog import ANSWER_TOOLS
+
+# Per-tool key whose non-empty value means the read returned real content.
+_CONTENT_KEYS: tuple[str, ...] = (
+    "lines", "entries", "symbols", "callers", "callees",
+    "commits", "blame", "diff", "tests",
+)
+
+
+def is_content_bearing_read(tool_name: str, result: dict[str, Any]) -> bool:
+    """True iff a research-tool call returned real evidence.
+
+    Excludes answer tools (emit_block/finish), anything with an "error" key, and
+    results whose content payload is empty (e.g. grep_symbols -> {"symbols": []},
+    the NORMAL path on an unanalyzed project).
+    """
+    if tool_name in ANSWER_TOOLS:
+        return False
+    if not isinstance(result, dict) or result.get("error"):
+        return False
+    return any(result.get(k) for k in _CONTENT_KEYS)
+
+
+class ReadLedger:
+    """Accumulates, across a turn, which reads returned content and which file
+    paths were actually read. Request-local; never shared across threads."""
+
+    def __init__(self) -> None:
+        self.content_bearing_count = 0
+        self.read_paths: set[str] = set()
+
+    def record(self, tool_name: str, result: dict[str, Any]) -> None:
+        if is_content_bearing_read(tool_name, result):
+            self.content_bearing_count += 1
+            path = result.get("path")
+            if isinstance(path, str) and path:
+                self.read_paths.add(path)

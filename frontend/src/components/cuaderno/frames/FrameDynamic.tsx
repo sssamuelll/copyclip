@@ -1,5 +1,24 @@
 import type { Block, Citation, Frame } from '../../../types/api'
 import { CitationChip } from '../CitationChip'
+
+const STATUS_BANNER: Partial<Record<NonNullable<Frame['status']>, { kicker: string; text: string }>> = {
+  ungrounded: {
+    kicker: 'not grounded',
+    text: 'This answer is not anchored to code the tutor actually read, so it may be invented. Either the project does not cover this, or the tutor answered too soon. Re-ask, or point at a specific file, function, or commit.',
+  },
+  insufficient_evidence: {
+    kicker: 'insufficient evidence',
+    text: 'The tutor looked but the project does not contain enough to answer this confidently. What it would need is named above.',
+  },
+  partial: {
+    kicker: 'partial answer',
+    text: 'This answer was interrupted before it finished. It may be incomplete.',
+  },
+  fallback: {
+    kicker: 'no answer',
+    text: 'The tutor could not produce an answer for this question this time.',
+  },
+}
 import { GraphSubset } from '../widgets/GraphSubset'
 import { SequenceDiagram } from '../widgets/SequenceDiagram'
 import { CallersTree } from '../widgets/CallersTree'
@@ -11,12 +30,33 @@ type Props = {
 }
 
 export function FrameDynamic({ frame, onOpenCitation, onAsk }: Props) {
+  const banner = frame.status ? STATUS_BANNER[frame.status] : undefined
+  const isLegacy = frame.status === 'legacy'
   return (
     <>
       <div className="cua-question">
         <span className="label">you asked</span>
         <span className="q">{frame.question}</span>
       </div>
+      {banner ? (
+        <div className="callout" role="status">
+          <div className="kicker">{banner.kicker}</div>
+          <p>{banner.text}</p>
+        </div>
+      ) : null}
+      {isLegacy ? (
+        <div
+          style={{
+            fontFamily: 'var(--font-ui)',
+            fontSize: 11,
+            letterSpacing: '0.04em',
+            color: 'var(--ink-4)',
+            marginBottom: 12,
+          }}
+        >
+          predates grounding checks — provenance not verified
+        </div>
+      ) : null}
       {frame.blocks.map((b, i) => (
         <BlockRender
           key={i}
