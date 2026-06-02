@@ -44,11 +44,32 @@ def _one_block_finish():
     ]]
 
 
+def _read_then_answer():
+    # A grounded turn (a real content-bearing read) followed by an answer turn,
+    # so the groundedness gate seals a normal `answer` frame instead of forcing
+    # a grounding retry. Requires a README.md in the project_root.
+    return [
+        [
+            _tool_stop("r1", "read_file", {"path": "README.md"}),
+            _msg_stop("tool_use", [_content("r1", "read_file", {"path": "README.md"})]),
+        ],
+        [
+            _tool_stop("b1", "emit_block", {"kind": "lead", "text": "hi"}),
+            _tool_stop("f", "finish", {}),
+            _msg_stop("tool_use", [
+                _content("b1", "emit_block", {"kind": "lead", "text": "hi"}),
+                _content("f", "finish", {}),
+            ]),
+        ],
+    ]
+
+
 def test_meta_is_first_and_frame_carries_position(tmp_path: Path):
     conn = _conn()
     sid = create_session(conn, project_root=str(tmp_path))
+    (tmp_path / "README.md").write_text("# X\n", encoding="utf-8")
     events = list(iter_ask_events(
-        client=StubStream(_one_block_finish()), question="q",
+        client=StubStream(_read_then_answer()), question="q",
         project_root=str(tmp_path), project_id=1, conn=conn, session_id=sid,
     ))
     assert events[0] == {"type": "meta", "session_id": sid}

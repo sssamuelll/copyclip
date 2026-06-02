@@ -54,7 +54,7 @@ def test_emits_blocks_then_frame_in_one_turn(tmp_path: Path):
     client = StubStream([turn])
     events = list(iter_compose_events(
         client=client, question="q", project_root=str(tmp_path),
-        project_id=1, conn=None,
+        project_id=1, conn=None, max_tool_rounds=1,
     ))
     kinds = [e["type"] for e in events]
     assert kinds == ["block", "block", "frame"]
@@ -105,7 +105,7 @@ def test_implicit_finish_on_end_turn(tmp_path: Path):
     client = StubStream([turn])
     events = list(iter_compose_events(
         client=client, question="q", project_root=str(tmp_path),
-        project_id=1, conn=None,
+        project_id=1, conn=None, max_tool_rounds=1,
     ))
     assert [e["type"] for e in events] == ["block", "frame"]
     assert events[1]["frame"]["blocks"] == [{"kind": "lead", "text": "x"}]
@@ -125,7 +125,7 @@ def test_malformed_block_is_dropped(tmp_path: Path):
     client = StubStream([turn])
     events = list(iter_compose_events(
         client=client, question="q", project_root=str(tmp_path),
-        project_id=1, conn=None,
+        project_id=1, conn=None, max_tool_rounds=1,
     ))
     block_events = [e for e in events if e["type"] == "block"]
     assert len(block_events) == 1
@@ -191,7 +191,7 @@ def test_compose_frame_wrapper_returns_terminal_frame(tmp_path: Path):
     client = StubStream([turn])
     frame = compose_frame(
         client=client, question="q", project_root=str(tmp_path),
-        project_id=1, conn=None,
+        project_id=1, conn=None, max_tool_rounds=1,
     )
     assert isinstance(frame, Frame)
     assert frame.question == "q"
@@ -275,7 +275,7 @@ def test_emit_block_across_two_turns_emits_once(tmp_path: Path):
     client = StubStream(turns)
     events = list(iter_compose_events(
         client=client, question="q", project_root=str(tmp_path),
-        project_id=1, conn=None,
+        project_id=1, conn=None, max_tool_rounds=2,
     ))
     block_events = [e for e in events if e["type"] == "block"]
     assert len(block_events) == 1
@@ -287,7 +287,9 @@ def test_emit_block_across_two_turns_emits_once(tmp_path: Path):
 
 
 def test_pyrrhic_answer_is_sealed_ungrounded(tmp_path: Path):
-    """Zero reads + a confident code answer -> status ungrounded (the incident)."""
+    """Zero reads + a confident code answer -> status ungrounded (the incident).
+    With max_tool_rounds=1 there is no budget for a retry, so the verdict seals
+    immediately — confirming the gate fires even when the retry cannot."""
     turn = [
         _tool_stop("b1", "emit_block",
                    {"kind": "lead", "text": "CopyClip is a local-first CLI."}),
@@ -301,7 +303,7 @@ def test_pyrrhic_answer_is_sealed_ungrounded(tmp_path: Path):
     client = StubStream([turn])
     events = list(iter_compose_events(
         client=client, question="how does it work?",
-        project_root=str(tmp_path), project_id=1, conn=None,
+        project_root=str(tmp_path), project_id=1, conn=None, max_tool_rounds=1,
     ))
     frame = next(e for e in events if e["type"] == "frame")
     assert frame["frame"]["status"] == "ungrounded"
@@ -344,3 +346,61 @@ def test_fallback_frames_are_status_fallback(tmp_path: Path):
     ))
     frame = next(e for e in events if e["type"] == "frame")
     assert frame["frame"]["status"] == "fallback"
+
+
+def test_ungrounded_finish_triggers_one_grounding_retry(tmp_path: Path):
+    """Turn 1: ungrounded finish (no reads). The gate must NOT seal; it injects
+    a grounding directive and grants another round. Turn 2 reads. Turn 3 answers
+    grounded -> status answer. Exactly one retry, research tools kept on retry."""
+    (tmp_path / "README.md").write_text("# X\n", encoding="utf-8")
+    ungrounded_turn = [
+        _tool_stop("b1", "emit_block", {"kind": "lead", "text": "It is a CLI."}),
+        _tool_stop("f", "finish", {}),
+        _msg_stop("tool_use", [
+            _content("b1", "emit_block", {"kind": "lead", "text": "It is a CLI."}),
+            _content("f", "finish", {}),
+        ]),
+    ]
+    grounded_turn = [
+        _tool_stop("r1", "read_file", {"path": "README.md"}),
+        _msg_stop("tool_use", [_content("r1", "read_file", {"path": "README.md"})]),
+    ]
+    final_turn = [
+        _tool_stop("b2", "emit_block", {"kind": "lead", "text": "It does X per README.md."}),
+        _tool_stop("f2", "finish", {}),
+        _msg_stop("tool_use", [
+            _content("b2", "emit_block", {"kind": "lead", "text": "It does X per README.md."}),
+            _content("f2", "finish", {}),
+        ]),
+    ]
+    client = StubStream([ungrounded_turn, grounded_turn, final_turn])
+    events = list(iter_compose_events(
+        client=client, question="how does it work?",
+        project_root=str(tmp_path), project_id=1, conn=None, max_tool_rounds=8,
+    ))
+    frame = next(e for e in events if e["type"] == "frame")
+    assert frame["frame"]["status"] == "answer"
+    retry_call = client.calls[1]
+    retry_names = {t["name"] for t in retry_call["tools"]}
+    assert "read_file" in retry_names
+
+
+def test_grounding_retry_fires_at_most_once(tmp_path: Path):
+    """Model stays ungrounded across the original finish AND the retry ->
+    sealed ungrounded, no infinite loop, exactly one retry (2 stream calls)."""
+    ungrounded_turn = [
+        _tool_stop("b1", "emit_block", {"kind": "lead", "text": "It is a CLI."}),
+        _tool_stop("f", "finish", {}),
+        _msg_stop("tool_use", [
+            _content("b1", "emit_block", {"kind": "lead", "text": "It is a CLI."}),
+            _content("f", "finish", {}),
+        ]),
+    ]
+    client = StubStream([ungrounded_turn, ungrounded_turn, ungrounded_turn])
+    events = list(iter_compose_events(
+        client=client, question="how does it work?",
+        project_root=str(tmp_path), project_id=1, conn=None, max_tool_rounds=8,
+    ))
+    frame = next(e for e in events if e["type"] == "frame")
+    assert frame["frame"]["status"] == "ungrounded"
+    assert len(client.calls) == 2

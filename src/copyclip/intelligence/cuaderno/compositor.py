@@ -5,12 +5,12 @@ import sqlite3
 import time
 from typing import Any, Iterator, Optional
 
-from .prompts import SYSTEM_PROMPT
+from .prompts import SYSTEM_PROMPT, GROUNDING_RETRY_DIRECTIVE
 from .read_ledger import ReadLedger
 from .quality import assess
 from .schema import (
     Block, Frame, frame_from_dict, frame_to_dict, validate_block_dict,
-    FRAME_STATUS_FALLBACK,
+    FRAME_STATUS_FALLBACK, FRAME_STATUS_ANSWER,
 )
 from .tool_catalog import ANSWER_TOOLS, build_tool_definitions, dispatch_tool
 
@@ -111,6 +111,7 @@ def iter_compose_events(
     messages: list[dict[str, Any]] = [{"role": "user", "content": question}]
     emitted: list[Block] = []
     ledger = ReadLedger()
+    grounding_retry_used = False
 
     for round_i in range(max_tool_rounds):
         # Final round: take the research tools away and force an answer, so a
@@ -162,7 +163,18 @@ def iter_compose_events(
         # Terminal: explicit finish, or a non-tool stop reason (implicit finish).
         if finish_seen or stop_reason != "tool_use":
             if emitted:
-                yield {"type": "frame", "frame": _sealed_frame(question, emitted, ledger)}
+                verdict = assess(question=question, blocks=emitted, ledger=ledger)
+                rounds_left = round_i < max_tool_rounds - 1
+                if (verdict.status != FRAME_STATUS_ANSWER
+                        and not grounding_retry_used and rounds_left):
+                    # Refuse the close: inject a grounding directive, KEEP tools,
+                    # spend one more normal round. Fires at most once.
+                    grounding_retry_used = True
+                    _inject_directive(messages, GROUNDING_RETRY_DIRECTIVE)
+                    continue
+                yield {"type": "frame",
+                       "frame": frame_to_dict(
+                           Frame(question=question, blocks=emitted, status=verdict.status))}
             else:
                 yield {"type": "frame",
                        "frame": frame_to_dict(

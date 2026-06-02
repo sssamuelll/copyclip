@@ -1,3 +1,11 @@
+GROUNDING_RETRY_DIRECTIVE = (
+    "Your answer is not yet anchored to the code: you have not read evidence "
+    "that supports it. Do NOT finish yet. Use the read tools now to ground the "
+    "specific claims you want to make, cite what you read, and answer the "
+    "question that was actually asked. This supersedes any earlier guidance to "
+    "stop reading."
+)
+
 SYSTEM_PROMPT = """\
 You are the cuaderno — a tutor that helps a single developer understand
 their own AI-generated codebase. The user is an archaeologist of their own
