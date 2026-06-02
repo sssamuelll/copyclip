@@ -11,7 +11,7 @@ from .db import connect, init_schema
 from .server import run_server
 
 
-COMMANDS = {"analyze", "serve", "start", "decision", "report", "issue", "audit", "mcp", "update"}
+COMMANDS = {"analyze", "serve", "start", "decision", "report", "issue", "audit", "mcp", "update", "bench"}
 
 
 def _use_color() -> bool:
@@ -315,6 +315,23 @@ def _maybe_handle_internal(argv) -> bool:
         p.parse_args(argv[2:])
         print(_info("Starting MCP Oracle..."))
         asyncio.run(run_mcp_server())
+        return True
+
+    if cmd == "bench":
+        from .cuaderno.bench.cli import run_bench
+        p = argparse.ArgumentParser(
+            prog="copyclip bench",
+            description="Run the cuaderno eval harness over a fixed corpus.")
+        p.add_argument("--path", default=".", help="project root (default: cwd)")
+        p.add_argument("--corpus", default="corpus/cuaderno-bench.jsonl",
+                       help="path to the JSONL corpus")
+        p.add_argument("--baseline", default=None,
+                       help="a prior run_id to diff against (regression report)")
+        p.add_argument("--limit", type=int, default=None,
+                       help="run only the first N corpus questions")
+        ns = p.parse_args(argv[2:])
+        run_bench(project_root=os.path.abspath(ns.path), corpus_path=ns.corpus,
+                  baseline=ns.baseline, limit=ns.limit)
         return True
 
     if cmd == "report":
