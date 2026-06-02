@@ -119,3 +119,17 @@ def assess(*, question: str, blocks: list[Block], ledger: ReadLedger) -> Quality
         question_language=q_lang,
         reason="ok" if not language_mismatch else "language mismatch",
     )
+
+
+def cheap_verdict_dict(v: QualityVerdict) -> dict[str, Any]:
+    """The cheap layer's partial verdict as the persisted pre-image. The cheap
+    layer cannot judge responsiveness, so `responsive` is None (unknown)."""
+    return {
+        "grounded": v.status == FRAME_STATUS_ANSWER,
+        "responsive": None,
+        "language_ok": not v.language_mismatch,
+        "question_kind": None,
+        "world": None,
+        "reason": v.reason,
+        "source": "cheap",
+    }
