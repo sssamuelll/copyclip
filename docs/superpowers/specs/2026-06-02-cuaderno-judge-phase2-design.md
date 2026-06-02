@@ -105,7 +105,7 @@ Two changes:
 
 2. **`Frame` gains a `verdict` field** — the persisted multi-axis pre-image. The disposition `status` is the shadow; the `verdict` is the object that casts it. Without persisting it, the system re-commits the original sin (compute a verdict, use it once, discard it) one level up: the first time a frame is both `ungrounded` AND off-target, the flat `status` must choose one word, and only the persisted verdict remembers both were true.
 
-   `Frame.verdict: Optional[dict]` carries: `grounded`, `responsive`, `language_ok`, `question_kind`, `world`, `reason`, and `source` (`cheap` | `judge`). It rides inside `frame_json` (like `status`); `frame_from_dict` defaults it to `None` for legacy/pre-existing frames. Every freshly-sealed frame carries the verdict that produced its status: cheap-only seals carry the cheap layer's partial verdict (grounded/language known; responsive unknown); judge seals carry the full seven-field verdict.
+   `Frame.verdict: Optional[dict]` carries: `grounded`, `responsive`, `language_ok`, `question_kind`, `world`, `reason`, and `source` (`cheap` | `judge` | `unjudged`). It rides inside `frame_json` (like `status`); `frame_from_dict` defaults it to `None` for legacy/pre-existing frames. Every freshly-sealed frame carries the verdict that produced its status. **An axis the layer did not assess is `None`, never a default `True`** — the cheap layer writes `responsive: None` (it cannot judge it), and a **fail-open** seal (the judge errored/timed out/returned garbage) is recorded as `source: unjudged` with every assessment axis `None`, so the record never claims the judge ran when it did not.
 
 The UI consumes `status` (one disposition); the record keeps `verdict` (the pre-image). Collapse the view; never collapse the record.
 
@@ -159,4 +159,17 @@ UI-chrome i18n ("you asked" / "go deeper"); a "checking…" indicator; citation-
 
 ## 14. Open questions
 
-None blocking. Deferred by decision: surfacing the persisted `verdict` to the user beyond the banner (Phase 3); `contradiction_detected` (§13); judge model is configurable, default `claude-haiku-4-5`.
+None blocking. Deferred by decision: surfacing the persisted `verdict` to the user beyond the banner (Phase 3 — until then it is forward plumbing whose **values** must be honest, §15); `contradiction_detected` (§13). The judge model resolves to `claude-haiku-4-5` for Anthropic else the answer model; it is overridable via the `cuaderno_judge_model` config key, but **no Settings-UI writer exists yet** (DB-level config only).
+
+## 15. Full-roster review (2026-06-02)
+
+A five-lens panel (Halberg runtime / Serrano spec-risk / Voronov + Null Vale honesty / Vex deletion) re-audited the shipped code. Fixes applied:
+
+- **The fail-open verdict lied (BLOCKER, all four).** A judge outage persisted `{responsive: true, source: judge}` — forging the judge's signature on an answer it never assessed (the original sin reborn). Fix: `JudgeVerdict`'s assessment axes are `Optional` (None = unknown, never default True); a fail-open seal is `source: unjudged` with every axis `None` (§6). The cheap path was already honest (`responsive: None`); now the judge path is too.
+- **The `timeout=20` was swallowed on non-Anthropic providers (BLOCKER).** `OpenAICompatAdapter.messages_create` dropped it into `**_ignored` → a hung judge stalled the terminal ~600s (a #124 degradation). Fix: the OpenAI path now threads `timeout` to the SDK call.
+- **Prompt injection (HIGH).** The judged answer is fenced as untrusted `DATA` with a `JUDGE_PROMPT` instruction to never follow instructions inside it — the custodian's independence at the channel level.
+- **World default-to-blame (HIGH).** `JUDGE_PROMPT` now requires `world` on `insufficient`; the record persists `world` honestly (`None` when unknown); the disposition defaults to the **recoverable** `ungrounded` ("re-ask"), never a false terminal claim that the project is empty.
+- **Budget-tail unjudged (#3).** A would-be-`answer` reached via budget exhaustion is now judged too (Option A holds on every path); a judge `retry` there seals `off_target` (no retry left).
+- **Frontend (#11/#12).** Follow-ups are suppressed on non-`answer` dispositions; a pre-Phase-2 `answer` (no `verdict`) carries the same "predates grounding checks" provenance note as `legacy`.
+
+Accepted residuals: the persisted `verdict` is still unread by the UI (Phase-3 plumbing, now with honest values); a responsiveness-retry round that returns cheap-ungrounded seals `ungrounded` (honest) rather than re-judging; the `world`-unknown disposition is recoverable-by-design. Vex's cleanups applied (reused `_answer_text`, simplified `_extract_json`, keyword `_ok_verdict`); the server config read keeps its guard.
