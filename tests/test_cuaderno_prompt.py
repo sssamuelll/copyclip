@@ -21,4 +21,19 @@ def test_prompt_does_not_assume_project_is_analyzed():
 
 def test_prompt_pushes_to_answer_rather_than_over_explore():
     low = SYSTEM_PROMPT.lower()
-    assert "stop reading" in low or "stop exploring" in low
+    assert "stop reading" in low or "stop exploring" in low or "read before you answer" in low
+
+
+def test_prompt_requires_language_mirroring():
+    low = SYSTEM_PROMPT.lower()
+    assert "language" in low and ("same language" in low or "user's language" in low)
+
+
+def test_prompt_requires_grounding_before_answering():
+    low = SYSTEM_PROMPT.lower()
+    assert "before" in low and ("read" in low or "evidence" in low)
+
+
+def test_prompt_requires_answering_the_question_asked():
+    low = SYSTEM_PROMPT.lower()
+    assert "asked" in low or ("how" in low and "what" in low)
