@@ -122,6 +122,30 @@ def _args_summary(name: str, args: dict[str, Any]) -> str:
     return ""
 
 
+def _ack_terminal_tools(turn_content: list[dict[str, Any]],
+                        emit_status: dict[str, Optional[str]]) -> list[dict[str, Any]]:
+    """tool_result acks for every tool_use in a TERMINAL assistant turn.
+
+    A retry re-invokes the model, and both the Anthropic and OpenAI APIs require
+    every assistant tool_use/tool_call to be answered by a tool_result before the
+    next turn (OpenAI: 'insufficient tool messages following tool_calls'). The
+    normal round acks inline (and dispatches read tools); the terminal round
+    skipped acking because it used to always return — until grounding /
+    responsiveness retries began re-calling the model from here."""
+    results: list[dict[str, Any]] = []
+    for blk in turn_content:
+        if blk.get("type") != "tool_use":
+            continue
+        tuid = blk["id"]
+        if blk.get("name") == "emit_block":
+            reason = emit_status.get(tuid)
+            results.append(_ack(tuid, {"ok": True}) if reason is None
+                           else _ack(tuid, {"error": "invalid_block", "detail": reason}, is_error=True))
+        else:
+            results.append(_ack(tuid, {"ok": True}))
+    return results
+
+
 def iter_compose_events(
     *,
     client: Any,
@@ -222,6 +246,11 @@ def iter_compose_events(
                     # more normal round. Fires at most once.
                     grounding_retry_used = True
                     emitted.clear()
+                    # Answer the terminal turn's tool_use blocks before re-calling
+                    # the model — a dangling tool_call 400s on real APIs.
+                    acks = _ack_terminal_tools(turn_content, emit_status)
+                    if acks:
+                        messages.append({"role": "user", "content": acks})
                     _inject_directive(messages, _retry_directive(verdict))
                     yield {"type": "reset"}
                     continue
@@ -236,6 +265,9 @@ def iter_compose_events(
                             and can_retry):
                         responsiveness_retry_used = True
                         emitted.clear()
+                        acks = _ack_terminal_tools(turn_content, emit_status)
+                        if acks:
+                            messages.append({"role": "user", "content": acks})
                         _inject_directive(
                             messages, jv.retry_directive or RESPONSIVENESS_RETRY_FALLBACK)
                         yield {"type": "reset"}

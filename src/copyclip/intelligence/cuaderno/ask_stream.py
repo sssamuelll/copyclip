@@ -8,12 +8,15 @@ from .persistence import save_question
 from .schema import Block, Frame, FRAME_STATUS_PARTIAL, frame_from_dict
 
 
-def _persist_partial(conn, session_id: str, question: str, emitted: list[dict]) -> None:
-    pframe = Frame(
-        question=question,
-        blocks=[Block.from_dict(b) for b in emitted],
-        status=FRAME_STATUS_PARTIAL,
-    )
+def _persist_partial(conn, session_id: str, question: str, emitted: list[dict],
+                     message: Optional[str] = None) -> None:
+    blocks = [Block.from_dict(b) for b in emitted]
+    if not blocks:
+        # No surviving blocks (e.g. an error after a retry's reset cleared the
+        # buffer). Persist a marker so the turn is never silently lost.
+        reason = message or "the stream ended early"
+        blocks = [Block.paragraph(f"This turn was interrupted ({reason}). Re-ask to retry.")]
+    pframe = Frame(question=question, blocks=blocks, status=FRAME_STATUS_PARTIAL)
     save_question(conn, session_id, question, pframe)
 
 
@@ -66,9 +69,13 @@ def iter_ask_events(
                 persisted = True
                 yield {"type": "frame", "position": position, "frame": ev["frame"]}
             elif ev["type"] == "error":
-                if ev.get("partial") and emitted:
-                    _persist_partial(conn, session_id, question, emitted)
-                    persisted = True
+                # Always persist the turn so it is never silently lost — a stream
+                # error is a `partial` per the status taxonomy. Surviving blocks
+                # ride as the partial body; with none (e.g. an error after a
+                # retry's reset cleared the buffer) a marker block keeps the
+                # question in the conversation.
+                _persist_partial(conn, session_id, question, emitted, message=ev.get("message"))
+                persisted = True
                 yield ev
     finally:
         # Client disconnect (GeneratorExit) or abnormal stop: persist partial once.
