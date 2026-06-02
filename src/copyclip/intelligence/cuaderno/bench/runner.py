@@ -8,7 +8,7 @@ from ..compositor import iter_compose_events, _fallback_frame
 from ..quality import _cited_paths, _answer_text, _norm_path
 from ..language import detect_language
 from ..read_ledger import ReadLedger
-from ..schema import Block, frame_from_dict, FRAME_STATUS_PARTIAL
+from ..schema import Block, FRAME_STATUS_PARTIAL
 from .artifact import QuestionRecord
 from .asserts import AssertContext, run_asserts
 from .score import question_rollup
