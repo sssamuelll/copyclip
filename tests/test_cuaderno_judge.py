@@ -91,3 +91,18 @@ def test_judge_verdict_dict_shape():
         "question_kind": "code_comprehension", "world": None,
         "reason": "off topic", "source": "judge",
     }
+
+
+def test_parse_unhashable_decision_returns_none():
+    # The membership test must not raise on an unhashable `decision`.
+    assert parse_judge_verdict('{"decision":["ok"]}') is None
+    assert parse_judge_verdict('{"decision":{"x":1}}') is None
+
+
+def test_judge_answer_fails_open_on_unhashable_decision():
+    # The #124 invariant: valid JSON with a malformed decision must STILL
+    # fail-open to ok, never raise out of judge_answer.
+    client = _StubClient(text='{"decision":["ok"]}')
+    v = judge_answer(client=client, question="how?", blocks=[Block.lead("x")],
+                     ledger=_ledger(), model="m")
+    assert v.decision == "ok"

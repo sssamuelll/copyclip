@@ -39,14 +39,20 @@ def parse_judge_verdict(text: str) -> Optional[JudgeVerdict]:
         obj = json.loads(_extract_json(text))
     except (ValueError, TypeError):
         return None
-    if not isinstance(obj, dict) or obj.get("decision") not in _DECISIONS:
+    if not isinstance(obj, dict):
+        return None
+    decision = obj.get("decision")
+    # isinstance(str) guards the `in` against an unhashable decision (e.g. the
+    # model returns {"decision": ["ok"]}) — without it the membership test raises
+    # TypeError, which would escape judge_answer and break fail-open.
+    if not isinstance(decision, str) or decision not in _DECISIONS:
         return None
     return JudgeVerdict(
         question_kind=str(obj.get("question_kind", "code_comprehension")),
         grounded=bool(obj.get("grounded", True)),
         responsive=bool(obj.get("responsive", True)),
         language_ok=bool(obj.get("language_ok", True)),
-        decision=obj["decision"],
+        decision=decision,
         world=obj.get("world") if isinstance(obj.get("world"), str) else None,
         retry_directive=obj.get("retry_directive") if isinstance(obj.get("retry_directive"), str) else None,
         reason=str(obj.get("reason", "")),
@@ -84,14 +90,18 @@ def judge_answer(*, client, question, blocks, ledger, model, max_tokens: int = 5
     try:
         resp = client.messages_create(
             model=model, system=JUDGE_PROMPT,
-            messages=[{"role": "user", "content": user}], max_tokens=max_tokens,
+            messages=[{"role": "user", "content": user}],
+            max_tokens=max_tokens, timeout=20,
         )
         text = "".join(
             b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text"
         )
-    except Exception as exc:  # noqa: BLE001 — fail-open is the whole point
+        v = parse_judge_verdict(text)
+    except Exception as exc:  # noqa: BLE001 — fail-open is the whole point: a judge
+        # error, a HANG (bounded by timeout=20 on the Anthropic path), or any
+        # parser surprise must seal the already-streamed answer, never crash the
+        # terminal and lock the composer (the #124 invariant).
         return _ok_verdict(f"judge unavailable: {exc}")
-    v = parse_judge_verdict(text)
     return v if v is not None else _ok_verdict("judge output unparseable")
 
 
