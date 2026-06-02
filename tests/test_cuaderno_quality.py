@@ -47,3 +47,47 @@ def test_looks_like_code_question_detects_meta():
     assert looks_like_code_question("how does read_file work?") is True
     assert looks_like_code_question("what can I ask you?") is False
     assert looks_like_code_question("por qué respondiste en inglés?") is False
+
+
+def test_cites_only_unread_paths_is_ungrounded():
+    # Oriented with list_dir but cites a file it never read -> fabricated grounding.
+    led = ReadLedger()
+    led.record("list_dir", {"path": ".", "entries": ["a", "b"]})
+    v = assess(
+        question="how does the analyzer work?",
+        blocks=[
+            Block.lead("It walks the AST in analyzer.py."),
+            Block.citation({"kind": "path", "path": "src/analyzer.py", "line_start": 10}),
+        ],
+        ledger=led,
+    )
+    assert v.status == FRAME_STATUS_UNGROUNDED
+    assert "unread" in v.reason
+
+
+def test_cites_a_read_path_is_answer():
+    led = ReadLedger()
+    led.record("read_file", {"path": "src/analyzer.py", "lines": [{"n": 1, "text": "x"}]})
+    v = assess(
+        question="how does the analyzer work?",
+        blocks=[
+            Block.lead("It walks the AST."),
+            Block.citation({"kind": "path", "path": "src/analyzer.py"}),
+        ],
+        ledger=led,
+    )
+    assert v.status == FRAME_STATUS_ANSWER
+
+
+def test_reads_but_no_citations_is_answer():
+    led = ReadLedger()
+    led.record("read_file", {"path": "README.md", "lines": [{"n": 1, "text": "x"}]})
+    v = assess(question="how does it work?", blocks=[Block.lead("It does X.")], ledger=led)
+    assert v.status == FRAME_STATUS_ANSWER
+
+
+def test_verdict_carries_question_language():
+    led = ReadLedger()
+    led.record("read_file", {"path": "a.py", "lines": [{"n": 1, "text": "x"}]})
+    v = assess(question="como funciona el analizador", blocks=[Block.lead("hi")], ledger=led)
+    assert v.question_language == "es"

@@ -431,3 +431,73 @@ def test_grounding_retry_fires_at_most_once(tmp_path: Path):
     frame = next(e for e in events if e["type"] == "frame")
     assert frame["frame"]["status"] == "ungrounded"
     assert len(client.calls) == 2
+
+
+def test_retry_emits_reset_event(tmp_path: Path):
+    """The grounding retry emits a `reset` so downstream consumers drop the
+    discarded provisional blocks; the corrected answer seals `answer`."""
+    (tmp_path / "README.md").write_text("# X\n", encoding="utf-8")
+    ungrounded_turn = [
+        _tool_stop("b1", "emit_block", {"kind": "lead", "text": "It is a CLI."}),
+        _tool_stop("f", "finish", {}),
+        _msg_stop("tool_use", [
+            _content("b1", "emit_block", {"kind": "lead", "text": "It is a CLI."}),
+            _content("f", "finish", {}),
+        ]),
+    ]
+    read_turn = [
+        _tool_stop("r1", "read_file", {"path": "README.md"}),
+        _msg_stop("tool_use", [_content("r1", "read_file", {"path": "README.md"})]),
+    ]
+    final_turn = [
+        _tool_stop("b2", "emit_block", {"kind": "lead", "text": "It does X per README.md."}),
+        _tool_stop("f2", "finish", {}),
+        _msg_stop("tool_use", [
+            _content("b2", "emit_block", {"kind": "lead", "text": "It does X per README.md."}),
+            _content("f2", "finish", {}),
+        ]),
+    ]
+    client = StubStream([ungrounded_turn, read_turn, final_turn])
+    events = list(iter_compose_events(
+        client=client, question="how does it work?",
+        project_root=str(tmp_path), project_id=1, conn=None, max_tool_rounds=8,
+    ))
+    assert any(e["type"] == "reset" for e in events)
+    frame = next(e for e in events if e["type"] == "frame")
+    assert frame["frame"]["status"] == "answer"
+
+
+def test_language_mismatch_triggers_retry(tmp_path: Path):
+    """A GROUNDED answer in the wrong language fires the one retry (with a
+    reset); the corrected Spanish answer seals `answer`."""
+    (tmp_path / "README.md").write_text("# X\n", encoding="utf-8")
+    read_turn = [
+        _tool_stop("r1", "read_file", {"path": "README.md"}),
+        _msg_stop("tool_use", [_content("r1", "read_file", {"path": "README.md"})]),
+    ]
+    english_answer = [
+        _tool_stop("b1", "emit_block", {"kind": "lead", "text": "It walks the syntax tree."}),
+        _tool_stop("f", "finish", {}),
+        _msg_stop("tool_use", [
+            _content("b1", "emit_block", {"kind": "lead", "text": "It walks the syntax tree."}),
+            _content("f", "finish", {}),
+        ]),
+    ]
+    spanish_answer = [
+        _tool_stop("b2", "emit_block", {"kind": "lead", "text": "El sistema recorre la sintaxis del proyecto."}),
+        _tool_stop("f2", "finish", {}),
+        _msg_stop("tool_use", [
+            _content("b2", "emit_block", {"kind": "lead", "text": "El sistema recorre la sintaxis del proyecto."}),
+            _content("f2", "finish", {}),
+        ]),
+    ]
+    client = StubStream([read_turn, english_answer, spanish_answer])
+    events = list(iter_compose_events(
+        client=client, question="como funciona el analizador",
+        project_root=str(tmp_path), project_id=1, conn=None, max_tool_rounds=8,
+    ))
+    assert any(e["type"] == "reset" for e in events)
+    frame = next(e for e in events if e["type"] == "frame")
+    assert frame["frame"]["status"] == "answer"
+    texts = " ".join(b.get("text", "") for b in frame["frame"]["blocks"])
+    assert "sistema" in texts and "It walks" not in texts

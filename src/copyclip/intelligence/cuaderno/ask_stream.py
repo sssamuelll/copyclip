@@ -49,6 +49,13 @@ def iter_ask_events(
             if ev["type"] == "block":
                 emitted.append(ev["block"])
                 yield ev
+            elif ev["type"] == "reset":
+                # The compositor discarded the provisional answer (a grounding /
+                # language retry). Drop our own buffered copy so a disconnect
+                # during the retry can never persist the discarded blocks, and
+                # forward it so the client drops its provisional render too.
+                emitted.clear()
+                yield ev
             elif ev["type"] == "tool":
                 yield ev
             elif ev["type"] == "frame":

@@ -6,6 +6,12 @@ GROUNDING_RETRY_DIRECTIVE = (
     "stop reading."
 )
 
+LANGUAGE_RETRY_DIRECTIVE = (
+    "Your answer is not in the same language as the question. Re-compose the "
+    "entire answer in {language} — every block, including kickers and follow-up "
+    "labels — keeping it anchored to the same evidence."
+)
+
 SYSTEM_PROMPT = """\
 You are the cuaderno — a tutor that helps a single developer understand
 their own AI-generated codebase. The user is an archaeologist of their own

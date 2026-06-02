@@ -117,3 +117,37 @@ def test_disconnect_persists_partial_with_status_partial(tmp_path: Path):
     rows = list_questions(conn, sid)
     assert len(rows) == 1
     assert rows[0]["frame"]["status"] == "partial"
+
+
+def test_retry_reset_drops_discarded_blocks_on_disconnect(tmp_path: Path):
+    """A grounding retry fires, then the client disconnects: the persisted
+    partial must NOT contain the discarded (pre-reset) ungrounded blocks."""
+    conn = _conn()
+    sid = create_session(conn, project_root=str(tmp_path))
+    (tmp_path / "README.md").write_text("# X\n", encoding="utf-8")
+    ungrounded_turn = [
+        _tool_stop("b1", "emit_block", {"kind": "lead", "text": "discarded ungrounded"}),
+        _tool_stop("f", "finish", {}),
+        _msg_stop("tool_use", [
+            _content("b1", "emit_block", {"kind": "lead", "text": "discarded ungrounded"}),
+            _content("f", "finish", {}),
+        ]),
+    ]
+    read_turn = [
+        _tool_stop("r1", "read_file", {"path": "README.md"}),
+        _msg_stop("tool_use", [_content("r1", "read_file", {"path": "README.md"})]),
+    ]
+    gen = iter_ask_events(
+        client=StubStream([ungrounded_turn, read_turn]), question="how does it work?",
+        project_root=str(tmp_path), project_id=1, conn=conn, session_id=sid,
+    )
+    saw_reset = False
+    for ev in gen:
+        if ev["type"] == "reset":
+            saw_reset = True
+            break
+    assert saw_reset
+    gen.close()  # disconnect during the retry round
+    for r in list_questions(conn, sid):
+        texts = " ".join(b.get("text", "") for b in r["frame"]["blocks"])
+        assert "discarded ungrounded" not in texts
