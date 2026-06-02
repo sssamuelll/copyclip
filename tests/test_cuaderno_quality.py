@@ -91,3 +91,30 @@ def test_verdict_carries_question_language():
     led.record("read_file", {"path": "a.py", "lines": [{"n": 1, "text": "x"}]})
     v = assess(question="como funciona el analizador", blocks=[Block.lead("hi")], ledger=led)
     assert v.question_language == "es"
+
+
+def test_grep_grounded_with_citation_is_not_falsely_ungrounded():
+    # Read via grep_symbols (no top-level `path` -> read_paths stays empty).
+    # Citing a real file must NOT be condemned as fabricated (we cannot verify).
+    led = ReadLedger()
+    led.record("grep_symbols", {"symbols": [{"name": "f", "path": "src/foo.py"}]})
+    assert led.content_bearing_count == 1 and led.read_paths == set()
+    v = assess(
+        question="how does foo work?",
+        blocks=[
+            Block.lead("foo dispatches via the symbol table."),
+            Block.citation({"kind": "path", "path": "src/foo.py"}),
+        ],
+        ledger=led,
+    )
+    assert v.status == FRAME_STATUS_ANSWER
+
+
+def test_malformed_scalar_citations_does_not_crash():
+    # A model could emit a kind-valid block with a scalar where a list belongs.
+    led = ReadLedger()
+    led.record("read_file", {"path": "a.py", "lines": [{"n": 1, "text": "x"}]})
+    bad = Block.from_dict({"kind": "callout", "kicker": "k", "text": "t", "citations": 5})
+    worse = Block.from_dict({"kind": "ordered_list", "items": "nope"})
+    v = assess(question="how does it work?", blocks=[bad, worse], ledger=led)
+    assert v.status == FRAME_STATUS_ANSWER  # no raise, no false seal

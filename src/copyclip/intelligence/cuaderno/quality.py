@@ -52,11 +52,14 @@ def _cited_paths(blocks: list[Block]) -> set[str]:
         candidates: list[Any] = []
         if d.get("citation") is not None:
             candidates.append(d["citation"])
-        for c in d.get("citations") or []:
-            candidates.append(c)
-        for item in d.get("items") or []:
-            if isinstance(item, dict) and item.get("citation") is not None:
-                candidates.append(item["citation"])
+        cits = d.get("citations")
+        if isinstance(cits, list):
+            candidates.extend(cits)
+        items = d.get("items")
+        if isinstance(items, list):
+            for item in items:
+                if isinstance(item, dict) and item.get("citation") is not None:
+                    candidates.append(item["citation"])
         for c in candidates:
             if isinstance(c, dict) and c.get("kind") == "path" and c.get("path"):
                 paths.add(_norm_path(str(c["path"])))
@@ -95,9 +98,12 @@ def assess(*, question: str, blocks: list[Block], ledger: ReadLedger) -> Quality
     cited = _cited_paths(blocks)
     read = {_norm_path(p) for p in ledger.read_paths}
     # Fabricated grounding: the answer cites evidence, but none of the cited
-    # paths were actually read this turn. Conservative (all-disjoint) to avoid
-    # false-sealing an answer that cites a real read alongside a near-miss path.
-    if codey and cited and cited.isdisjoint(read):
+    # paths were actually read this turn. Requires `read` to be non-empty —
+    # the ledger only records paths from read_file/list_dir, so a turn grounded
+    # purely through grep_symbols/git_* has no comparable paths and must NOT be
+    # condemned (we cannot verify those citations, so we do not flag them).
+    # Conservative all-disjoint also tolerates a real citation beside a near-miss.
+    if codey and cited and read and cited.isdisjoint(read):
         return QualityVerdict(
             status=FRAME_STATUS_UNGROUNDED,
             suspicion=True,
