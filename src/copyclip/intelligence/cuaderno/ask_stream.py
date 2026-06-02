@@ -28,6 +28,7 @@ def iter_ask_events(
     model: str = "claude-sonnet-4-5",
     max_tool_rounds: int = 8,
     max_tokens: int = 8192,
+    judge: Any = None,
 ) -> Iterator[dict[str, Any]]:
     """Wrap iter_compose_events for the HTTP layer.
 
@@ -45,6 +46,7 @@ def iter_ask_events(
             client=client, question=question, project_root=project_root,
             project_id=project_id, conn=conn, model=model,
             max_tool_rounds=max_tool_rounds, max_tokens=max_tokens,
+            judge=judge,
         ):
             if ev["type"] == "block":
                 emitted.append(ev["block"])

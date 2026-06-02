@@ -20,6 +20,17 @@ DEFAULT_MODELS: dict[str, str] = {
 # agentic emit_block protocol.
 TOOL_INCAPABLE_MODELS: frozenset[str] = frozenset({"deepseek-reasoner"})
 
+# Cheap default judge model per provider (the judge is classification, not authoring).
+JUDGE_DEFAULT_MODELS: dict[str, str] = {"anthropic": "claude-haiku-4-5"}
+
+
+def resolve_judge_model(provider: str, answer_model: str, overlay: Optional[str]) -> str:
+    """The judge model: an explicit overlay wins; else a cheap per-provider
+    default; else the answer model (always serveable by the current provider)."""
+    if overlay:
+        return overlay
+    return JUDGE_DEFAULT_MODELS.get(provider, answer_model)
+
 # Providers whose wire format is the Anthropic Messages API.
 _ANTHROPIC_PROVIDERS: frozenset[str] = frozenset({"anthropic"})
 

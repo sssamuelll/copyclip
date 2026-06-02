@@ -2564,10 +2564,28 @@ def run_server(
                                     "provider": exc.provider, "detail": str(exc)}, 503)
                         return
                     client = build_cuaderno_client(resolved)
+                    from .cuaderno.provider import resolve_judge_model
+                    from .cuaderno.judge import judge_answer
+                    judge_overlay = None
+                    try:
+                        _jrow = conn.execute(
+                            "SELECT value FROM config WHERE key=?",
+                            ("cuaderno_judge_model",),
+                        ).fetchone()
+                        judge_overlay = _jrow[0] if _jrow and _jrow[0] else None
+                    except Exception:
+                        judge_overlay = None
+                    judge_model = resolve_judge_model(
+                        resolved["provider"], resolved["model"], judge_overlay)
+
+                    def _judge(q, b, l):
+                        return judge_answer(client=client, question=q, blocks=b, ledger=l, model=judge_model)
+
                     events = iter_ask_events(
                         client=client, question=question,
                         project_root=ctx.root, project_id=pid, conn=conn,
                         session_id=session_id, model=resolved["model"],
+                        judge=_judge,
                     )
                     sse_response(self, events)
                     return

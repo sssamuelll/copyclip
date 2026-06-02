@@ -128,10 +128,12 @@ FRAME_STATUS_UNGROUNDED = "ungrounded"               # World B: never consulted 
 FRAME_STATUS_PARTIAL = "partial"                     # interrupted mid-composition
 FRAME_STATUS_FALLBACK = "fallback"                   # no blocks / budget exhausted
 FRAME_STATUS_LEGACY = "legacy"                       # pre-existing frame with no recorded status
+FRAME_STATUS_OFF_TARGET = "off_target"               # grounded, but answers a different question
 
 KNOWN_FRAME_STATUSES: frozenset[str] = frozenset({
     FRAME_STATUS_ANSWER, FRAME_STATUS_INSUFFICIENT_EVIDENCE, FRAME_STATUS_UNGROUNDED,
     FRAME_STATUS_PARTIAL, FRAME_STATUS_FALLBACK, FRAME_STATUS_LEGACY,
+    FRAME_STATUS_OFF_TARGET,
 })
 
 
@@ -140,6 +142,7 @@ class Frame:
     question: str
     blocks: list[Block]
     status: str = FRAME_STATUS_ANSWER
+    verdict: Optional[dict[str, Any]] = None
 
 
 def frame_to_dict(f: Frame) -> dict[str, Any]:
@@ -147,6 +150,7 @@ def frame_to_dict(f: Frame) -> dict[str, Any]:
         "question": f.question,
         "blocks": [b.to_dict() for b in f.blocks],
         "status": f.status,
+        "verdict": f.verdict,
     }
 
 
@@ -155,6 +159,7 @@ def frame_from_dict(d: dict[str, Any]) -> Frame:
         question=d["question"],
         blocks=[Block.from_dict(b) for b in d["blocks"]],
         status=d.get("status", FRAME_STATUS_LEGACY),
+        verdict=d.get("verdict"),
     )
 
 

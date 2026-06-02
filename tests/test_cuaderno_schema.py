@@ -101,3 +101,26 @@ def test_frame_status_round_trip():
 def test_known_frame_statuses_membership():
     assert FRAME_STATUS_ANSWER in KNOWN_FRAME_STATUSES
     assert FRAME_STATUS_LEGACY in KNOWN_FRAME_STATUSES
+
+
+def test_off_target_status_known():
+    from copyclip.intelligence.cuaderno.schema import (
+        FRAME_STATUS_OFF_TARGET, KNOWN_FRAME_STATUSES,
+    )
+    assert FRAME_STATUS_OFF_TARGET == "off_target"
+    assert FRAME_STATUS_OFF_TARGET in KNOWN_FRAME_STATUSES
+
+
+def test_frame_carries_verdict_round_trip():
+    from copyclip.intelligence.cuaderno.schema import Frame, Block, frame_to_dict, frame_from_dict
+    vd = {"grounded": True, "responsive": False, "source": "judge"}
+    f = Frame(question="q", blocks=[Block.lead("x")], status="off_target", verdict=vd)
+    d = frame_to_dict(f)
+    assert d["verdict"] == vd and d["status"] == "off_target"
+    assert frame_from_dict(d).verdict == vd
+
+
+def test_frame_verdict_defaults_none_for_legacy():
+    from copyclip.intelligence.cuaderno.schema import frame_from_dict
+    f = frame_from_dict({"question": "q", "blocks": [{"kind": "lead", "text": "x"}]})
+    assert f.verdict is None and f.status == "legacy"

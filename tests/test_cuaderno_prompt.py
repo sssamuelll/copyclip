@@ -38,3 +38,12 @@ def test_prompt_requires_grounding_before_answering():
 def test_prompt_requires_answering_the_question_asked():
     low = SYSTEM_PROMPT.lower()
     assert "asked" in low or ("how" in low and "what" in low)
+
+
+def test_judge_prompt_demands_structured_verdict_and_responsiveness():
+    from copyclip.intelligence.cuaderno.prompts import JUDGE_PROMPT
+    low = JUDGE_PROMPT.lower()
+    assert "json" in low
+    assert "decision" in low and "responsive" in low and "world" in low
+    assert ("mechanism" in low or "how it works" in low)
+    assert "consulted_empty" in low and "not_consulted" in low

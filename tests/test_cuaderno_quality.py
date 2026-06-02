@@ -110,6 +110,19 @@ def test_grep_grounded_with_citation_is_not_falsely_ungrounded():
     assert v.status == FRAME_STATUS_ANSWER
 
 
+def test_cheap_verdict_dict_shape():
+    from copyclip.intelligence.cuaderno.quality import cheap_verdict_dict
+    led = ReadLedger()
+    led.record("read_file", {"path": "a.py", "lines": [{"n": 1, "text": "x"}]})
+    v = assess(question="como funciona", blocks=[Block.lead("hi")], ledger=led)
+    d = cheap_verdict_dict(v)
+    assert d["source"] == "cheap"
+    assert d["grounded"] is True
+    assert d["language_ok"] is True
+    assert d["responsive"] is None
+    assert "reason" in d
+
+
 def test_malformed_scalar_citations_does_not_crash():
     # A model could emit a kind-valid block with a scalar where a list belongs.
     led = ReadLedger()

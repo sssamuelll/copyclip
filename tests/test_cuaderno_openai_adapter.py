@@ -144,3 +144,32 @@ def test_messages_stream_maps_stop_reason_stop_to_end_turn():
     events = list(_adapter(chunks).messages_stream(
         model="deepseek-chat", messages=[], max_tokens=100))
     assert events[-1]["stop_reason"] == "end_turn"
+
+
+def test_messages_create_forwards_timeout_to_sdk():
+    # The judge passes timeout=20; the OpenAI-compat path must HONOR it, not drop
+    # it into **_ignored (else a hung judge stalls the terminal ~600s).
+    captured = {}
+
+    class _Completions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            class _Msg:
+                content = "{}"
+                tool_calls = []
+            class _Choice:
+                message = _Msg()
+                finish_reason = "stop"
+            class _Resp:
+                choices = [_Choice()]
+            return _Resp()
+
+    class _Chat:
+        completions = _Completions()
+
+    class _Raw:
+        chat = _Chat()
+
+    adapter = OpenAICompatAdapter(raw_client=_Raw())
+    adapter.messages_create(model="m", messages=[{"role": "user", "content": "x"}], timeout=20)
+    assert captured.get("timeout") == 20

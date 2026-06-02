@@ -827,6 +827,7 @@ export type FrameStatus =
   | 'answer'
   | 'insufficient_evidence'
   | 'ungrounded'
+  | 'off_target'
   | 'partial'
   | 'fallback'
   | 'legacy'
@@ -835,6 +836,7 @@ export type Frame = {
   question: string
   blocks: Block[]
   status?: FrameStatus
+  verdict?: Record<string, unknown> | null
 }
 
 export type CuadernoQuestion = {
