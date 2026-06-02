@@ -37,8 +37,8 @@ def run_bench(*, project_root: str, corpus_path: str, baseline: Optional[str] = 
               limit: Optional[int] = None) -> dict[str, Any]:
     """Resolve the real client, run the corpus, write an artifact, print the
     scorecard, and (if baseline) the regression diff."""
-    from ..db import connect, init_schema, init_cuaderno_schema
-    from ..server_helpers import project_id as _project_id
+    from ...db import connect, init_schema, init_cuaderno_schema
+    from ...server_helpers import project_id as _project_id
 
     conn = connect(project_root)
     init_schema(conn)
@@ -115,7 +115,7 @@ def run_bench(*, project_root: str, corpus_path: str, baseline: Optional[str] = 
 def _version() -> str:
     try:
         here = os.path.dirname(__file__)
-        vf = os.path.abspath(os.path.join(here, "..", "..", "..", "..", "VERSION"))
+        vf = os.path.abspath(os.path.join(here, "..", "..", "..", "..", "..", "VERSION"))
         with open(vf) as f:
             return f.read().strip()
     except Exception:
