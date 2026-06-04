@@ -17,6 +17,7 @@ from .schema import (
     FRAME_STATUS_UNGROUNDED, FRAME_STATUS_INSUFFICIENT_EVIDENCE, FRAME_STATUS_OFF_TARGET,
 )
 from .tool_catalog import ANSWER_TOOLS, build_tool_definitions, dispatch_tool
+from .widget_checks import GraphEvidence, validate_widget_payload
 
 CLOSING_DIRECTIVE = (
     "You have gathered your evidence — the research tools are no longer "
@@ -195,6 +196,7 @@ def iter_compose_events(
         stop_reason: Optional[str] = None
         finish_seen = False
         emit_status: dict[str, Optional[str]] = {}  # tool_use_id -> reason (None = ok)
+        evidence = GraphEvidence()  # graph-tool results seen this turn
 
         try:
             for sev in client.messages_stream(
@@ -209,6 +211,8 @@ def iter_compose_events(
                     if blk.get("type") == "tool_use" and blk.get("name") == "emit_block":
                         inp = blk.get("input") or {}
                         reason = validate_block_dict(inp)
+                        if reason is None:
+                            reason = validate_widget_payload(inp, evidence)
                         emit_status[blk["id"]] = reason
                         if reason is None:
                             b = Block.from_dict(inp)
@@ -320,6 +324,12 @@ def iter_compose_events(
                     project_id=project_id, conn=conn,
                 )
                 ledger.record(name, result)
+                if name == "get_module_graph":
+                    evidence.add_module_graph(result)
+                elif name == "get_callers":
+                    evidence.add_callers(args.get("symbol", ""), result)
+                elif name == "get_callees":
+                    evidence.add_callees(args.get("symbol", ""), result)
                 ms = int((time.perf_counter() - t0) * 1000)
                 tool_results.append(_ack(tuid, result))
                 yield {"type": "tool", "id": tuid, "name": name, "args": args_str,
