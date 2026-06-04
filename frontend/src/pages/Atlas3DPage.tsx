@@ -8,38 +8,7 @@ import {
   useState,
 } from 'react'
 import { api } from '../api/client'
-import { usePlayground } from '../hooks/usePlayground'
-import type { ArchEdge, ArchNode, FunctionRef, Overview, TreeNode } from '../types/api'
-
-// Node kinds that map to something the playground backend can actually
-// import and run. Anything else (Directory/File/Module/Repository/Other)
-// is structural and has no callable entry point. The set is intentionally
-// narrow — broaden in a follow-up PR if symbol-level nodes start exposing
-// Trait/Interface/etc. callables.
-//
-// TODO(#104): Atlas3D's buildFlowData currently emits only structural
-// nodes (Repository/Directory/File/Module/Other), so this filter never
-// matches in the live UI and the playground button stays disabled. The
-// connector activates the moment Function/Method/Class nodes reach
-// FlowData — see issue #104 for the data-layer work that unblocks it.
-const LAUNCHABLE_NODE_TYPES: ReadonlySet<string> = new Set(['Function', 'Method', 'Class'])
-
-// FlowNode.path encodes either a project-relative file path
-// (e.g. "src/copyclip/foo.py") or — once symbol-level nodes are added —
-// a "file:line" pair. Module nodes use a "module:<dotted>" prefix that
-// we never reach here because LAUNCHABLE_NODE_TYPES filters them out.
-function buildLaunchableRef(node: { name: string; path: string }): FunctionRef {
-  const colon = node.path.indexOf(':')
-  if (colon > 0) {
-    const lineNum = Number(node.path.slice(colon + 1))
-    return {
-      file: node.path.slice(0, colon),
-      name: node.name,
-      line: Number.isFinite(lineNum) && lineNum > 0 ? lineNum : undefined,
-    }
-  }
-  return { file: node.path, name: node.name }
-}
+import type { ArchEdge, ArchNode, Overview, TreeNode } from '../types/api'
 
 const NODE_W = 200
 const NODE_H = 40
@@ -1183,36 +1152,6 @@ export function Atlas3DPage() {
     [mergedData.nodes, selectedNodeId],
   )
 
-  const playground = usePlayground()
-  // Carry the narrowed node (or null) explicitly so TS sees a non-null
-  // FlowNode in every branch that consumes it — avoids the
-  // `selectedNode!.name` non-null assertions that the previous shape needed.
-  //
-  // Python-only gate: Marimo (the playground engine) runs Python in v1. A
-  // selection from a .ts/.tsx/.js file would reach `/api/playground/launch`
-  // with a module like 'frontend/src/pages', fail the importable-module
-  // check in resolve_function_ref (playground.py:310), and surface as a
-  // misleading "function_not_found" dialog. We gate at the source so the
-  // pill stays inert and the tooltip explains why.
-  const isPythonSymbolPath = (path: string) => {
-    const colon = path.indexOf(':')
-    const filePath = colon > 0 ? path.slice(0, colon) : path
-    return filePath.toLowerCase().endsWith('.py')
-  }
-  const isLaunchableType = selectedNode != null && LAUNCHABLE_NODE_TYPES.has(selectedNode.type)
-  const launchableSelection =
-    isLaunchableType && selectedNode != null && isPythonSymbolPath(selectedNode.path)
-      ? selectedNode
-      : null
-  const launchPlayground = useCallback(() => {
-    if (!launchableSelection) return
-    void playground.launch({
-      source: 'atlas',
-      function_ref: buildLaunchableRef(launchableSelection),
-      breadcrumb: `Atlas → ${launchableSelection.path} → ${launchableSelection.name}()`,
-    })
-  }, [launchableSelection, playground])
-
   const toggleNodeType = (type: string) => {
     setVisibleNodeTypes((current) => {
       const next = new Set(current)
@@ -1233,33 +1172,6 @@ export function Atlas3DPage() {
         <div className="atlas-flow-toolbar">
           <button className="atlas-flow-pill atlas-flow-icon-pill" onClick={() => setIsDark((value) => !value)} title="Toggle theme">
             {isDark ? '☼' : '◐'}
-          </button>
-
-          <button
-            type="button"
-            className="atlas-flow-pill"
-            onClick={launchPlayground}
-            disabled={launchableSelection == null}
-            aria-label={
-              launchableSelection
-                ? `Open ${launchableSelection.name} in playground`
-                : 'Open in Playground'
-            }
-            title={
-              launchableSelection
-                ? `Run ${launchableSelection.name}() in a Marimo playground`
-                : isLaunchableType
-                  ? 'Playground is Python-only in v1 — select a function from a .py file'
-                  : 'Select a function, method, or class to open in the playground'
-            }
-            style={{
-              borderColor: launchableSelection ? 'var(--accent-cyan)' : undefined,
-              color: launchableSelection ? 'var(--accent-cyan)' : undefined,
-              cursor: launchableSelection ? 'pointer' : 'not-allowed',
-              opacity: launchableSelection ? 1 : 0.55,
-            }}
-          >
-            <span aria-hidden="true">▶</span>&nbsp;Playground
           </button>
 
           <div className="atlas-flow-pill atlas-flow-mode-pill">
