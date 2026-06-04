@@ -137,7 +137,9 @@ question; it is recorded automatically.
    "callers": [{"citation": <Citation>, "note": "..."}, ...]}
 - {"kind": "graph_view", "nodes": [{"id": "...", "label": "...", "citation": <Citation>}, ...],
    "edges": [{"from": "<id>", "to": "<id>"}], "focus": "<id>"?, "truncated": <bool>}
-   nodes/edges MUST come from this turn's get_module_graph or get_callers/get_callees results;
+   nodes/edges MUST come from this turn's get_module_graph or get_callers/get_callees results
+   (no other tool's output qualifies); each node "id" and each edge "from"/"to" MUST be the
+   EXACT module or symbol name the tool returned — never a slug, index, or shortened label;
    every node carries a citation ({kind:'path', path}); set truncated when the tool said so.
 - {"kind": "playground", "function_ref": {"file": "...", "name": "...", "line": <int>?, "qualname": "..."?},
    "breadcrumb": "one-line description", "suggested_inputs": [...]?}
