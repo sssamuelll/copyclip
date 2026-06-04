@@ -132,7 +132,7 @@ def test_cli_flow_diagram_modes(mock_print, mock_copy, mock_read, mock_scan):
     mock_read.return_value = fake_files
 
     # --- Test --view=text ---
-    sys.argv = ["copyclip", ".", "--view", "text", "--print"]
+    sys.argv = ["copyclip", "export", ".", "--view", "text", "--print"]
     main_module.main()
     # Captura la última llamada a print, que contiene el resultado final
     printed_text = mock_print.call_args_list[-1].args[0]
@@ -142,7 +142,7 @@ def test_cli_flow_diagram_modes(mock_print, mock_copy, mock_read, mock_scan):
     mock_print.reset_mock()
 
     # --- Test --view=flow ---
-    sys.argv = ["copyclip", ".", "--view", "flow", "--print"]
+    sys.argv = ["copyclip", "export", ".", "--view", "flow", "--print"]
     main_module.main()
     printed_text = mock_print.call_args_list[-1].args[0]
     assert "Flow Diagram for a.py" in printed_text
@@ -151,7 +151,7 @@ def test_cli_flow_diagram_modes(mock_print, mock_copy, mock_read, mock_scan):
     mock_print.reset_mock()
 
     # --- Test --view=both ---
-    sys.argv = ["copyclip", ".", "--view", "both", "--print"]
+    sys.argv = ["copyclip", "export", ".", "--view", "both", "--print"]
     main_module.main()
     printed_text = mock_print.call_args_list[-1].args[0]
     assert "def foo()" in printed_text
@@ -171,7 +171,7 @@ def test_cli_view_prompt(mock_print, mock_copy, mock_read, mock_scan, monkeypatc
     mock_read.return_value = {"file.py": "def foo(): pass"}
 
     # Use explicit --view to avoid relying on interactive prompt in CI
-    sys.argv = ["copyclip", ".", "--view", "flow", "--print"]
+    sys.argv = ["copyclip", "export", ".", "--view", "flow", "--print"]
     main_module.main()
 
     # Verifica la salida final
