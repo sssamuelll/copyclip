@@ -1,4 +1,4 @@
-import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, AskResponse, RiskTrends, AlertRule, AlertsResponse, WeeklyExport, SchedulerState, AnalyzeJob, ArchaeologyResponse, StoryTimelineResponse, AdvisorCheckResponse, IdentityDriftResponse, DecisionLinkItem, CognitiveLoadResponse, ModuleSourceResponse, ModuleSymbolsResponse, TreeNode, ReacquaintanceResponse, HandoffPacket, HandoffPacketListResponse, HandoffPacketState, HandoffReviewSummary, DebtBreakdown, RemediationPlan, DebtScopeKind, PlaygroundLaunchRequest, PlaygroundLaunchResponse, PlaygroundStatus } from '../types/api'
+import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, AskResponse, RiskTrends, AlertRule, AlertsResponse, WeeklyExport, SchedulerState, AnalyzeJob, ArchaeologyResponse, StoryTimelineResponse, AdvisorCheckResponse, DecisionLinkItem, CognitiveLoadResponse, ModuleSourceResponse, ModuleSymbolsResponse, TreeNode, ReacquaintanceResponse, HandoffPacket, HandoffPacketListResponse, HandoffPacketState, HandoffReviewSummary, DebtBreakdown, RemediationPlan, DebtScopeKind, PlaygroundLaunchRequest, PlaygroundLaunchResponse, PlaygroundStatus } from '../types/api'
 
 // --- Debugging Suite Helpers ---
 const logAPI = (method: string, url: string, start: number, payload?: any, response?: any, error?: any) => {
@@ -150,7 +150,6 @@ export const api = {
     const suffix = q.toString() ? `?${q.toString()}` : ''
     return getJSON<ReacquaintanceResponse>(`/api/reacquaintance${suffix}`)
   },
-  identityDrift: (range = '30d') => getJSON<IdentityDriftResponse>(`/api/identity/drift?range=${encodeURIComponent(range)}`),
   cognitiveLoad: () => getJSON<CognitiveLoadResponse>('/api/cognitive-load'),
   getConfig: () => getJSON<Record<string, string>>('/api/config'),
   setConfig: (data: Record<string, string>) => postJSON<{ status: string }>('/api/config', data),
