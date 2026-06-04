@@ -182,6 +182,7 @@ def iter_compose_events(
     ledger = ledger if ledger is not None else ReadLedger()
     grounding_retry_used = False
     responsiveness_retry_used = False
+    evidence = GraphEvidence()  # graph-tool results seen this TURN — accumulates across rounds
 
     for round_i in range(max_tool_rounds):
         # Final round: take the research tools away and force an answer, so a
@@ -196,7 +197,6 @@ def iter_compose_events(
         stop_reason: Optional[str] = None
         finish_seen = False
         emit_status: dict[str, Optional[str]] = {}  # tool_use_id -> reason (None = ok)
-        evidence = GraphEvidence()  # graph-tool results seen this turn
 
         try:
             for sev in client.messages_stream(

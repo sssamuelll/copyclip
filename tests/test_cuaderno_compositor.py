@@ -763,3 +763,68 @@ def test_invented_graph_edge_yields_invalid_block_ack(tmp_path: Path):
     assert frame["frame"]["blocks"] == [] or frame["frame"]["status"] in (
         "fallback", "ungrounded"
     ), "frame must reflect rejection of the invalid widget"
+
+
+def test_graph_evidence_survives_across_rounds(tmp_path: Path):
+    """Round 1 returns a get_module_graph tool result (nodes pkg/a + pkg/b, edge
+    a->b); round 2 emits a VALID graph_view widget whose edges match that
+    evidence, then finishes.  The compositor must ACCEPT the block — evidence
+    accumulated at turn level, not per-round, so the cross-round emission is
+    valid."""
+    _MODULE_GRAPH_RESULT = {
+        "modules": [
+            {"name": "pkg/a", "file_path": "src/pkg/a.py"},
+            {"name": "pkg/b", "file_path": "src/pkg/b.py"},
+        ],
+        "edges": [{"from": "pkg/a", "to": "pkg/b", "weight": 1}],
+        "truncated": False,
+    }
+
+    valid_widget_block = {
+        "kind": "widget",
+        "widget": {
+            "kind": "graph_view",
+            "nodes": [{"id": "pkg/a", "label": "a"}, {"id": "pkg/b", "label": "b"}],
+            "edges": [{"from": "pkg/a", "to": "pkg/b"}],  # matches evidence exactly
+        },
+    }
+
+    turns = [
+        # Round 1: model calls get_module_graph
+        [
+            _tool_stop("g1", "get_module_graph", {"scope": ""}),
+            _msg_stop("tool_use", [_content("g1", "get_module_graph", {"scope": ""})]),
+        ],
+        # Round 2: model emits a widget whose edges ARE in the evidence, then finishes
+        [
+            _tool_stop("b1", "emit_block", valid_widget_block),
+            _tool_stop("f", "finish", {}),
+            _msg_stop("tool_use", [
+                _content("b1", "emit_block", valid_widget_block),
+                _content("f", "finish", {}),
+            ]),
+        ],
+    ]
+
+    client = StubStream(turns)
+    with patch(
+        "copyclip.intelligence.cuaderno.compositor.dispatch_tool",
+        side_effect=lambda name, args, **kw: _MODULE_GRAPH_RESULT,
+    ):
+        events = list(iter_compose_events(
+            client=client, question="q", project_root=str(tmp_path),
+            project_id=1, conn=None, max_tool_rounds=8,
+        ))
+
+    # The widget block must have been ACCEPTED: a block event must exist and the
+    # frame must contain the widget (no invalid_block rejection).
+    block_events = [e for e in events if e["type"] == "block"]
+    assert len(block_events) == 1, (
+        "cross-round graph_view with valid edges must be accepted as a block"
+    )
+    assert block_events[0]["block"]["kind"] == "widget"
+
+    frame = next(e for e in events if e["type"] == "frame")
+    assert len(frame["frame"]["blocks"]) == 1, (
+        "valid cross-round widget must appear in the sealed frame"
+    )
