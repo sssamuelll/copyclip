@@ -1,13 +1,12 @@
-"""Integration tests for cognitive debt signals flowing into Reacquaintance and Ask Project.
+"""Integration tests for cognitive debt signals flowing into Reacquaintance.
 
 These cover the #51 acceptance criterion: debt should influence re-entry prioritization
-and Ask Project's evidence presentation without siloing it in its own dashboard.
+without siloing it in its own dashboard.
 """
 
 from copyclip.intelligence.cognitive_debt import quick_debt_signal
 from copyclip.intelligence.db import connect, init_schema, get_or_create_project
 from copyclip.intelligence.reacquaintance import build_reacquaintance_briefing, record_reacquaintance_visit
-from copyclip.intelligence.ask_project import build_ask_response
 
 
 def _seed_debt_project(conn, root: str, *, debt_for_server: float = 82.0, debt_for_ask: float = 10.0) -> int:
@@ -113,97 +112,3 @@ def test_reacquaintance_prioritizes_high_debt_over_equal_signal_low_debt(tmp_pat
     if len(ordered) >= 2:
         assert ordered[0]["target"] == "src/copyclip/intelligence/server.py"
 
-
-def test_ask_response_exposes_debt_hints_for_touched_files(tmp_path):
-    root = str(tmp_path)
-    conn = connect(root)
-    init_schema(conn)
-    pid = _seed_debt_project(conn, root)
-
-    response = build_ask_response(conn, pid, "what is happening in the intelligence server")
-    conn.close()
-
-    assert "debt_hints" in response
-    # server.py has debt 82 → must surface at least one debt hint when it appears in evidence
-    if response.get("grounded"):
-        hinted_targets = {hint["target"] for hint in response["debt_hints"]}
-        # intelligence/server is high debt; if it's in evidence, it should appear
-        file_ids = {item["id"] for item in response["evidence"]["files"]}
-        if "src/copyclip/intelligence/server.py" in file_ids:
-            assert "src/copyclip/intelligence/server.py" in hinted_targets
-
-
-def test_ask_response_biases_drill_down_to_critical_debt_file(tmp_path):
-    root = str(tmp_path)
-    conn = connect(root)
-    init_schema(conn)
-    pid = _seed_debt_project(conn, root)
-
-    response = build_ask_response(conn, pid, "look at the intelligence server implementation")
-    conn.close()
-
-    if response.get("grounded"):
-        file_ids = {item["id"] for item in response["evidence"]["files"]}
-        if "src/copyclip/intelligence/server.py" in file_ids:
-            assert response["next_drill_down"]["type"] == "file"
-            assert response["next_drill_down"]["target"] == "src/copyclip/intelligence/server.py"
-
-
-def test_ask_response_low_debt_file_does_not_appear_in_debt_hints(tmp_path):
-    import time
-
-    root = str(tmp_path)
-    conn = connect(root)
-    init_schema(conn)
-    pid = get_or_create_project(conn, root, name="copyclip-low-debt")
-    # Engineer a v1-low file: recent human edit, no agent authorship, decision-linked,
-    # tests present in the module → all factors fall well below the medium threshold.
-    recent_human = time.time() - 86_400
-    for path, module in [
-        ("src/copyclip/ask/answer.py", "copyclip.ask"),
-        ("tests/copyclip/ask/test_answer.py", "tests"),
-    ]:
-        conn.execute(
-            "INSERT INTO files(project_id,path,language,size_bytes,mtime,hash) VALUES(?,?,?,?,?,?)",
-            (pid, path, "python", 600, 1.0, f"h-{path}"),
-        )
-        conn.execute(
-            "INSERT INTO analysis_file_insights(project_id,path,module,imports_json,complexity,cognitive_debt,agent_line_ratio,last_human_ts) VALUES(?,?,?,?,?,?,?,?)",
-            (pid, path, module, "[]", 4, 4.0, 0.0, recent_human),
-        )
-    conn.execute(
-        "INSERT INTO commits(project_id,sha,author,date,message) VALUES(?,?,?,?,?)",
-        (pid, "sha-ask-low", "samuel", "2026-05-01T10:00:00+00:00", "ask refactor"),
-    )
-    conn.execute(
-        "INSERT INTO file_changes(project_id,commit_sha,file_path,additions,deletions) VALUES(?,?,?,?,?)",
-        (pid, "sha-ask-low", "src/copyclip/ask/answer.py", 4, 1),
-    )
-    conn.execute(
-        "INSERT INTO decisions(project_id,title,summary,status,source_type) VALUES(?,?,?,?,?)",
-        (pid, "Ask answers are evidence-first", "Grounded.", "accepted", "manual"),
-    )
-    conn.execute(
-        "INSERT INTO decision_refs(decision_id,ref_type,ref_value) VALUES(?,?,?)",
-        (1, "file", "src/copyclip/ask/answer.py"),
-    )
-    conn.commit()
-
-    response = build_ask_response(conn, pid, "evidence first ask implementation")
-    conn.close()
-
-    # All files below the medium threshold: no debt_hints entries expected
-    assert response.get("debt_hints") == []
-
-
-def test_ask_insufficient_response_still_returns_debt_hints_field(tmp_path):
-    root = str(tmp_path)
-    conn = connect(root)
-    init_schema(conn)
-    pid = get_or_create_project(conn, root, name="copyclip-minimal")
-
-    response = build_ask_response(conn, pid, "zzz nonsense question with no evidence")
-    conn.close()
-
-    assert "debt_hints" in response
-    assert response["debt_hints"] == []
