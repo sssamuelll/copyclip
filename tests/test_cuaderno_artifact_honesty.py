@@ -79,3 +79,65 @@ def test_seal_injects_artifacts_cited():
     assert frame["verdict"]["artifacts_cited"] is False
     frame2 = _seal("q?", [Block.paragraph("hi")], "answer", {"source": "cheap"})
     assert frame2["verdict"]["artifacts_cited"] is None
+
+
+from copyclip.intelligence.cuaderno.quality import _artifact_summary
+
+
+def test_artifact_summary_graph_subset():
+    w = {"kind": "graph_subset",
+         "nodes": [{"id": "a", "label": "Parser"}, {"id": "b", "label": "Lexer"}],
+         "edges": [{"from": "a", "to": "b"}]}
+    s = _artifact_summary([_widget_block(w)])
+    assert "Parser" in s and "Lexer" in s and "->" in s
+
+
+def test_artifact_summary_unknown_kind_falls_back():
+    w = {"kind": "never_seen", "things": [{"label": "X9"}, {"name": "Y7"}]}
+    s = _artifact_summary([_widget_block(w)])
+    assert "X9" in s and "Y7" in s   # generic fallback: nothing is invisible
+
+
+def test_artifact_summary_empty_without_widgets():
+    assert _artifact_summary([Block.paragraph("hi")]) == ""
+
+
+def test_judge_fence_includes_artifacts():
+    """The judge's user message must contain the [ARTIFACTS] section when the
+    answer carries widgets."""
+    from copyclip.intelligence.cuaderno import judge as judge_mod
+    from copyclip.intelligence.cuaderno.read_ledger import ReadLedger
+
+    captured = {}
+
+    class _Client:
+        def messages_create(self, **kw):
+            captured["user"] = kw["messages"][0]["content"]
+            return {"content": [{"type": "text", "text": '{"decision": "ok", "reason": "fine"}'}]}
+
+    ledger = ReadLedger()
+    w = {"kind": "graph_subset", "nodes": [{"id": "n", "label": "Compositor"}], "edges": []}
+    judge_mod.judge_answer(client=_Client(), question="q?",
+                           blocks=[Block.paragraph("answer"), _widget_block(w)],
+                           ledger=ledger, model="m")
+    assert "[ARTIFACTS]" in captured["user"]
+    assert "Compositor" in captured["user"]
+
+
+def test_judge_fence_no_artifacts_section_without_widgets():
+    """Without widgets the fence must NOT contain [ARTIFACTS]."""
+    from copyclip.intelligence.cuaderno import judge as judge_mod
+    from copyclip.intelligence.cuaderno.read_ledger import ReadLedger
+
+    captured = {}
+
+    class _Client:
+        def messages_create(self, **kw):
+            captured["user"] = kw["messages"][0]["content"]
+            return {"content": [{"type": "text", "text": '{"decision": "ok", "reason": "fine"}'}]}
+
+    ledger = ReadLedger()
+    judge_mod.judge_answer(client=_Client(), question="q?",
+                           blocks=[Block.paragraph("answer")],
+                           ledger=ledger, model="m")
+    assert "[ARTIFACTS]" not in captured["user"]
