@@ -189,19 +189,21 @@ def assess(*, question: str, blocks: list[Block], ledger: ReadLedger) -> Quality
 
     cited = _cited_paths(blocks)
     read = {_norm_path(p) for p in ledger.read_paths}
+    evidenced = {_norm_path(p) for p in getattr(ledger, "evidence_paths", set())}
+    comparable = read | evidenced
     # Fabricated grounding: the answer cites evidence, but none of the cited
-    # paths were actually read this turn. Requires `read` to be non-empty —
-    # the ledger only records paths from read_file/list_dir, so a turn grounded
-    # purely through grep_symbols/git_* has no comparable paths and must NOT be
-    # condemned (we cannot verify those citations, so we do not flag them).
+    # paths were actually read or tool-evidenced this turn. Requires `comparable`
+    # to be non-empty — a turn grounded purely through grep_symbols/git_* with no
+    # path-bearing results has no comparable paths and must NOT be condemned (we
+    # cannot verify those citations, so we do not flag them).
     # Conservative all-disjoint also tolerates a real citation beside a near-miss.
-    if codey and cited and read and cited.isdisjoint(read):
+    if codey and cited and comparable and cited.isdisjoint(comparable):
         return QualityVerdict(
             status=FRAME_STATUS_UNGROUNDED,
             suspicion=True,
             language_mismatch=language_mismatch,
             question_language=q_lang,
-            reason=f"answer cites only unread paths: {sorted(cited)}",
+            reason=f"answer cites paths neither read nor tool-evidenced: {sorted(cited)}",
         )
 
     return QualityVerdict(

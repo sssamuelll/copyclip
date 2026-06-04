@@ -50,7 +50,7 @@ def test_fabricated_grounding_via_widget_seals_ungrounded():
                blocks=[Block.paragraph("It parses."), _widget_block(w)],
                ledger=ledger)
     assert v.status == FRAME_STATUS_UNGROUNDED
-    assert "unread" in v.reason
+    assert "neither read nor tool-evidenced" in v.reason
 
 
 from copyclip.intelligence.cuaderno.quality import artifacts_cited

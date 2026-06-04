@@ -25,6 +25,20 @@ def is_content_bearing_read(tool_name: str, result: dict[str, Any]) -> bool:
     return any(result.get(k) for k in _CONTENT_KEYS)
 
 
+def _harvest_file_paths(node: Any, out: set[str]) -> None:
+    """Collect file_path fields recursively from a tool result. These are
+    tool-EVIDENCED paths: a tool genuinely returned them this turn."""
+    if isinstance(node, dict):
+        fp = node.get("file_path")
+        if isinstance(fp, str) and fp:
+            out.add(fp)
+        for v in node.values():
+            _harvest_file_paths(v, out)
+    elif isinstance(node, list):
+        for v in node:
+            _harvest_file_paths(v, out)
+
+
 class ReadLedger:
     """Accumulates, across a turn, which reads returned content and which file
     paths were actually read. Request-local; never shared across threads."""
@@ -32,6 +46,7 @@ class ReadLedger:
     def __init__(self) -> None:
         self.content_bearing_count = 0
         self.read_paths: set[str] = set()
+        self.evidence_paths: set[str] = set()
 
     def record(self, tool_name: str, result: dict[str, Any]) -> None:
         if is_content_bearing_read(tool_name, result):
@@ -39,3 +54,5 @@ class ReadLedger:
             path = result.get("path")
             if isinstance(path, str) and path:
                 self.read_paths.add(path)
+        if tool_name not in ANSWER_TOOLS and isinstance(result, dict) and not result.get("error"):
+            _harvest_file_paths(result, self.evidence_paths)
