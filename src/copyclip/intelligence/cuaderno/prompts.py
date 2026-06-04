@@ -135,6 +135,14 @@ question; it is recorded automatically.
 - {"kind": "sequence_diagram", "actors": ["A", "B"], "steps": [{"from": 0, "to": 1, "label": "..."}, ...]}
 - {"kind": "callers_tree", "root": "symbol_name",
    "callers": [{"citation": <Citation>, "note": "..."}, ...]}
+- {"kind": "graph_view", "nodes": [{"id": "...", "label": "...", "citation": <Citation>}, ...],
+   "edges": [{"from": "<id>", "to": "<id>"}], "focus": "<id>"?, "truncated": <bool>}
+   nodes/edges MUST come from this turn's get_module_graph or get_callers/get_callees results;
+   every node carries a citation ({kind:'path', path}); set truncated when the tool said so.
+- {"kind": "playground", "function_ref": {"file": "...", "name": "...", "line": <int>?, "qualname": "..."?},
+   "breadcrumb": "one-line description", "suggested_inputs": [...]?}
+   a runnable example descriptor; function_ref must name a real symbol you located this turn;
+   never invent paths.
 
 ## Tone
 

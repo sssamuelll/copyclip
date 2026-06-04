@@ -35,7 +35,7 @@ class Citation:
 @dataclass(frozen=True)
 class Widget:
     """A display-only widget glimpse inside a frame block."""
-    kind: str  # 'graph_subset' | 'sequence_diagram' | 'callers_tree'
+    kind: str  # 'graph_subset' | 'sequence_diagram' | 'callers_tree' | 'graph_view' | 'playground'
     data: dict[str, Any]
 
     @staticmethod
@@ -49,6 +49,26 @@ class Widget:
     @staticmethod
     def callers_tree(root: str, callers: list[dict]) -> "Widget":
         return Widget(kind="callers_tree", data={"root": root, "callers": callers})
+
+    @staticmethod
+    def graph_view(nodes: list[dict], edges: list[dict],
+                   focus: Optional[str] = None, truncated: bool = False) -> "Widget":
+        d: dict[str, Any] = {"nodes": nodes, "edges": edges, "truncated": truncated}
+        if focus is not None:
+            d["focus"] = focus
+        return Widget(kind="graph_view", data=d)
+
+    @staticmethod
+    def playground(function_ref: dict, breadcrumb: str,
+                   suggested_inputs: Optional[list] = None) -> "Widget":
+        citation: dict[str, Any] = {"kind": "path", "path": function_ref.get("file")}
+        if function_ref.get("line") is not None:
+            citation["line_start"] = function_ref["line"]
+        d: dict[str, Any] = {"function_ref": function_ref, "breadcrumb": breadcrumb,
+                             "citation": citation}
+        if suggested_inputs is not None:
+            d["suggested_inputs"] = suggested_inputs
+        return Widget(kind="playground", data=d)
 
     def to_dict(self) -> dict[str, Any]:
         return {"kind": self.kind, **self.data}

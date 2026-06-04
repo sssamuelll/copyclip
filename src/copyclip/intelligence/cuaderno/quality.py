@@ -132,6 +132,17 @@ def _artifact_summary(blocks: list[Block]) -> str:
             callers = [c for c in (w.get("callers") or []) if isinstance(c, dict)]
             names = [str(c.get("name") or "?") for c in callers]
             parts.append(f"callers of {w.get('root') or '?'}: [{', '.join(names)}]")
+        elif kind == "graph_view":
+            nodes = [n for n in (w.get("nodes") or []) if isinstance(n, dict)]
+            edges = [e for e in (w.get("edges") or []) if isinstance(e, dict)]
+            labels = [str(n.get("label") or n.get("id") or "?") for n in nodes]
+            arrows = [f"{e.get('from') or '?'} -> {e.get('to') or '?'}" for e in edges]
+            parts.append(f"graph: nodes [{', '.join(labels)}]; edges [{'; '.join(arrows)}]"
+                         + ("; truncated" if w.get("truncated") else ""))
+        elif kind == "playground":
+            fr = w.get("function_ref") or {}
+            parts.append(f"playground: run {fr.get('name') or '?'} from {fr.get('file') or '?'}"
+                         + (f" — {w.get('breadcrumb')}" if w.get("breadcrumb") else ""))
         else:
             flat: list[str] = []
             _flatten_strings(w, flat)
