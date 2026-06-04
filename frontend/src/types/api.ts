@@ -691,7 +691,15 @@ export type CallersTreeWidget = {
   callers: Array<{ citation: Citation; note?: string }>
 }
 
-export type Widget = GraphSubsetWidget | SequenceDiagramWidget | CallersTreeWidget
+export type GraphViewWidget = {
+  kind: 'graph_view'
+  nodes: Array<{ id: string; label: string; citation?: Citation }>
+  edges: Array<{ from: string; to: string; weight?: number }>
+  focus?: string
+  truncated?: boolean
+}
+
+export type Widget = GraphSubsetWidget | SequenceDiagramWidget | CallersTreeWidget | GraphViewWidget
 
 export type Block =
   | { kind: 'lead'; text: string }

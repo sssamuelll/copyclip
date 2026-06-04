@@ -4,6 +4,7 @@ import { t } from '../strings'
 import { GraphSubset } from '../widgets/GraphSubset'
 import { SequenceDiagram } from '../widgets/SequenceDiagram'
 import { CallersTree } from '../widgets/CallersTree'
+import { GraphView } from '../widgets/GraphView'
 
 function statusBanner(
   status: NonNullable<Frame['status']>,
@@ -193,6 +194,10 @@ function BlockRender({
         case 'callers_tree':
           return (
             <CallersTree widget={block.widget} onOpenCitation={onOpenCitation} />
+          )
+        case 'graph_view':
+          return (
+            <GraphView widget={block.widget} onOpenCitation={onOpenCitation} lang={lang} />
           )
       }
       return null
