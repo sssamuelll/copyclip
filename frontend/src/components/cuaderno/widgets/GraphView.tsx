@@ -70,7 +70,7 @@ export function GraphView({ widget, onOpenCitation, lang }: Props) {
       if (!placed.has(rootId)) place(rootId, 0, yCursor)
     })
 
-    // disconnected or cycle-remnant nodes: stack in a final column
+    // disconnected or cycle-remnant nodes: wrap into columns rather than a single ribbon
     const unplaced = nodes.filter((n) => !placed.has(n.id))
     if (unplaced.length > 0) {
       let maxDepth = 0
@@ -79,9 +79,16 @@ export function GraphView({ widget, onOpenCitation, lang }: Props) {
         if (col > maxDepth) maxDepth = col
       })
       const orphanX = (maxDepth + 1) * (NODE_W + LEVEL_GAP)
-      unplaced.forEach((n) => {
-        pos.set(n.id, { x: orphanX, y: yCursor.value })
-        yCursor.value += NODE_H + NODE_V_GAP
+      // how many rows fit in the placed tree's height (or CONTAINER_H if nothing placed)
+      const treeHeight = yCursor.value > 0 ? yCursor.value : CONTAINER_H
+      const maxRows = Math.max(1, Math.floor(treeHeight / (NODE_H + NODE_V_GAP)))
+      unplaced.forEach((n, i) => {
+        const row = i % maxRows
+        const col = Math.floor(i / maxRows)
+        pos.set(n.id, {
+          x: orphanX + col * (NODE_W + 40),
+          y: row * (NODE_H + NODE_V_GAP),
+        })
       })
     }
 
@@ -138,6 +145,17 @@ export function GraphView({ widget, onOpenCitation, lang }: Props) {
   const panStart = useRef({ x: 0, y: 0, px: 0, py: 0 })
   const autoFitDone = useRef(false)
 
+  // reset view state when the widget identity changes (new graph loaded)
+  const widgetRef = useRef(widget)
+  useEffect(() => {
+    if (widgetRef.current !== widget) {
+      widgetRef.current = widget
+      autoFitDone.current = false
+      setZoom(1)
+      setPan({ x: 0, y: 0 })
+    }
+  }, [widget])
+
   // auto-fit after first layout
   useEffect(() => {
     if (autoFitDone.current || positions.size === 0) return
@@ -153,11 +171,17 @@ export function GraphView({ widget, onOpenCitation, lang }: Props) {
     autoFitDone.current = true
   }, [positions, graphBounds])
 
-  // ctrl/cmd+wheel zoom only — attached via React prop (not passive:false listener)
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    if (!e.ctrlKey && !e.metaKey) return
-    e.preventDefault()
-    setZoom((z) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z * (e.deltaY > 0 ? 0.92 : 1.08))))
+  // ctrl/cmd+wheel zoom — non-passive native listener so preventDefault() works in Chrome
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const handler = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return   // plain wheel: page scrolls, untouched
+      e.preventDefault()
+      setZoom((z) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z * (e.deltaY > 0 ? 0.92 : 1.08))))
+    }
+    el.addEventListener('wheel', handler, { passive: false })
+    return () => el.removeEventListener('wheel', handler)
   }, [])
 
   const handlePointerDown = useCallback(
@@ -209,7 +233,6 @@ export function GraphView({ widget, onOpenCitation, lang }: Props) {
           height={CONTAINER_H}
           viewBox={`0 0 ${viewSize} ${CONTAINER_H}`}
           style={{ display: 'block', cursor: isPanning.current ? 'grabbing' : 'grab' }}
-          onWheel={handleWheel}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
@@ -291,7 +314,9 @@ export function GraphView({ widget, onOpenCitation, lang }: Props) {
                     fill={fill}
                     stroke={stroke}
                     strokeWidth={1}
-                  />
+                  >
+                    <title>{node.label}</title>
+                  </rect>
                   <text
                     x={p.x + NODE_W / 2}
                     y={p.y + NODE_H / 2}
@@ -302,7 +327,6 @@ export function GraphView({ widget, onOpenCitation, lang }: Props) {
                     fill={textColor}
                     style={{ pointerEvents: 'none', userSelect: 'none' }}
                   >
-                    <title>{node.label}</title>
                     {label}
                   </text>
                   {/* citation chip: small underline strip at the bottom of the node */}
@@ -343,15 +367,7 @@ export function GraphView({ widget, onOpenCitation, lang }: Props) {
         </svg>
       </div>
       {widget.truncated ? (
-        <div
-          style={{
-            fontFamily: 'var(--font-ui)',
-            fontSize: 11,
-            letterSpacing: '0.04em',
-            color: 'var(--ink-4)',
-            padding: '6px 14px 10px',
-          }}
-        >
+        <div className="graph-view-note">
           {t('graph_truncated', lang)}
         </div>
       ) : null}

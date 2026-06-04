@@ -674,6 +674,13 @@
   border-top: 1px solid var(--hairline-soft);
   background: var(--surface);
 }
+.graph-view-note {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ink-4);
+  padding: 6px 14px 10px;
+}
 
 /* sequence diagram widget */
 .seq {
