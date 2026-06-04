@@ -11,7 +11,7 @@ from .db import connect, init_schema
 from .server import run_server
 
 
-COMMANDS = {"analyze", "serve", "start", "decision", "report", "issue", "audit", "mcp", "update", "bench"}
+COMMANDS = {"analyze", "serve", "start", "decision", "report", "issue", "audit", "mcp", "update", "bench", "export"}
 
 
 def _use_color() -> bool:
@@ -593,5 +593,11 @@ input("Press Enter to close...")
                 pass
 
         sys.exit(0)
+
+    if cmd == "export":
+        # Import inside the handler to avoid circular imports (cli.py is imported by __main__.py).
+        from copyclip.__main__ import run_export
+        run_export(argv[2:])
+        return True
 
     return False
