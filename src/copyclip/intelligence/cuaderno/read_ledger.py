@@ -7,7 +7,7 @@ from .tool_catalog import ANSWER_TOOLS
 # Per-tool key whose non-empty value means the read returned real content.
 _CONTENT_KEYS: tuple[str, ...] = (
     "lines", "entries", "symbols", "callers", "callees",
-    "commits", "blame", "diff", "tests",
+    "commits", "blame", "diff", "tests", "modules",
 )
 
 

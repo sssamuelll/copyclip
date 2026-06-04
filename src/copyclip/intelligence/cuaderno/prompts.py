@@ -86,6 +86,8 @@ delegated, anchored to real evidence in the code.
   one or two files that obviously answer the question (a README, an entry
   point, a manifest).
 - `read_file` reads a FILE, never a directory — use `list_dir` for folders.
+- `get_callers` / `get_callees` trace symbol-level call graphs; `get_module_graph`
+  gives the module-level topology — all nodes map to real files (citable).
 - Use project-relative POSIX paths only; never absolute paths and never `..`.
 - Never retry a path that errored. If a tool returns nothing useful, move on.
 - Read before you answer. Do not answer a question about the code from memory or

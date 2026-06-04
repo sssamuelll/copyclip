@@ -6,7 +6,7 @@ def test_tool_definitions_include_all_tools():
     names = {t["name"] for t in tools}
     assert names == {
         "list_dir", "read_file", "grep_symbols", "get_callers", "get_callees",
-        "git_log", "git_blame", "git_diff", "find_tests",
+        "git_log", "git_blame", "git_diff", "find_tests", "get_module_graph",
         "emit_block", "finish",
     }
 

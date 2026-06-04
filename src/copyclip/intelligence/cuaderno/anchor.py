@@ -261,6 +261,60 @@ def git_diff(project_root: str, commit_sha: str, path: Optional[str] = None) -> 
     return {"diff": out}
 
 
+def get_module_graph(
+    conn: sqlite3.Connection,
+    project_id: int,
+    scope: str = "",
+    max_modules: int = 50,
+    max_edges: int = 80,
+) -> dict[str, Any]:
+    """Module-level topology aggregated from symbol_edges — both endpoints live
+    in the symbols.module namespace, so every node maps to a real file (citation)
+    and stdlib/external import targets never appear. Deterministic caps: modules
+    ranked by edge degree DESC then name ASC; edges pruned to surviving nodes,
+    then capped by weight DESC."""
+    rows = conn.execute(
+        """
+        SELECT s1.module, s2.module, COUNT(*) AS weight
+        FROM symbol_edges e
+        JOIN symbols s1 ON e.from_symbol_id = s1.id
+        JOIN symbols s2 ON e.to_symbol_id = s2.id
+        WHERE e.project_id=? AND s1.module IS NOT NULL AND s2.module IS NOT NULL
+              AND s1.module != s2.module
+        GROUP BY s1.module, s2.module
+        """,
+        (project_id,),
+    ).fetchall()
+    files = dict(
+        conn.execute(
+            "SELECT module, MIN(file_path) FROM symbols "
+            "WHERE project_id=? AND module IS NOT NULL GROUP BY module",
+            (project_id,),
+        ).fetchall()
+    )
+    mods = set(files)
+    if scope:
+        mods = {m for m in mods if scope in m}
+    edges = [(f, t, w) for (f, t, w) in rows if f in mods and t in mods]
+    degree: dict[str, int] = {}
+    for f, t, w in edges:
+        degree[f] = degree.get(f, 0) + 1
+        degree[t] = degree.get(t, 0) + 1
+    ranked = sorted(mods, key=lambda m: (-degree.get(m, 0), m))
+    truncated = len(ranked) > max_modules
+    keep = set(ranked[:max_modules])
+    pruned = [(f, t, w) for (f, t, w) in edges if f in keep and t in keep]
+    pruned.sort(key=lambda e: (-e[2], e[0], e[1]))
+    if len(pruned) > max_edges:
+        truncated = True
+        pruned = pruned[:max_edges]
+    return {
+        "modules": [{"name": m, "file_path": files[m]} for m in sorted(keep)],
+        "edges": [{"from": f, "to": t, "weight": w} for (f, t, w) in pruned],
+        "truncated": truncated,
+    }
+
+
 def find_tests(project_root: str, symbol_name: str) -> dict[str, Any]:
     """Scan tests/ directory for files mentioning the symbol name."""
     root = Path(project_root).resolve()
