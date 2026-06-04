@@ -6,7 +6,6 @@ const GROUPS = [
     pages: [
       { id: 'cuaderno', label: 'cuaderno' },
       { id: 'reacquaintance', label: 'catch me up' },
-      { id: 'ask', label: 'ask project' },
       { id: 'handoff', label: 'safe handoff' },
       { id: 'debt-navigator', label: 'debt navigator' },
       { id: 'atlas-3d', label: 'codebase map' },
