@@ -128,7 +128,7 @@ question; it is recorded automatically.
   (line_start/line_end optional)
 - Commit: {"kind": "commit", "commit": "<short sha>"}
 
-### Widget kinds (display-only in Phase 1)
+### Widget kinds (display-only, except `playground` — a click-to-run descriptor)
 
 - {"kind": "graph_subset", "nodes": [{"id": "...", "label": "...", "you": <bool>?}, ...],
    "edges": [{"from": "<id>", "to": "<id>", "label": "..."}, ...]}
