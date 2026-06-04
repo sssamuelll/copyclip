@@ -3,8 +3,8 @@ import type { PlaygroundLaunchRequest } from '../../types/api'
 
 export type SlotState =
   | { kind: 'empty' }
-  | { kind: 'spawning'; widgetKey: string }
-  | { kind: 'live'; widgetKey: string; playgroundId: string; iframeUrl: string }
+  | { kind: 'spawning'; widgetKey: string; token: number }
+  | { kind: 'live'; widgetKey: string; playgroundId: string; iframeUrl: string; token: number }
   | { kind: 'ended'; widgetKey: string; reason: 'closed' | 'evicted' | 'exited' | 'error'; message?: string }
 
 let state: SlotState = { kind: 'empty' }
@@ -48,11 +48,11 @@ export async function launch(widgetKey: string, req: PlaygroundLaunchRequest): P
   const myToken = ++token              // absorbs double-clicks: stale awaits no-op
   await killCurrent('evicted')          // awaited DELETE BEFORE the new POST
   if (token !== myToken) return
-  set({ kind: 'spawning', widgetKey })
+  set({ kind: 'spawning', widgetKey, token: myToken })
   try {
     const res = await api.launchPlayground(req)
     if (token !== myToken) { api.closePlayground(res.playground_id).catch(() => {}); return }
-    set({ kind: 'live', widgetKey, playgroundId: res.playground_id, iframeUrl: res.iframe_url })
+    set({ kind: 'live', widgetKey, playgroundId: res.playground_id, iframeUrl: res.iframe_url, token: myToken })
     startPoll(res.playground_id, widgetKey, myToken)
   } catch (e) {
     if (token !== myToken) return
