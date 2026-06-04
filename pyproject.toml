@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "copyclip"
 version = "0.4.0"
-description = "CLI to scan folders, minimize content, and copy AI-friendly context to clipboard"
+description = "Keeps you understanding your own codebase while AI agents write most of it"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
