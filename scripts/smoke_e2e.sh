@@ -14,8 +14,6 @@ sleep 2
 
 curl -sf "http://127.0.0.1:${PORT}/api/health" >/dev/null
 curl -sf "http://127.0.0.1:${PORT}/api/overview" >/dev/null
-curl -sf "http://127.0.0.1:${PORT}/api/alerts" >/dev/null
-curl -sf "http://127.0.0.1:${PORT}/api/export/weekly?days=7" >/dev/null
 curl -sf -X POST "http://127.0.0.1:${PORT}/api/ask" -H 'Content-Type: application/json' -d '{"question":"what are top risks?"}' >/dev/null
 
 echo "[OK] smoke_e2e passed on port ${PORT}"

@@ -5,7 +5,6 @@ import re
 import sqlite3
 import sys
 import threading
-import time
 import uuid
 import subprocess
 from fnmatch import fnmatch
@@ -80,12 +79,6 @@ def run_server(
     events_lock = threading.Condition()
     next_event_id = {"value": 1}
 
-    scheduler_state = {
-        "enabled": False,
-        "interval_sec": 300,
-        "last_run_at": None,
-    }
-
     analysis_lock = threading.Lock()
     cancel_lock = threading.Lock()
     cancel_events = {}
@@ -96,7 +89,6 @@ def run_server(
         events=events,
         events_lock=events_lock,
         next_event_id=next_event_id,
-        scheduler_state=scheduler_state,
         analysis_lock=analysis_lock,
         cancel_lock=cancel_lock,
         cancel_events=cancel_events,
@@ -197,81 +189,6 @@ def run_server(
             "throughput_fps": round(throughput, 2) if throughput is not None else None,
             "eta_sec": eta_sec,
         }
-
-    def _evaluate_alerts(conn, pid):
-        rules = conn.execute(
-            "SELECT id,name,kind,severity,min_score,cooldown_min,enabled,last_triggered_at FROM alert_rules WHERE project_id=? AND enabled=1 ORDER BY id",
-            (pid,),
-        ).fetchall()
-        risks = conn.execute(
-            "SELECT area,severity,kind,rationale,score,created_at FROM risks WHERE project_id=? ORDER BY score DESC, id DESC",
-            (pid,),
-        ).fetchall()
-
-        now = datetime.now(timezone.utc)
-        fired = []
-        for r in rules:
-            rid, name, kind, severity, min_score, cooldown_min, enabled, last_t = r
-            candidates = []
-            for risk in risks:
-                area, sev, knd, rationale, score, created_at = risk
-                if kind and knd != kind:
-                    continue
-                if severity and sev != severity:
-                    continue
-                if int(score or 0) < int(min_score or 0):
-                    continue
-                candidates.append(risk)
-
-            if not candidates:
-                continue
-
-            last_dt = parse_dt(last_t)
-            if last_dt is not None and (now - last_dt).total_seconds() < int(cooldown_min or 0) * 60:
-                continue
-
-            top = candidates[0]
-            title = f"{name}: {top[0]}"
-            detail = f"[{top[2]}/{top[1]}] score={top[4]} — {top[3]}"
-
-            conn.execute(
-                "INSERT INTO alert_events(project_id,rule_id,title,detail) VALUES(?,?,?,?)",
-                (pid, rid, title, detail),
-            )
-            conn.execute(
-                "UPDATE alert_rules SET last_triggered_at=? WHERE id=?",
-                (now.isoformat(), rid),
-            )
-            fired.append({"rule": name, "title": title, "detail": detail})
-
-        if fired:
-            conn.commit()
-        return fired
-
-    def _scheduler_loop():
-        while True:
-            time.sleep(1)
-            if not scheduler_state["enabled"]:
-                continue
-
-            last_run = scheduler_state.get("last_run_at")
-            if last_run:
-                last_dt = parse_dt(last_run)
-                if last_dt and (datetime.now(timezone.utc) - last_dt).total_seconds() < int(scheduler_state["interval_sec"]):
-                    continue
-
-            try:
-                conn_s = connect(root)
-                init_schema(conn_s)
-                pid_s = project_id(conn_s, root)
-                if pid_s:
-                    fired = _evaluate_alerts(conn_s, pid_s)
-                    scheduler_state["last_run_at"] = datetime.now(timezone.utc).isoformat()
-                    if fired:
-                        publish_event("alerts.fired", {"count": len(fired), "items": fired[:5]})
-                conn_s.close()
-            except Exception:
-                pass
 
     def _start_analysis_job(pid: int, resume_from: int = 0, checkpoint_every: int = 500):
         job_id = str(uuid.uuid4())
@@ -556,59 +473,6 @@ def run_server(
                         "items": items[:80],
                         "total": len(items),
                         "last_review_at": last_review,
-                    }))
-                    return
-
-                if parsed.path == "/api/identity/drift":
-                    if not pid:
-                        self._json(with_meta({"items": [], "total": 0, "range_days": 30, "current": None}))
-                        return
-
-                    q = parse_qs(parsed.query or "")
-                    raw_range = (q.get("range", ["30d"])[0] or "30d").strip().lower()
-                    m = re.match(r"^(\d+)(d)?$", raw_range)
-                    range_days = int(m.group(1)) if m else 30
-                    range_days = max(1, min(range_days, 365))
-
-                    rows = conn.execute(
-                        """
-                        SELECT id, generated_at, decision_alignment_score, architecture_cohesion_delta, risk_concentration_index, causes_json, summary_json
-                        FROM identity_drift_snapshots
-                        WHERE project_id=? AND datetime(generated_at) >= datetime('now', ?)
-                        ORDER BY datetime(generated_at) DESC
-                        LIMIT 400
-                        """,
-                        (pid, f"-{range_days} days"),
-                    ).fetchall()
-
-                    items = []
-                    for r in rows:
-                        try:
-                            causes = json.loads(r[5] or "[]")
-                        except Exception:
-                            causes = []
-                        try:
-                            summary = json.loads(r[6] or "{}")
-                        except Exception:
-                            summary = {}
-                        items.append(
-                            {
-                                "id": int(r[0]),
-                                "generated_at": r[1],
-                                "decision_alignment_score": float(r[2] or 0),
-                                "architecture_cohesion_delta": float(r[3] or 0),
-                                "risk_concentration_index": float(r[4] or 0),
-                                "causes": causes,
-                                "summary": summary,
-                            }
-                        )
-
-                    current = items[0] if items else None
-                    self._json(with_meta({
-                        "items": items,
-                        "total": len(items),
-                        "range_days": range_days,
-                        "current": current,
                     }))
                     return
 
@@ -1459,149 +1323,6 @@ def run_server(
                     }))
                     return
 
-                if parsed.path == "/api/alerts":
-                    if not pid:
-                        self._json(with_meta({"fired": [], "events": []}))
-                        return
-                    fired = _evaluate_alerts(conn, pid)
-                    limit, offset = pagination(parsed)
-                    total = conn.execute("SELECT COUNT(*) FROM alert_events WHERE project_id=?", (pid,)).fetchone()[0]
-                    rows = conn.execute(
-                        "SELECT id,rule_id,title,detail,created_at FROM alert_events WHERE project_id=? ORDER BY id DESC LIMIT ? OFFSET ?",
-                        (pid, limit, offset),
-                    ).fetchall()
-                    self._json(with_meta({
-                        "fired": fired,
-                        "events": [
-                            {"id": r[0], "rule_id": r[1], "title": r[2], "detail": r[3], "created_at": r[4]}
-                            for r in rows
-                        ],
-                        "total": total,
-                        "limit": limit,
-                        "offset": offset,
-                    }))
-                    return
-
-                if parsed.path == "/api/alerts/rules":
-                    if not pid:
-                        self._json(with_meta({"items": []}))
-                        return
-                    rows = conn.execute(
-                        "SELECT id,name,kind,severity,min_score,cooldown_min,enabled,last_triggered_at FROM alert_rules WHERE project_id=? ORDER BY id",
-                        (pid,),
-                    ).fetchall()
-                    self._json(with_meta({
-                        "items": [
-                            {
-                                "id": r[0],
-                                "name": r[1],
-                                "kind": r[2],
-                                "severity": r[3],
-                                "min_score": r[4],
-                                "cooldown_min": r[5],
-                                "enabled": bool(r[6]),
-                                "last_triggered_at": r[7],
-                            }
-                            for r in rows
-                        ]
-                    }))
-                    return
-
-                if parsed.path == "/api/alerts/scheduler":
-                    self._json(with_meta({
-                        "enabled": bool(scheduler_state.get("enabled")),
-                        "interval_sec": int(scheduler_state.get("interval_sec") or 300),
-                        "last_run_at": scheduler_state.get("last_run_at"),
-                    }))
-                    return
-
-                if parsed.path == "/api/export/weekly":
-                    if not pid:
-                        self._json(with_meta({"markdown": "# Weekly Brief\n\nNo data available.", "summary": {}}))
-                        return
-                    q = parse_qs(parsed.query or "")
-                    try:
-                        days = max(1, min(int(q.get("days", ["7"])[0]), 30))
-                    except Exception:
-                        days = 7
-
-                    commits_count = conn.execute(
-                        "SELECT COUNT(*) FROM commits WHERE project_id=? AND datetime(date) >= datetime('now', ?)",
-                        (pid, f"-{days} days"),
-                    ).fetchone()[0]
-                    issues_count = conn.execute(
-                        "SELECT COUNT(*) FROM issues WHERE project_id=? AND datetime(created_at) >= datetime('now', ?)",
-                        (pid, f"-{days} days"),
-                    ).fetchone()[0]
-                    pulls_count = conn.execute(
-                        "SELECT COUNT(*) FROM pulls WHERE project_id=? AND datetime(created_at) >= datetime('now', ?)",
-                        (pid, f"-{days} days"),
-                    ).fetchone()[0]
-                    decisions_open = conn.execute(
-                        "SELECT COUNT(*) FROM decisions WHERE project_id=? AND status != 'resolved'",
-                        (pid,),
-                    ).fetchone()[0]
-
-                    top_risks = conn.execute(
-                        "SELECT area,severity,kind,score,rationale FROM risks WHERE project_id=? ORDER BY score DESC, id DESC LIMIT 5",
-                        (pid,),
-                    ).fetchall()
-                    recent_alerts = conn.execute(
-                        "SELECT title,detail,created_at FROM alert_events WHERE project_id=? ORDER BY id DESC LIMIT 5",
-                        (pid,),
-                    ).fetchall()
-                    recent_decisions = conn.execute(
-                        "SELECT id,title,status,created_at FROM decisions WHERE project_id=? ORDER BY id DESC LIMIT 5",
-                        (pid,),
-                    ).fetchall()
-
-                    md = []
-                    md.append("# Weekly Executive Brief")
-                    md.append("")
-                    md.append(f"Period: last {days} days")
-                    md.append("")
-                    md.append("## Summary")
-                    md.append(f"- Commits: {commits_count}")
-                    md.append(f"- New Issues: {issues_count}")
-                    md.append(f"- New PRs: {pulls_count}")
-                    md.append(f"- Open Decisions: {decisions_open}")
-                    md.append("")
-
-                    md.append("## Top Risks")
-                    if top_risks:
-                        for r in top_risks:
-                            md.append(f"- [{r[1]}/{r[2]}] {r[0]} (score {r[3]}): {r[4]}")
-                    else:
-                        md.append("- No risks registered.")
-                    md.append("")
-
-                    md.append("## Recent Decisions")
-                    if recent_decisions:
-                        for d in recent_decisions:
-                            md.append(f"- #{d[0]} [{d[2]}] {d[1]} ({str(d[3])[:10]})")
-                    else:
-                        md.append("- No recent decisions.")
-                    md.append("")
-
-                    md.append("## Recent Alerts")
-                    if recent_alerts:
-                        for a in recent_alerts:
-                            md.append(f"- {a[0]} ({str(a[2])[:19]}): {a[1]}")
-                    else:
-                        md.append("- No alert activity.")
-
-                    summary = {
-                        "days": days,
-                        "commits": commits_count,
-                        "issues": issues_count,
-                        "pulls": pulls_count,
-                        "open_decisions": decisions_open,
-                        "top_risks_count": len(top_risks),
-                        "recent_alerts_count": len(recent_alerts),
-                    }
-                    self._json(with_meta({"markdown": "\n".join(md), "summary": summary}))
-                    return
-
                 if parsed.path == "/api/analyze/status":
                     if not pid:
                         self._json(with_meta({"items": []}))
@@ -1765,40 +1486,6 @@ def run_server(
                     self._json({"error": "run_analyze_first"}, 400)
                     return
 
-                if parsed.path.startswith("/api/alerts/rules/"):
-                    try:
-                        rule_id = int(parsed.path.rsplit("/", 1)[-1])
-                    except Exception:
-                        self._json({"error": "invalid_rule_id"}, 400)
-                        return
-
-                    length = int(self.headers.get("Content-Length", "0"))
-                    raw = self.rfile.read(length) if length else b"{}"
-                    data = json.loads(raw.decode("utf-8"))
-
-                    row = conn.execute(
-                        "SELECT id,name,kind,severity,min_score,cooldown_min,enabled FROM alert_rules WHERE id=? AND project_id=?",
-                        (rule_id, pid),
-                    ).fetchone()
-                    if not row:
-                        self._json({"error": "rule_not_found"}, 404)
-                        return
-
-                    name = (data.get("name") if "name" in data else row[1])
-                    kind = (data.get("kind") if "kind" in data else row[2])
-                    severity = (data.get("severity") if "severity" in data else row[3])
-                    min_score = int(data.get("min_score") if "min_score" in data else row[4])
-                    cooldown_min = int(data.get("cooldown_min") if "cooldown_min" in data else row[5])
-                    enabled = 1 if bool(data.get("enabled") if "enabled" in data else row[6]) else 0
-
-                    conn.execute(
-                        "UPDATE alert_rules SET name=?, kind=?, severity=?, min_score=?, cooldown_min=?, enabled=? WHERE id=? AND project_id=?",
-                        (name, kind, severity, min_score, cooldown_min, enabled, rule_id, pid),
-                    )
-                    conn.commit()
-                    self._json({"ok": True, "id": rule_id})
-                    return
-
                 if parsed.path.startswith("/api/handoff-packets/"):
                     if not pid:
                         self._json({"error": "run_analyze_first"}, 400)
@@ -1907,17 +1594,6 @@ def run_server(
                         self._json({"ok": True, "id": playground_id})
                     else:
                         self._json({"error": "playground_not_found", "id": playground_id}, 404)
-                    return
-
-                if parsed.path.startswith("/api/alerts/rules/"):
-                    try:
-                        rule_id = int(parsed.path.rsplit("/", 1)[-1])
-                    except Exception:
-                        self._json({"error": "invalid_rule_id"}, 400)
-                        return
-                    conn.execute("DELETE FROM alert_rules WHERE id=? AND project_id=?", (rule_id, pid))
-                    conn.commit()
-                    self._json({"ok": True, "id": rule_id})
                     return
 
                 self._json({"error": "not_found"}, 404)
@@ -2105,41 +1781,6 @@ def run_server(
                     self._json(with_meta({"ok": True, "job_id": job_id, "cancel_requested": True}))
                     return
 
-                if parsed.path == "/api/alerts/scheduler":
-                    length = int(self.headers.get("Content-Length", "0"))
-                    raw = self.rfile.read(length) if length else b"{}"
-                    data = json.loads(raw.decode("utf-8"))
-                    if "enabled" in data:
-                        scheduler_state["enabled"] = bool(data.get("enabled"))
-                    if "interval_sec" in data:
-                        try:
-                            scheduler_state["interval_sec"] = max(15, min(int(data.get("interval_sec")), 86400))
-                        except Exception:
-                            pass
-                    self._json({"ok": True, "scheduler": scheduler_state})
-                    return
-
-                if parsed.path == "/api/alerts/rules":
-                    length = int(self.headers.get("Content-Length", "0"))
-                    raw = self.rfile.read(length) if length else b"{}"
-                    data = json.loads(raw.decode("utf-8"))
-                    name = (data.get("name") or "").strip()
-                    if not name:
-                        self._json({"error": "name_required"}, 400)
-                        return
-                    kind = (data.get("kind") or "").strip() or None
-                    severity = (data.get("severity") or "").strip() or None
-                    min_score = int(data.get("min_score") or 0)
-                    cooldown_min = int(data.get("cooldown_min") or 60)
-                    enabled = 1 if bool(data.get("enabled", True)) else 0
-                    conn.execute(
-                        "INSERT OR REPLACE INTO alert_rules(project_id,name,kind,severity,min_score,cooldown_min,enabled,last_triggered_at) VALUES(?,?,?,?,?,?,?,NULL)",
-                        (pid, name, kind, severity, min_score, cooldown_min, enabled),
-                    )
-                    conn.commit()
-                    self._json({"ok": True, "name": name})
-                    return
-
                 if parsed.path == "/api/github/sync":
                     from .analyzer import analyze
                     try:
@@ -2148,28 +1789,6 @@ def run_server(
                         self._json(with_meta({"ok": True, "summary": summary}))
                     except Exception as e:
                         self._json({"error": "github_sync_failed", "message": str(e)}, 500)
-                    return
-
-                if parsed.path == "/api/agents/chat":
-                    try:
-                        from .agents import get_agent
-                        length = int(self.headers.get("Content-Length", "0"))
-                        raw = self.rfile.read(length) if length else b"{}"
-                        data = json.loads(raw.decode("utf-8"))
-                    
-                        agent_type = data.get("agent", "scout")
-                        message = data.get("message", "")
-                    
-                        if not message:
-                            self._json({"error": "message_required"}, 400)
-                            return
-                    
-                        agent = get_agent(agent_type, root)
-                        response = asyncio.run(agent.chat(message))
-                        self._json(with_meta({"response": response, "agent": agent_type}))
-                    except Exception as e:
-                        print(f"[ERROR] Chat failed: {e}")
-                        self._json({"error": "agent_error", "message": str(e)}, 500)
                     return
 
                 if parsed.path == "/api/decision-advisor/check":
@@ -2596,9 +2215,6 @@ def run_server(
                     conn.close()
                 except Exception:
                     pass
-
-    scheduler_thread = threading.Thread(target=_scheduler_loop, daemon=True)
-    scheduler_thread.start()
 
     def _use_color() -> bool:
         return sys.stdout.isatty() and os.getenv("NO_COLOR") is None

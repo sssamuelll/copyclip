@@ -83,11 +83,6 @@ export type RiskTrends = {
   delta: Record<string, number>
   has_previous: boolean
 }
-export type AgentResponse = {
-  response: string
-  agent: string
-}
-
 export type AskCitation = {
   type: 'decision' | 'risk' | 'commit' | 'file'
   id: string | number
@@ -133,44 +128,6 @@ export type AskResponse = {
     target: string | number | null
   }
   bundle_manifest?: Array<Record<string, unknown>>
-}
-
-export type AlertRule = {
-  id: number
-  name: string
-  kind?: string | null
-  severity?: string | null
-  min_score: number
-  cooldown_min: number
-  enabled: boolean
-  last_triggered_at?: string | null
-}
-
-export type AlertEvent = {
-  id: number
-  rule_id?: number | null
-  title: string
-  detail?: string | null
-  created_at: string
-}
-
-export type AlertsResponse = {
-  fired: Array<{ rule: string; title: string; detail: string }>
-  events: AlertEvent[]
-  total: number
-  limit: number
-  offset: number
-}
-
-export type WeeklyExport = {
-  markdown: string
-  summary: Record<string, number>
-}
-
-export type SchedulerState = {
-  enabled: boolean
-  interval_sec: number
-  last_run_at?: string | null
 }
 
 export type AnalyzeJob = {
@@ -388,26 +345,6 @@ export type AdvisorCheckResponse = {
   }
 }
 
-export type IdentityDriftItem = {
-  id: number
-  generated_at: string
-  decision_alignment_score: number
-  architecture_cohesion_delta: number
-  risk_concentration_index: number
-  causes: string[]
-  summary: Record<string, any>
-}
-
-export type IdentityDriftResponse = {
-  items: IdentityDriftItem[]
-  total: number
-  range_days: number
-  current: IdentityDriftItem | null
-  meta?: {
-    project?: string
-    generated_at?: string
-  }
-}
 
 export type DecisionLinkItem = {
   id: number

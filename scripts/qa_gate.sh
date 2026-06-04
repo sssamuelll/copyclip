@@ -23,10 +23,7 @@ sleep 2
 
 curl -sf "http://127.0.0.1:${PORT}/api/health" >/dev/null
 curl -sf "http://127.0.0.1:${PORT}/api/overview" >/dev/null
-curl -sf "http://127.0.0.1:${PORT}/api/alerts/rules" >/dev/null
-curl -sf "http://127.0.0.1:${PORT}/api/alerts/scheduler" >/dev/null
 curl -sf "http://127.0.0.1:${PORT}/api/risks/trends" >/dev/null
-curl -sf "http://127.0.0.1:${PORT}/api/export/weekly?days=7" >/dev/null
 curl -sf -X POST "http://127.0.0.1:${PORT}/api/ask" -H 'Content-Type: application/json' -d '{"question":"top risks?"}' >/dev/null
 
 log "PASS: QA gate complete."
