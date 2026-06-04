@@ -1,6 +1,41 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 
+const paperWrap: React.CSSProperties = {
+  background: 'var(--paper)',
+  color: 'var(--ink)',
+  fontFamily: 'var(--font-ui)',
+  border: '1px solid var(--hairline)',
+  borderRadius: 'var(--radius)',
+  padding: '28px 32px',
+  marginTop: '2rem',
+  maxWidth: '600px',
+  boxShadow: 'var(--shadow-1)',
+}
+
+const fieldLabel: React.CSSProperties = {
+  display: 'block',
+  fontFamily: 'var(--font-ui)',
+  fontSize: '11px',
+  textTransform: 'uppercase',
+  letterSpacing: '0.14em',
+  color: 'var(--ink-3)',
+  marginBottom: '6px',
+}
+
+const fieldControl: React.CSSProperties = {
+  width: '100%',
+  background: 'var(--surface)',
+  color: 'var(--ink)',
+  border: '1px solid var(--hairline)',
+  borderRadius: 'var(--radius-sm)',
+  padding: '8px 10px',
+  fontFamily: 'var(--font-ui)',
+  fontSize: '14px',
+  outline: 'none',
+  boxSizing: 'border-box',
+}
+
 export function SettingsPage({ onNotify }: { onNotify?: (msg: string) => void }) {
   const [config, setConfig] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(false)
@@ -20,7 +55,7 @@ export function SettingsPage({ onNotify }: { onNotify?: (msg: string) => void })
     try {
       await api.setConfig(config)
       setSaved(true)
-      onNotify?.('Nexus updated')
+      onNotify?.('Settings saved')
       setTimeout(() => setSaved(false), 3000)
     } finally {
       setLoading(false)
@@ -29,19 +64,19 @@ export function SettingsPage({ onNotify }: { onNotify?: (msg: string) => void })
 
   return (
     <section className="page">
-      <h2>Configuration Nexus</h2>
-      <p className="muted">Configure how Project Memory sees, interprets, and speaks. Settings are stored locally inside .copyclip/.</p>
+      <h2>Settings</h2>
+      <p className="muted">Configure the LLM provider and API keys. Settings are stored locally inside .copyclip/.</p>
 
-      <div className="panel" style={{ marginTop: '2rem', maxWidth: '600px' }}>
-        <h3>Interpretive Providers</h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginTop: '1rem' }}>
-          
+      <div style={paperWrap}>
+        <h3 style={{ fontFamily: 'var(--font-ui)', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.16em', color: 'var(--ink-3)', margin: '0 0 20px 0', fontWeight: 500 }}>Providers</h3>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+
           <div>
-            <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.5rem', opacity: 0.7 }}>Active Provider</label>
-            <select 
-              value={config['COPYCLIP_LLM_PROVIDER'] || ''} 
+            <label style={fieldLabel}>Active Provider</label>
+            <select
+              value={config['COPYCLIP_LLM_PROVIDER'] || ''}
               onChange={e => handleChange('COPYCLIP_LLM_PROVIDER', e.target.value)}
-              style={{ width: '100%', background: '#000', color: '#fff', border: '1px solid var(--border)', padding: '8px' }}
+              style={fieldControl}
             >
               <option value="">Select a provider...</option>
               <option value="openai">OpenAI (GPT-4o, etc.)</option>
@@ -53,44 +88,44 @@ export function SettingsPage({ onNotify }: { onNotify?: (msg: string) => void })
           </div>
 
           <div>
-            <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.5rem', opacity: 0.7 }}>OpenAI API Key</label>
-            <input 
-              type="password" 
-              value={config['OPENAI_API_KEY'] || ''} 
+            <label style={fieldLabel}>OpenAI API Key</label>
+            <input
+              type="password"
+              value={config['OPENAI_API_KEY'] || ''}
               onChange={e => handleChange('OPENAI_API_KEY', e.target.value)}
               placeholder="sk-..."
-              style={{ width: '100%', background: '#000', color: '#fff', border: '1px solid var(--border)', padding: '8px' }}
+              style={fieldControl}
             />
           </div>
 
           <div>
-            <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.5rem', opacity: 0.7 }}>Anthropic API Key</label>
-            <input 
-              type="password" 
-              value={config['ANTHROPIC_API_KEY'] || ''} 
+            <label style={fieldLabel}>Anthropic API Key</label>
+            <input
+              type="password"
+              value={config['ANTHROPIC_API_KEY'] || ''}
               onChange={e => handleChange('ANTHROPIC_API_KEY', e.target.value)}
               placeholder="sk-ant-..."
-              style={{ width: '100%', background: '#000', color: '#fff', border: '1px solid var(--border)', padding: '8px' }}
+              style={fieldControl}
             />
           </div>
 
           <div>
-            <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.5rem', opacity: 0.7 }}>Gemini API Key</label>
-            <input 
-              type="password" 
-              value={config['GEMINI_API_KEY'] || ''} 
+            <label style={fieldLabel}>Gemini API Key</label>
+            <input
+              type="password"
+              value={config['GEMINI_API_KEY'] || ''}
               onChange={e => handleChange('GEMINI_API_KEY', e.target.value)}
-              style={{ width: '100%', background: '#000', color: '#fff', border: '1px solid var(--border)', padding: '8px' }}
+              style={fieldControl}
             />
           </div>
 
-          <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
-            <button 
-              className="btn primary" 
-              onClick={handleSave} 
+          <div style={{ borderTop: '1px solid var(--hairline)', paddingTop: '1rem' }}>
+            <button
+              className="btn primary"
+              onClick={handleSave}
               disabled={loading}
             >
-              {loading ? 'Anchoring…' : saved ? 'NEXUS UPDATED' : 'Anchor Configuration'}
+              {loading ? 'Saving…' : saved ? 'Saved' : 'Save'}
             </button>
           </div>
 
