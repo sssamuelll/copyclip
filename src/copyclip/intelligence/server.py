@@ -2150,28 +2150,6 @@ def run_server(
                         self._json({"error": "github_sync_failed", "message": str(e)}, 500)
                     return
 
-                if parsed.path == "/api/agents/chat":
-                    try:
-                        from .agents import get_agent
-                        length = int(self.headers.get("Content-Length", "0"))
-                        raw = self.rfile.read(length) if length else b"{}"
-                        data = json.loads(raw.decode("utf-8"))
-                    
-                        agent_type = data.get("agent", "scout")
-                        message = data.get("message", "")
-                    
-                        if not message:
-                            self._json({"error": "message_required"}, 400)
-                            return
-                    
-                        agent = get_agent(agent_type, root)
-                        response = asyncio.run(agent.chat(message))
-                        self._json(with_meta({"response": response, "agent": agent_type}))
-                    except Exception as e:
-                        print(f"[ERROR] Chat failed: {e}")
-                        self._json({"error": "agent_error", "message": str(e)}, 500)
-                    return
-
                 if parsed.path == "/api/decision-advisor/check":
                     length = int(self.headers.get("Content-Length", "0"))
                     raw = self.rfile.read(length) if length else b"{}"

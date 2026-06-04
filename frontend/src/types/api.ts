@@ -83,11 +83,6 @@ export type RiskTrends = {
   delta: Record<string, number>
   has_previous: boolean
 }
-export type AgentResponse = {
-  response: string
-  agent: string
-}
-
 export type AskCitation = {
   type: 'decision' | 'risk' | 'commit' | 'file'
   id: string | number
