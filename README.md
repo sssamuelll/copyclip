@@ -1,17 +1,17 @@
 # CopyClip
 
-**Stay attached to your codebase while AI writes most of it.**
+**Keeps you understanding your own codebase while AI agents write most of it.**
 
-Pick up any project after a week away, after 30 agent PRs, or after a context switch — CopyClip tells you exactly what changed, why it matters, and what you should read first.
+That is the whole job. Pick up any project after a week away, after 30 agent PRs, or after a context switch — CopyClip tells you what changed, why it matters, and what you should read first.
 
 Built first for the author's own daily use, working alongside AI agents on long-lived personal codebases. Lives publicly so others with the same pain can read it, fork it, or learn from how the architecture is shaped — but the author optimizes for his own workflow first, team adoption is not currently in scope.
 
+- Surfaces unfamiliar code: what AI wrote that you haven't reviewed.
 - Project memory anchored to architectural decisions, not just commits.
-- Surfaces unfamiliar code — what AI wrote that you haven't reviewed.
 - Hands off bounded scopes to agents with explicit review gates.
 - Local-first. Works alongside Claude Code, Cursor, Cline, Aider.
 
-> Current version: v0.4.0. See [CHANGELOG.md](CHANGELOG.md) for shipped features.
+> In development. Current version: v0.4.0. See [CHANGELOG.md](CHANGELOG.md) for shipped features.
 
 ---
 
@@ -37,16 +37,21 @@ CopyClip exposes its project memory, ask, and handoff layers as MCP tools. Exter
 
 ---
 
-## Cuaderno (Phase 1)
+## Cuaderno
 
-The cuaderno is the conversational surface where the user asks questions
-about the codebase and receives interactive frames composed by an LLM tutor.
+The cuaderno is CopyClip's main surface: you ask questions about the codebase
+and an LLM tutor answers in interactive frames, grounded in code it actually
+read. Every answer carries its own verdict — answers that are ungrounded,
+off-target, or short on evidence are labeled as such instead of presented as
+fact. The chrome mirrors the language of your question (Spanish/English).
+
+A deterministic eval harness (`copyclip bench`) regression-tests the tutor
+against a SHA-pinned corpus of questions, so answer-quality changes are
+observed rather than guessed at.
+
 See `docs/superpowers/specs/2026-05-28-copyclip-cuaderno-conversacional-design.md`
-for the design and `docs/superpowers/specs/2026-05-28-cuaderno-prototype/` for
-the visual reference.
-
-Phase 1 requires `ANTHROPIC_API_KEY` set in env or `.copyclip/config`. Run
-`copyclip start` to onboard.
+for the design. Requires `ANTHROPIC_API_KEY` set in env or `.copyclip/config`.
+Run `copyclip start` to onboard.
 
 ---
 
