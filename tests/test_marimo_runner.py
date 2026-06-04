@@ -607,3 +607,87 @@ def test_integration_kill_all_cleans_everything(runner, tmp_path):
     assert runner.status(pid2) == "missing"
     assert not os.path.exists(os.path.dirname(nb1))
     assert not os.path.exists(os.path.dirname(nb2))
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: mode parameter + list()
+# ---------------------------------------------------------------------------
+
+
+def test_launch_default_mode_is_edit(monkeypatch, tmp_path):
+    """launch() with no mode kwarg must spawn 'marimo edit ...'."""
+    captured_argv: list[list[str]] = []
+
+    def fake_popen(args, **kwargs):
+        captured_argv.append(list(args))
+        return _FakeProcess()
+
+    monkeypatch.setattr(
+        "copyclip.intelligence.marimo_runner.subprocess.Popen", fake_popen
+    )
+    r = MarimoRunner()
+    monkeypatch.setattr(r, "_probe_url", lambda url: True)
+    nb = _make_notebook(tmp_path, "default-mode")
+
+    r.launch(nb)
+
+    assert len(captured_argv) == 1
+    argv = captured_argv[0]
+    assert argv[2] == "marimo"
+    assert argv[3] == "edit"
+    r.kill_all()
+
+
+def test_launch_run_mode_spawn_args(monkeypatch, tmp_path):
+    """launch(mode='run') must pass 'run' as the marimo sub-command, not 'edit'."""
+    captured_argv: list[list[str]] = []
+
+    def fake_popen(args, **kwargs):
+        captured_argv.append(list(args))
+        return _FakeProcess()
+
+    monkeypatch.setattr(
+        "copyclip.intelligence.marimo_runner.subprocess.Popen", fake_popen
+    )
+    r = MarimoRunner()
+    monkeypatch.setattr(r, "_probe_url", lambda url: True)
+    nb = _make_notebook(tmp_path, "run-mode")
+
+    r.launch(nb, mode="run")
+
+    assert len(captured_argv) == 1
+    argv = captured_argv[0]
+    # argv: [sys.executable, "-m", "marimo", "run", notebook_path, ...]
+    assert argv[2] == "marimo"
+    assert argv[3] == "run"
+    r.kill_all()
+
+
+def test_launch_unknown_mode_raises(monkeypatch, tmp_path):
+    """launch(mode='bogus') must raise MarimoSpawnError before spawning."""
+    r = MarimoRunner()
+    nb = _make_notebook(tmp_path, "bad-mode")
+
+    with pytest.raises(MarimoSpawnError, match="unknown marimo mode"):
+        r.launch(nb, mode="bogus")
+
+
+def test_list_empty_when_no_instances():
+    r = MarimoRunner()
+    assert r.list() == []
+
+
+def test_list_returns_instances(monkeypatch, tmp_path):
+    """After a successful launch, list() must include the instance id + status."""
+    _patch_healthy_spawn(monkeypatch)
+    r = MarimoRunner()
+    monkeypatch.setattr(r, "_probe_url", lambda url: True)
+    nb = _make_notebook(tmp_path, "list-test")
+
+    pid, _ = r.launch(nb)
+
+    items = r.list()
+    assert len(items) == 1
+    assert items[0]["id"] == pid
+    assert items[0]["status"] == "running"
+    r.kill_all()

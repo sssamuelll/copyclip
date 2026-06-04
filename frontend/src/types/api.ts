@@ -623,6 +623,7 @@ export type PlaygroundSource =
   | 'risks'
   | 'timeline'
   | 'context_builder'
+  | 'cuaderno'
 
 export type FunctionRef = {
   file: string

@@ -183,4 +183,6 @@ export const api = {
     deleteJSON<{ ok: boolean }>(`/api/playground/${encodeURIComponent(id)}`),
   playgroundStatus: (id: string) =>
     getJSON<{ status: PlaygroundStatus; id: string }>(`/api/playground/${encodeURIComponent(id)}/status`),
+  playgroundList: () =>
+    getJSON<{ items: { id: string; status: PlaygroundStatus }[] }>('/api/playground'),
 }

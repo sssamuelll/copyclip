@@ -814,3 +814,78 @@ def test_launch_endpoint_rejects_path_traversal():
     )
     assert status == 400
     assert body["error"] == "invalid_function_ref"
+
+
+# ---------------------------------------------------------------------------
+# Wave-3: cuaderno source + run mode + list route
+# ---------------------------------------------------------------------------
+
+
+def test_cuaderno_source_accepted():
+    """PlaygroundLaunchRequest.from_dict with source='cuaderno' must not raise."""
+    req = PlaygroundLaunchRequest.from_dict(
+        {
+            "source": "cuaderno",
+            "function_ref": {"file": "src/foo.py", "name": "bar"},
+            "breadcrumb": "Cuaderno -> bar()",
+        }
+    )
+    assert req.source == "cuaderno"
+
+
+def test_cuaderno_source_launches_run_mode(tmp_path):
+    """launch_playground with source='cuaderno' must call runner.launch(path, mode='run').
+    Any other source must use mode='edit'.
+    """
+    conn = sqlite3.connect(":memory:")
+    init_schema(conn)
+    pid = _seed_project(conn)
+    _seed_symbol(conn, pid, name="bar", kind="function", file_path="src/foo.py", module="foo")
+
+    # cuaderno source -> run mode
+    mock_runner = Mock()
+    mock_runner.launch.return_value = ("id-run", "http://127.0.0.1:9999/")
+
+    req_cuaderno = PlaygroundLaunchRequest(
+        source="cuaderno",
+        function_ref=FunctionRef(file="src/foo.py", name="bar"),
+        breadcrumb="Cuaderno -> bar()",
+    )
+    launch_playground(req_cuaderno, str(tmp_path), conn, pid, mock_runner)
+    _, kwargs_run = mock_runner.launch.call_args
+    assert kwargs_run.get("mode") == "run", (
+        f"Expected mode='run' for cuaderno source, got {kwargs_run}"
+    )
+
+    # atlas source -> edit mode
+    mock_runner.reset_mock()
+    mock_runner.launch.return_value = ("id-edit", "http://127.0.0.1:9998/")
+
+    req_atlas = PlaygroundLaunchRequest(
+        source="atlas",
+        function_ref=FunctionRef(file="src/foo.py", name="bar"),
+        breadcrumb="Atlas -> bar()",
+    )
+    launch_playground(req_atlas, str(tmp_path), conn, pid, mock_runner)
+    _, kwargs_edit = mock_runner.launch.call_args
+    assert kwargs_edit.get("mode") == "edit", (
+        f"Expected mode='edit' for atlas source, got {kwargs_edit}"
+    )
+
+
+def test_get_playground_list_route():
+    """GET /api/playground must return 200 with {'items': [...]} matching runner.list()."""
+    mock_runner = Mock()
+    mock_runner.list.return_value = [
+        {"id": "abc123", "status": "running"},
+        {"id": "def456", "status": "exited"},
+    ]
+    _, port = _start_server_with_runner(mock_runner)
+
+    status, body = _get_json(f"http://127.0.0.1:{port}/api/playground")
+    assert status == 200
+    assert "items" in body
+    assert body["items"] == [
+        {"id": "abc123", "status": "running"},
+        {"id": "def456", "status": "exited"},
+    ]
