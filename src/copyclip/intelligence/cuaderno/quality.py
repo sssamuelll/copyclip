@@ -41,6 +41,24 @@ def _norm_path(p: str) -> str:
     return p.rstrip("/")
 
 
+def _walk_citations(node: Any, out: list[Any]) -> None:
+    """Recursively collect citation-shaped values from arbitrary widget data.
+    Recursive descent (not per-kind extractors) is deliberate: future widget
+    kinds are covered for free, so the artifact blind spot cannot be recreated
+    by forgetting to register a kind."""
+    if isinstance(node, dict):
+        if node.get("citation") is not None:
+            out.append(node["citation"])
+        cits = node.get("citations")
+        if isinstance(cits, list):
+            out.extend(cits)
+        for v in node.values():
+            _walk_citations(v, out)
+    elif isinstance(node, list):
+        for v in node:
+            _walk_citations(v, out)
+
+
 def _cited_paths(blocks: list[Block]) -> set[str]:
     """Every file path the answer cites (path-kind citations only; commits are
     not path-checked). Walks the citation shapes a block can carry: a direct
@@ -60,6 +78,9 @@ def _cited_paths(blocks: list[Block]) -> set[str]:
             for item in items:
                 if isinstance(item, dict) and item.get("citation") is not None:
                     candidates.append(item["citation"])
+        w = d.get("widget")
+        if isinstance(w, dict):
+            _walk_citations(w, candidates)
         for c in candidates:
             if isinstance(c, dict) and c.get("kind") == "path" and c.get("path"):
                 paths.add(_norm_path(str(c["path"])))
