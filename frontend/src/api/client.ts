@@ -1,4 +1,4 @@
-import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, AskResponse, RiskTrends, AnalyzeJob, ArchaeologyResponse, StoryTimelineResponse, AdvisorCheckResponse, DecisionLinkItem, CognitiveLoadResponse, ModuleSourceResponse, ModuleSymbolsResponse, TreeNode, ReacquaintanceResponse, HandoffPacket, HandoffPacketListResponse, HandoffPacketState, HandoffReviewSummary, DebtBreakdown, RemediationPlan, DebtScopeKind, PlaygroundLaunchRequest, PlaygroundLaunchResponse, PlaygroundStatus } from '../types/api'
+import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, RiskTrends, AnalyzeJob, ArchaeologyResponse, StoryTimelineResponse, AdvisorCheckResponse, DecisionLinkItem, CognitiveLoadResponse, ModuleSourceResponse, ModuleSymbolsResponse, TreeNode, ReacquaintanceResponse, HandoffPacket, HandoffPacketListResponse, HandoffPacketState, HandoffReviewSummary, DebtBreakdown, RemediationPlan, DebtScopeKind, PlaygroundLaunchRequest, PlaygroundLaunchResponse, PlaygroundStatus } from '../types/api'
 
 // --- Debugging Suite Helpers ---
 const logAPI = (method: string, url: string, start: number, payload?: any, response?: any, error?: any) => {
@@ -146,7 +146,6 @@ export const api = {
   setConfig: (data: Record<string, string>) => postJSON<{ status: string }>('/api/config', data),
   architecture: () => getJSON<{ nodes: ArchNode[]; edges: ArchEdge[] }>('/api/architecture/graph'),
   architectureTree: () => getJSON<TreeNode>('/api/architecture/tree'),
-  ask: (question: string) => postJSON<AskResponse>('/api/ask', { question }),
   handoffPackets: () => getJSON<HandoffPacketListResponse>('/api/handoff-packets'),
   createHandoffPacket: (payload: {
     task_prompt: string

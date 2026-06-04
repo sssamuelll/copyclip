@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from './api/client'
 import { Sidebar, PAGE_LABELS } from './components/Sidebar'
 import { ReacquaintancePage } from './pages/ReacquaintancePage'
-import { AskPage } from './pages/AskPage'
 import { ArchitecturePage } from './pages/ArchitecturePage'
 import { RisksPage } from './pages/RisksPage'
 import { ContextBuilderPage } from './pages/ContextBuilderPage'
@@ -25,7 +24,7 @@ import type { ArchEdge, ArchNode, ChangeItem, DecisionItem, Overview, RiskItem }
 
 import './styles/cuaderno.css'
 
-type Page = 'cuaderno' | 'reacquaintance' | 'ask' | 'handoff' | 'debt-navigator' | 'atlas-3d' | 'timeline' | 'planning' | 'changes' | 'architecture' | 'impact' | 'risks' | 'context-builder' | 'decisions' | 'settings'
+type Page = 'cuaderno' | 'reacquaintance' | 'handoff' | 'debt-navigator' | 'atlas-3d' | 'timeline' | 'planning' | 'changes' | 'architecture' | 'impact' | 'risks' | 'context-builder' | 'decisions' | 'settings'
 
 export function App() {
   const [page, setPage] = useState<Page>('cuaderno')
@@ -131,7 +130,6 @@ export function App() {
 
           <div style={{ padding: '24px', flex: 1 }}>
             {page === 'reacquaintance' && <ReacquaintancePage onOpenDecision={openDecision} onOpenRisk={openRisk} onOpenChanges={openChanges} />}
-            {page === 'ask' && <AskPage onNotify={notify} onOpenDecision={openDecision} onOpenRisk={openRisk} onOpenChanges={openChanges} />}
             {page === 'handoff' && <HandoffPage onNotify={notify} />}
             {page === 'debt-navigator' && <DebtNavigatorPage onNotify={notify} />}
             {page === 'atlas-3d' && <Atlas3DPage />}

@@ -134,7 +134,7 @@ class TestCLIEndToEnd(unittest.TestCase):
 
         old_argv = sys.argv[:]
         try:
-            sys.argv = [old_argv[0], self.temp_dir.name, "--minimize", "contextual", "--preset", "code", "--print"]
+            sys.argv = [old_argv[0], "export", self.temp_dir.name, "--minimize", "contextual", "--preset", "code", "--print"]
             buf = StringIO()
             with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
                 main_module.main()

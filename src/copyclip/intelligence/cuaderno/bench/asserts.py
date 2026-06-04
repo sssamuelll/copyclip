@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from .artifact import QuestionRecord
+from ..quality import _walk_citations
 
 
 @dataclass(frozen=True)
@@ -128,6 +129,30 @@ def _harvested(axis: str):
     return fn
 
 
+def _a_has_artifact(r, spec, ctx):
+    kinds: list = []
+    cited_any = False
+    for b in r.blocks:
+        if not isinstance(b, dict) or b.get("kind") != "widget":
+            continue
+        w = b.get("widget")
+        if not isinstance(w, dict):
+            continue
+        kinds.append(w.get("kind"))
+        found: list = []
+        _walk_citations(w, found)
+        if found:
+            cited_any = True
+    if not kinds:
+        return _fail("has_artifact", "no widget blocks in answer")
+    want = spec.get("kind")
+    if want and want not in kinds:
+        return _fail("has_artifact", f"no widget of kind {want!r}; kinds={kinds}")
+    if spec.get("cited") and not cited_any:
+        return _fail("has_artifact", "widgets present but none carries a citation")
+    return _ok("has_artifact", f"kinds={kinds}, cited={cited_any}")
+
+
 ASSERTS: dict[str, Callable[[QuestionRecord, dict, AssertContext], AssertResult]] = {
     "status_in": _a_status_in,
     "status_is": _a_status_is,
@@ -140,6 +165,7 @@ ASSERTS: dict[str, Callable[[QuestionRecord, dict, AssertContext], AssertResult]
     "cited_lines_within_eof": _a_cited_lines_within_eof,
     "harvested_responsive": _harvested("responsive"),
     "harvested_grounded": _harvested("grounded"),
+    "has_artifact": _a_has_artifact,
 }
 
 KNOWN_ASSERT_TYPES = frozenset(ASSERTS)

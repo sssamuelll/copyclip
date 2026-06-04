@@ -111,6 +111,8 @@ copyclip start
 
 First run walks you through interactive LLM setup (DeepSeek, OpenAI, Anthropic, etc.) and performs an initial project analysis.
 
+The clipboard context export now lives at `copyclip export`.
+
 ### 4. Local development (green path)
 
 From source, the canonical development path is:

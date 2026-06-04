@@ -4,7 +4,7 @@ import os
 import sys
 import logging
 from typing import Optional
-from tqdm import tqdm 
+from tqdm import tqdm
 from dotenv import load_dotenv
 
 # Agrega 'src' al path si se ejecuta directamente desde el repo
@@ -25,6 +25,25 @@ from copyclip.intelligence.db import get_active_decisions
 from copyclip.llm.selector_service import select_relevant_files
 
 DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+
+EXPORT_ONLY_FLAGS = frozenset({
+    "--minimize", "--prompt", "--preset", "--extension", "--include", "--exclude",
+    "--only", "--view", "--docstrings", "--with-dependencies", "--output", "--print",
+})
+
+
+def classify_bare_invocation(argv: list) -> tuple:
+    """Route a non-subcommand invocation. Returns ('start', folder) or
+    ('error', offending_flag). The front door opens the shell; export flags
+    on the bare invocation get the hint instead of silently exporting."""
+    folder = "."
+    for a in argv[1:]:
+        base = a.split("=", 1)[0]
+        if base in EXPORT_ONLY_FLAGS:
+            return ("error", base)
+        if not a.startswith("-") and folder == ".":
+            folder = a
+    return ("start", folder)
 
 # Brief: _get_copyclip_ignore_file
 def _get_copyclip_ignore_file() -> Optional[str]:
@@ -62,43 +81,46 @@ def main():
         _main_inner()
     except KeyboardInterrupt:
         print("\n\n  Exiting copyclip. (Ctrl+C)", file=sys.stderr)
-        print("  Run 'copyclip start' to launch the dashboard.", file=sys.stderr)
+        print("  Run 'copyclip' to open the cuaderno.", file=sys.stderr)
         print("  Run 'copyclip --help' for all commands.\n", file=sys.stderr)
         sys.exit(0)
 
 
-def _main_inner():
-    # Explicitly load .env from CWD to ensure it's found on all platforms
-    _cwd_env = os.path.join(os.getcwd(), ".env")
-    if os.path.exists(_cwd_env):
-        load_dotenv(_cwd_env, override=True)
-    else:
-        load_dotenv(override=True)
-    # Intelligence commands are handled first and remain additive.
-    if maybe_handle_intelligence(sys.argv):
-        return
-    parser = argparse.ArgumentParser(
+def _build_root_parser() -> argparse.ArgumentParser:
+    """Build the help-only root parser for bare `copyclip` invocations."""
+    return argparse.ArgumentParser(
         prog="copyclip",
-        description="CopyClip v0.4.0 — Project Intelligence & Intent Authority\n\n"
-                    "Scan, analyze, and maintain cognitive ownership of your codebase.\n"
-                    "Provides semantic analysis, architectural decision tracking,\n"
-                    "risk detection, and AI-agent governance via MCP.",
-        epilog="commands:\n"
-               "  start             Launch the intelligence dashboard\n"
-               "  analyze            Index project files, build dependency graph\n"
-               "  update             Update copyclip to the latest version\n"
-               "  decision           Manage architectural decisions\n"
-               "  mcp                Start the MCP Intent Authority server\n"
-               "\n"
-               "examples:\n"
-               "  copyclip start                Start dashboard for current project\n"
-               "  copyclip start --path ./myapp  Start dashboard for a specific project\n"
-               "  copyclip analyze               Re-index the current project\n"
-               "  copyclip update                Update to latest version\n"
-               "  copyclip .                     Copy project context to clipboard\n"
-               "  copyclip . --minimize basic    Copy with token reduction\n"
-               "  copyclip . --prompt \"fix auth\" Copy files relevant to a task\n",
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        description=(
+            "CopyClip v0.4.0 — Keeps you understanding your own codebase while AI agents write most of it."
+        ),
+        epilog=(
+            "commands:\n"
+            "  (bare)             Open the cuaderno for the current project\n"
+            "  start              Open the cuaderno for a project\n"
+            "  analyze            Index project files, build dependency graph\n"
+            "  export             Copy project context to clipboard\n"
+            "  bench              Run the eval harness\n"
+            "  report             Generate a re-acquaintance briefing\n"
+            "  mcp                Start the MCP server\n"
+            "  update             Update copyclip to the latest version\n"
+            "\n"
+            "examples:\n"
+            "  copyclip                         Open the cuaderno for the current project\n"
+            "  copyclip export .                Copy project context to clipboard\n"
+            "  copyclip export . --minimize basic   Copy with token reduction\n"
+            "  copyclip export . --prompt \"fix auth\" Copy files relevant to a task\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+
+def run_export(argv_tail: list) -> None:
+    """Run the clipboard export pipeline. argv_tail is everything after 'export'."""
+    parser = argparse.ArgumentParser(
+        prog="copyclip export",
+        description="Copy project context to clipboard.\n\n"
+                    "Scans the given folder and copies all relevant files to the clipboard.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("folder", nargs="?", default=".", help="Path to scan (default: current directory)")
     parser.add_argument("--extension", help="File extension filter, e.g., .py", default=None)
@@ -118,12 +140,12 @@ def _main_inner():
     parser.add_argument("--flow-diagram", action="store_true", help=argparse.SUPPRESS)  # deprecated
     parser.add_argument("--print", dest="print_output", action="store_true", help="Print output to stdout")
     parser.add_argument("--docstrings", choices=["off", "generate", "overwrite"], default=os.environ.get("COPYCLIP_DOCSTRINGS", "off"), help="Docstring handling mode")
-    parser.add_argument("--doc-lang", choices=["en","es"], default=os.environ.get("COPYCLIP_DOC_LANG","en"), help="Docstring language")
+    parser.add_argument("--doc-lang", choices=["en", "es"], default=os.environ.get("COPYCLIP_DOC_LANG", "en"), help="Docstring language")
     parser.add_argument("--with-dependencies", action="store_true", help="Prepend Mermaid dependency graph (with --minimize contextual)")
     parser.add_argument("--no-decisions", action="store_true", help="Exclude architectural decisions from context")
     parser.add_argument("--prompt", help="Select files relevant to this task/intent via LLM")
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv_tail)
 
     from copyclip.llm.provider_config import resolve_provider, ProviderConfigError, PROVIDERS
 
@@ -380,6 +402,32 @@ def _main_inner():
     except Exception as e:
         print(f"[ERROR] An unexpected error occurred: {e}", file=sys.stderr)
         sys.exit(1)
+
+
+def _main_inner():
+    # Explicitly load .env from CWD to ensure it's found on all platforms
+    _cwd_env = os.path.join(os.getcwd(), ".env")
+    if os.path.exists(_cwd_env):
+        load_dotenv(_cwd_env, override=True)
+    else:
+        load_dotenv(override=True)
+    # Intelligence commands (including 'export') are handled first and remain additive.
+    if maybe_handle_intelligence(sys.argv):
+        return
+    # --help / -h must short-circuit BEFORE any routing so the server is never started.
+    if any(a in ("--help", "-h") for a in sys.argv[1:]):
+        _build_root_parser().print_help()
+        return
+    kind, detail = classify_bare_invocation(sys.argv)
+    if kind == "error":
+        print(
+            f"[ERROR] {detail} belongs to the export flow — did you mean 'copyclip export'?",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    from copyclip.intelligence.cli import maybe_handle as _dispatch
+    _dispatch([sys.argv[0], "start", "--path", detail])
+
 
 if __name__ == "__main__":
     main()

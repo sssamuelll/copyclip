@@ -2,6 +2,15 @@
 
 > Note: runtime/package version is currently `v0.4.0`. The milestones below describe product capability progress, not a strict semver changelog.
 
+## Scheduled: dashboard retirement — Friday 2026-06-19
+
+Ratified 2026-06-04 (cuaderno-shell consensus, Wave 5): the legacy App.tsx
+router, the Sidebar, and the remaining dashboard pages are deleted on
+2026-06-19, after every surviving route is re-homed to a tutor tool or a
+side surface. Until then the dashboard is reachable only through the
+cuaderno's existing toggle — it is an escape hatch, not a peer. No
+indefinite coexistence.
+
 ## ✅ Completed (current shipped baseline)
 - [x] **Project Memory:** Dynamic chat-first interface with component injection.
 - [x] **MCP integration:** Robust server for external agent alignment and semantic auditing.

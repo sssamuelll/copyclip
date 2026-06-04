@@ -120,7 +120,10 @@ def build_tool_definitions() -> list[dict[str, Any]]:
             "description": (
                 "Emit ONE block of your answer. Call once per block, in order. "
                 "Each block must conform to the Block schema in the system prompt. "
-                "Your answer IS the ordered sequence of emit_block calls."
+                "Your answer IS the ordered sequence of emit_block calls. "
+                "Widget primitives (nodes, steps, callers) that assert something "
+                "about the code MUST carry a `citation` "
+                "({kind:'path', path, line_start?, line_end?}) on the asserting item."
             ),
             "input_schema": {
                 "type": "object",

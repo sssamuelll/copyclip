@@ -14,7 +14,6 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .context_bundle_builder import build_context_bundle
-from .ask_project import build_ask_response
 from .cognitive_debt import build_debt_breakdown, severity_to_fog
 from .debt_remediation import build_remediation_plan
 from .handoff import (
@@ -1882,25 +1881,6 @@ def run_server(
                         "intent": intent,
                         "checked_files": selected_files,
                     }))
-                    return
-
-                if parsed.path == "/api/ask":
-                    length = int(self.headers.get("Content-Length", "0"))
-                    raw = self.rfile.read(length) if length else b"{}"
-                    data = json.loads(raw.decode("utf-8"))
-                    question = (data.get("question") or "").strip()
-                    if not question:
-                        self._json({"error": "question_required"}, 400)
-                        return
-
-                    payload = build_ask_response(conn, pid, question)
-
-                    # Strict grounding contract: no claim without citations for grounded answers.
-                    if payload.get("grounded") and not payload.get("citations"):
-                        self._json({"error": "ungrounded_answer_blocked"}, 500)
-                        return
-
-                    self._json(with_meta(payload))
                     return
 
                 if parsed.path == "/api/assemble-context":

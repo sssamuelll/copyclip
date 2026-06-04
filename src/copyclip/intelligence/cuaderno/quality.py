@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
 from .language import detect_language, languages_match
 from .read_ledger import ReadLedger
@@ -41,6 +41,24 @@ def _norm_path(p: str) -> str:
     return p.rstrip("/")
 
 
+def _walk_citations(node: Any, out: list[Any]) -> None:
+    """Recursively collect citation-shaped values from arbitrary widget data.
+    Recursive descent (not per-kind extractors) is deliberate: future widget
+    kinds are covered for free, so the artifact blind spot cannot be recreated
+    by forgetting to register a kind."""
+    if isinstance(node, dict):
+        if node.get("citation") is not None:
+            out.append(node["citation"])
+        cits = node.get("citations")
+        if isinstance(cits, list):
+            out.extend(cits)
+        for v in node.values():
+            _walk_citations(v, out)
+    elif isinstance(node, list):
+        for v in node:
+            _walk_citations(v, out)
+
+
 def _cited_paths(blocks: list[Block]) -> set[str]:
     """Every file path the answer cites (path-kind citations only; commits are
     not path-checked). Walks the citation shapes a block can carry: a direct
@@ -60,10 +78,84 @@ def _cited_paths(blocks: list[Block]) -> set[str]:
             for item in items:
                 if isinstance(item, dict) and item.get("citation") is not None:
                     candidates.append(item["citation"])
+        w = d.get("widget")
+        if isinstance(w, dict):
+            _walk_citations(w, candidates)
         for c in candidates:
             if isinstance(c, dict) and c.get("kind") == "path" and c.get("path"):
                 paths.add(_norm_path(str(c["path"])))
     return paths
+
+
+def _flatten_strings(node: Any, out: list[str]) -> None:
+    if isinstance(node, dict):
+        for k in ("label", "text", "name", "id"):
+            v = node.get(k)
+            if isinstance(v, str) and v:
+                out.append(v)
+        for v in node.values():
+            _flatten_strings(v, out)
+    elif isinstance(node, list):
+        for v in node:
+            _flatten_strings(v, out)
+
+
+def _artifact_summary(blocks: list[Block]) -> str:
+    """Deterministic textual rendering of widget claims for the judge. Known
+    kinds get a readable shape; unknown kinds hit the generic fallback so no
+    widget kind is ever invisible to the judge."""
+    parts: list[str] = []
+    for b in blocks:
+        if b.kind != "widget":
+            continue
+        w = b.data.get("widget")
+        if not isinstance(w, dict):
+            continue
+        kind = w.get("kind")
+        if kind == "graph_subset":
+            nodes = [n for n in (w.get("nodes") or []) if isinstance(n, dict)]
+            edges = [e for e in (w.get("edges") or []) if isinstance(e, dict)]
+            labels = [str(n.get("label") or n.get("id") or "?") for n in nodes]
+            arrows = [
+                f"{e.get('from') or e.get('source') or '?'} -> {e.get('to') or e.get('target') or '?'}"
+                for e in edges
+            ]
+            parts.append(f"graph: nodes [{', '.join(labels)}]; edges [{'; '.join(arrows)}]")
+        elif kind == "sequence_diagram":
+            steps = [s for s in (w.get("steps") or []) if isinstance(s, dict)]
+            lines = [
+                f"{s.get('from') or '?'} -> {s.get('to') or '?'}: {s.get('text') or ''}".strip()
+                for s in steps
+            ]
+            parts.append("sequence: " + "; ".join(lines))
+        elif kind == "callers_tree":
+            callers = [c for c in (w.get("callers") or []) if isinstance(c, dict)]
+            names = [str(c.get("name") or "?") for c in callers]
+            parts.append(f"callers of {w.get('root') or '?'}: [{', '.join(names)}]")
+        else:
+            flat: list[str] = []
+            _flatten_strings(w, flat)
+            parts.append(f"{kind or 'widget'}: " + "; ".join(flat))
+    return "\n".join(parts)
+
+
+def artifacts_cited(blocks: list[Block]) -> Optional[bool]:
+    """Confession axis, never a verdict: None = no widgets in the frame;
+    True = at least one citation collected from widget data; False = widgets
+    present, zero citations. Computed at _seal (the one chokepoint) because
+    cheap and judge verdict dicts replace each other."""
+    found: list[Any] = []
+    has_widget = False
+    for b in blocks:
+        if b.kind != "widget":
+            continue
+        has_widget = True
+        w = b.data.get("widget")
+        if isinstance(w, dict):
+            _walk_citations(w, found)
+    if not has_widget:
+        return None
+    return len(found) > 0
 
 
 @dataclass
