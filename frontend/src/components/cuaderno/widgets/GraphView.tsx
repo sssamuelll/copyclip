@@ -153,6 +153,7 @@ export function GraphView({ widget, onOpenCitation, lang }: Props) {
       autoFitDone.current = false
       setZoom(1)
       setPan({ x: 0, y: 0 })
+      setFocus(widget.focus ?? null)
     }
   }, [widget])
 

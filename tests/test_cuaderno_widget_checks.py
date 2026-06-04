@@ -22,8 +22,11 @@ def test_graph_subset_passes():
 
 
 def test_invented_edge_rejected():
+    # Nodes carry citations so the membership+citation checks pass and only the
+    # edge-membership check fires — isolating exactly what this test claims.
     w = {"kind": "graph_view",
-         "nodes": [{"id": "pkg/a", "label": "a"}, {"id": "pkg/b", "label": "b"}],
+         "nodes": [{"id": "pkg/a", "label": "a", "citation": {"kind": "path", "path": "src/pkg/a.py"}},
+                   {"id": "pkg/b", "label": "b", "citation": {"kind": "path", "path": "src/pkg/b.py"}}],
          "edges": [{"from": "pkg/b", "to": "pkg/a"}]}   # reversed: not in evidence
     reason = validate_widget_payload({"kind": "widget", "widget": w}, _ev())
     assert reason and "edge" in reason
@@ -40,7 +43,8 @@ def test_callers_evidence_admits_symbol_edges():
     ev.add_callers("parse", {"callers": [
         {"name": "main", "kind": "function", "file_path": "src/m.py", "line_start": 2}]})
     w = {"kind": "graph_view",
-         "nodes": [{"id": "main", "label": "main"}, {"id": "parse", "label": "parse"}],
+         "nodes": [{"id": "main", "label": "main", "citation": {"kind": "path", "path": "src/m.py"}},
+                   {"id": "parse", "label": "parse", "citation": {"kind": "path", "path": "src/parse.py"}}],
          "edges": [{"from": "main", "to": "parse"}]}
     assert validate_widget_payload({"kind": "widget", "widget": w}, ev) is None
 
@@ -63,3 +67,12 @@ def test_good_recipe_passes():
 def test_non_graph_widgets_unaffected():
     w = {"kind": "sequence_diagram", "actors": [], "steps": []}
     assert validate_widget_payload({"kind": "widget", "widget": w}, GraphEvidence()) is None
+
+
+def test_uncited_node_rejected():
+    ev = _ev()
+    w = {"kind": "graph_view",
+         "nodes": [{"id": "pkg/a", "label": "a"}],   # in evidence, but no citation
+         "edges": []}
+    reason = validate_widget_payload({"kind": "widget", "widget": w}, ev)
+    assert reason and "citation" in reason

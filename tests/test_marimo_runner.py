@@ -665,11 +665,22 @@ def test_launch_run_mode_spawn_args(monkeypatch, tmp_path):
 
 def test_launch_unknown_mode_raises(monkeypatch, tmp_path):
     """launch(mode='bogus') must raise MarimoSpawnError before spawning."""
+    popen_calls: list = []
+
+    def capturing_popen(*args, **kwargs):
+        popen_calls.append((args, kwargs))
+        return _FakeProcess()
+
+    monkeypatch.setattr(
+        "copyclip.intelligence.marimo_runner.subprocess.Popen", capturing_popen
+    )
     r = MarimoRunner()
     nb = _make_notebook(tmp_path, "bad-mode")
 
     with pytest.raises(MarimoSpawnError, match="unknown marimo mode"):
         r.launch(nb, mode="bogus")
+
+    assert popen_calls == [], "Popen must not be called when mode is invalid"
 
 
 def test_list_empty_when_no_instances():

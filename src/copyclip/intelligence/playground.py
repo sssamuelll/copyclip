@@ -181,7 +181,7 @@ class PlaygroundLaunchResponse:
 
 
 class MarimoRunner(Protocol):
-    def launch(self, notebook_path: str) -> tuple[str, str]:
+    def launch(self, notebook_path: str, mode: str = "edit") -> tuple[str, str]:
         """Return (playground_id, iframe_url) after a healthy spawn."""
         ...
 

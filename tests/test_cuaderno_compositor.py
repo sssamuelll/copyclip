@@ -722,7 +722,8 @@ def test_invented_graph_edge_yields_invalid_block_ack(tmp_path: Path):
         "kind": "widget",
         "widget": {
             "kind": "graph_view",
-            "nodes": [{"id": "pkg/a", "label": "a"}, {"id": "pkg/b", "label": "b"}],
+            "nodes": [{"id": "pkg/a", "label": "a", "citation": {"kind": "path", "path": "src/pkg/a.py"}},
+                      {"id": "pkg/b", "label": "b", "citation": {"kind": "path", "path": "src/pkg/b.py"}}],
             "edges": [{"from": "pkg/b", "to": "pkg/a"}],  # reversed — not in evidence
         },
     }
@@ -784,7 +785,8 @@ def test_graph_evidence_survives_across_rounds(tmp_path: Path):
         "kind": "widget",
         "widget": {
             "kind": "graph_view",
-            "nodes": [{"id": "pkg/a", "label": "a"}, {"id": "pkg/b", "label": "b"}],
+            "nodes": [{"id": "pkg/a", "label": "a", "citation": {"kind": "path", "path": "src/pkg/a.py"}},
+                      {"id": "pkg/b", "label": "b", "citation": {"kind": "path", "path": "src/pkg/b.py"}}],
             "edges": [{"from": "pkg/a", "to": "pkg/b"}],  # matches evidence exactly
         },
     }

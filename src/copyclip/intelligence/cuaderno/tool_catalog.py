@@ -118,9 +118,9 @@ def build_tool_definitions() -> list[dict[str, Any]]:
         {
             "name": "get_module_graph",
             "description": (
-                "Module-level dependency topology (who calls whom across modules), "
-                "with the file backing each module. Use it to build a graph_view "
-                "widget; emit only nodes/edges this tool returned."
+                "Module-level dependency topology (all relations: calls, inheritance) "
+                "across modules, with the file backing each module. Use it to build a "
+                "graph_view widget; emit only nodes/edges this tool returned."
             ),
             "input_schema": {
                 "type": "object",

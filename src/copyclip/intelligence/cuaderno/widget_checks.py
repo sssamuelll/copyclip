@@ -39,6 +39,9 @@ class GraphEvidence:
 
 
 def _check_graph_view(w: dict, ev: GraphEvidence) -> Optional[str]:
+    # Check order: node membership → edge membership → per-node citations.
+    # Membership failures are diagnosed first so the caller sees the most
+    # actionable rejection reason.
     for n in w.get("nodes") or []:
         nid = n.get("id") if isinstance(n, dict) else None
         if nid is None or str(nid) not in ev.nodes:
@@ -47,6 +50,13 @@ def _check_graph_view(w: dict, ev: GraphEvidence) -> Optional[str]:
         pair = (str(e.get("from")), str(e.get("to"))) if isinstance(e, dict) else ("?", "?")
         if pair not in ev.edges:
             return f"graph_view edge {pair[0]} -> {pair[1]} is not in this turn's graph evidence"
+    for n in w.get("nodes") or []:
+        if not isinstance(n, dict):
+            continue
+        nid = n.get("id")
+        citation = n.get("citation")
+        if not isinstance(citation, dict) or not citation.get("path"):
+            return f"graph_view node {nid!r} carries no citation"
     return None
 
 
