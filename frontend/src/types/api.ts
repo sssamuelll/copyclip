@@ -623,6 +623,7 @@ export type PlaygroundSource =
   | 'risks'
   | 'timeline'
   | 'context_builder'
+  | 'cuaderno'
 
 export type FunctionRef = {
   file: string
@@ -690,7 +691,23 @@ export type CallersTreeWidget = {
   callers: Array<{ citation: Citation; note?: string }>
 }
 
-export type Widget = GraphSubsetWidget | SequenceDiagramWidget | CallersTreeWidget
+export type GraphViewWidget = {
+  kind: 'graph_view'
+  nodes: Array<{ id: string; label: string; citation?: Citation }>
+  edges: Array<{ from: string; to: string; weight?: number }>
+  focus?: string
+  truncated?: boolean
+}
+
+export type PlaygroundWidgetData = {
+  kind: 'playground'
+  function_ref: FunctionRef
+  breadcrumb: string
+  suggested_inputs?: unknown[]
+  citation?: Citation
+}
+
+export type Widget = GraphSubsetWidget | SequenceDiagramWidget | CallersTreeWidget | GraphViewWidget | PlaygroundWidgetData
 
 export type Block =
   | { kind: 'lead'; text: string }

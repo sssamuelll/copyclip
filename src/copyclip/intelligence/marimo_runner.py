@@ -127,7 +127,9 @@ class MarimoRunner:
     # Public API (MarimoRunner Protocol + kill_all)
     # ------------------------------------------------------------------
 
-    def launch(self, notebook_path: str) -> tuple[str, str]:
+    def launch(self, notebook_path: str, mode: str = "edit") -> tuple[str, str]:
+        if mode not in ("edit", "run"):
+            raise MarimoSpawnError(f"unknown marimo mode: {mode!r}")
         # Reserve a slot under the lock so two concurrent launches can't both
         # see len == cap-1 and both register (ThreadingHTTPServer dispatches
         # each request in its own thread, so this race is reachable).
@@ -149,7 +151,7 @@ class MarimoRunner:
                 sys.executable,
                 "-m",
                 "marimo",
-                "edit",
+                mode,
                 notebook_path,
                 "--host",
                 "127.0.0.1",
@@ -221,6 +223,12 @@ class MarimoRunner:
         if instance is None:
             return "missing"
         return "running" if instance.process.poll() is None else "exited"
+
+    def list(self) -> list[dict[str, str]]:
+        """Ids + status of every registered instance (for frontend reconciliation)."""
+        with self._lock:
+            ids = list(self._instances)
+        return [{"id": i, "status": self.status(i)} for i in ids]
 
     def kill_all(self) -> None:
         with self._lock:

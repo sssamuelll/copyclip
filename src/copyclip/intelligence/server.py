@@ -310,6 +310,11 @@ def run_server(
                 init_schema(conn)
                 pid = project_id(conn, root)
 
+                if parsed.path == "/api/playground":
+                    items = playground_runner.list() if hasattr(playground_runner, "list") else []
+                    self._json({"items": items})
+                    return
+
                 if parsed.path.startswith("/api/playground/") and parsed.path.endswith("/status"):
                     if not pid:
                         self._json({"error": "run_analyze_first"}, 400)

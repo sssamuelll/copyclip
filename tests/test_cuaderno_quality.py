@@ -62,7 +62,7 @@ def test_cites_only_unread_paths_is_ungrounded():
         ledger=led,
     )
     assert v.status == FRAME_STATUS_UNGROUNDED
-    assert "unread" in v.reason
+    assert "neither read nor tool-evidenced" in v.reason
 
 
 def test_cites_a_read_path_is_answer():

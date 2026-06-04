@@ -17,9 +17,6 @@ import { HandoffPage } from './pages/HandoffPage'
 import { DebtNavigatorPage } from './pages/DebtNavigatorPage'
 import { CuadernoPage } from './pages/CuadernoPage'
 
-import { PlaygroundPanel } from './components/PlaygroundPanel'
-import { PlaygroundProvider } from './hooks/usePlayground'
-
 import type { ArchEdge, ArchNode, ChangeItem, DecisionItem, Overview, RiskItem } from './types/api'
 
 import './styles/cuaderno.css'
@@ -102,17 +99,14 @@ export function App() {
   // dashboard-first behavior.
   if (page === 'cuaderno') {
     return (
-      <PlaygroundProvider>
-        <div style={{ height: '100vh', overflow: 'hidden', background: 'var(--bg)', color: 'var(--text-primary)' }}>
-          <CuadernoPage onOpenDashboard={() => setPage('reacquaintance')} />
-        </div>
-      </PlaygroundProvider>
+      <div style={{ height: '100vh', overflow: 'hidden', background: 'var(--bg)', color: 'var(--text-primary)' }}>
+        <CuadernoPage onOpenDashboard={() => setPage('reacquaintance')} />
+      </div>
     )
   }
 
   return (
-    <PlaygroundProvider>
-      <div className="app gen-ui-layout" style={{ display: 'flex', height: '100vh', background: 'var(--bg)', color: 'var(--text-primary)' }}>
+    <div className="app gen-ui-layout" style={{ display: 'flex', height: '100vh', background: 'var(--bg)', color: 'var(--text-primary)' }}>
 
         <Sidebar
           page={page}
@@ -152,10 +146,6 @@ export function App() {
           </div>
         )}
 
-        {/* Global Anchored Playground overlay — surfaces (Atlas, Reacquaintance,
-            Debt, etc.) trigger it via usePlayground().launch(req). */}
-        <PlaygroundPanel />
       </div>
-    </PlaygroundProvider>
   )
 }

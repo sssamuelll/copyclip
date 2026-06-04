@@ -86,6 +86,8 @@ delegated, anchored to real evidence in the code.
   one or two files that obviously answer the question (a README, an entry
   point, a manifest).
 - `read_file` reads a FILE, never a directory — use `list_dir` for folders.
+- `get_callers` / `get_callees` trace symbol-level call graphs; `get_module_graph`
+  gives the module-level topology — all nodes map to real files (citable).
 - Use project-relative POSIX paths only; never absolute paths and never `..`.
 - Never retry a path that errored. If a tool returns nothing useful, move on.
 - Read before you answer. Do not answer a question about the code from memory or
@@ -126,13 +128,23 @@ question; it is recorded automatically.
   (line_start/line_end optional)
 - Commit: {"kind": "commit", "commit": "<short sha>"}
 
-### Widget kinds (display-only in Phase 1)
+### Widget kinds (display-only, except `playground` — a click-to-run descriptor)
 
 - {"kind": "graph_subset", "nodes": [{"id": "...", "label": "...", "you": <bool>?}, ...],
    "edges": [{"from": "<id>", "to": "<id>", "label": "..."}, ...]}
 - {"kind": "sequence_diagram", "actors": ["A", "B"], "steps": [{"from": 0, "to": 1, "label": "..."}, ...]}
 - {"kind": "callers_tree", "root": "symbol_name",
    "callers": [{"citation": <Citation>, "note": "..."}, ...]}
+- {"kind": "graph_view", "nodes": [{"id": "...", "label": "...", "citation": <Citation>}, ...],
+   "edges": [{"from": "<id>", "to": "<id>"}], "focus": "<id>"?, "truncated": <bool>}
+   nodes/edges MUST come from this turn's get_module_graph or get_callers/get_callees results
+   (no other tool's output qualifies); each node "id" and each edge "from"/"to" MUST be the
+   EXACT module or symbol name the tool returned — never a slug, index, or shortened label;
+   every node carries a citation ({kind:'path', path}); set truncated when the tool said so.
+- {"kind": "playground", "function_ref": {"file": "...", "name": "...", "line": <int>?, "qualname": "..."?},
+   "breadcrumb": "one-line description", "suggested_inputs": [...]?}
+   a runnable example descriptor; function_ref must name a real symbol you located this turn;
+   never invent paths.
 
 ## Tone
 

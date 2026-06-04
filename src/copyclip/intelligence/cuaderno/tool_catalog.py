@@ -116,6 +116,23 @@ def build_tool_definitions() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "get_module_graph",
+            "description": (
+                "Module-level dependency topology (all relations: calls, inheritance) "
+                "across modules, with the file backing each module. Use it to build a "
+                "graph_view widget; emit only nodes/edges this tool returned."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "scope": {
+                        "type": "string",
+                        "description": "substring filter on module names; empty = whole project",
+                    }
+                },
+            },
+        },
+        {
             "name": "emit_block",
             "description": (
                 "Emit ONE block of your answer. Call once per block, in order. "
@@ -177,4 +194,6 @@ def dispatch_tool(
         return anchor.git_diff(project_root, args["commit_sha"], args.get("path"))
     if name == "find_tests":
         return anchor.find_tests(project_root, args["symbol"])
+    if name == "get_module_graph":
+        return anchor.get_module_graph(conn, project_id, args.get("scope", ""))
     return {"error": "unknown_tool", "name": name}

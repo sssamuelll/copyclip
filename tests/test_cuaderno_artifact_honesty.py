@@ -50,7 +50,7 @@ def test_fabricated_grounding_via_widget_seals_ungrounded():
                blocks=[Block.paragraph("It parses."), _widget_block(w)],
                ledger=ledger)
     assert v.status == FRAME_STATUS_UNGROUNDED
-    assert "unread" in v.reason
+    assert "neither read nor tool-evidenced" in v.reason
 
 
 from copyclip.intelligence.cuaderno.quality import artifacts_cited
@@ -141,3 +141,37 @@ def test_judge_fence_no_artifacts_section_without_widgets():
                            blocks=[Block.paragraph("answer")],
                            ledger=ledger, model="m")
     assert "[ARTIFACTS]" not in captured["user"]
+
+
+def test_widget_factories_new_kinds():
+    from copyclip.intelligence.cuaderno.schema import Widget
+    g = Widget.graph_view(nodes=[{"id": "a", "label": "A"}], edges=[], truncated=True)
+    assert g.kind == "graph_view" and g.data["truncated"] is True
+    p = Widget.playground(function_ref={"file": "src/a.py", "name": "f", "line": 3},
+                          breadcrumb="parses x")
+    assert p.kind == "playground"
+    assert p.data["citation"] == {"kind": "path", "path": "src/a.py", "line_start": 3}
+
+
+def test_playground_factory_without_line():
+    from copyclip.intelligence.cuaderno.schema import Widget
+    p = Widget.playground(function_ref={"file": "src/a.py", "name": "f"}, breadcrumb="b")
+    assert p.data["citation"] == {"kind": "path", "path": "src/a.py"}
+
+
+def test_artifact_summary_graph_view_and_playground():
+    from copyclip.intelligence.cuaderno.quality import _artifact_summary
+    g = {"kind": "graph_view",
+         "nodes": [{"id": "a", "label": "Parser"}], "edges": [{"from": "a", "to": "b"}],
+         "truncated": False}
+    p = {"kind": "playground",
+         "function_ref": {"file": "src/a.py", "name": "parse"}, "breadcrumb": "tokenizes input"}
+    s = _artifact_summary([_widget_block(g), _widget_block(p)])
+    assert "Parser" in s and "a -> b" in s
+    assert "parse" in s and "src/a.py" in s and "tokenizes input" in s
+
+
+def test_artifact_summary_truncated_graph_says_so():
+    from copyclip.intelligence.cuaderno.quality import _artifact_summary
+    g = {"kind": "graph_view", "nodes": [{"id": "a"}], "edges": [], "truncated": True}
+    assert "truncated" in _artifact_summary([_widget_block(g)])

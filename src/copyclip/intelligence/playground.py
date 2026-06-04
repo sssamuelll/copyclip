@@ -31,6 +31,7 @@ PLAYGROUND_SOURCES = frozenset(
         "risks",
         "timeline",
         "context_builder",
+        "cuaderno",
     }
 )
 
@@ -180,7 +181,7 @@ class PlaygroundLaunchResponse:
 
 
 class MarimoRunner(Protocol):
-    def launch(self, notebook_path: str) -> tuple[str, str]:
+    def launch(self, notebook_path: str, mode: str = "edit") -> tuple[str, str]:
         """Return (playground_id, iframe_url) after a healthy spawn."""
         ...
 
@@ -466,8 +467,9 @@ def launch_playground(
     """
     resolved = resolve_function_ref(conn, pid, req.function_ref)
     notebook_path = generate_marimo_notebook(req, project_root, resolved)
+    mode = "run" if req.source == "cuaderno" else "edit"
     try:
-        playground_id, iframe_url = runner.launch(notebook_path)
+        playground_id, iframe_url = runner.launch(notebook_path, mode=mode)
     except Exception:
         shutil.rmtree(os.path.dirname(notebook_path), ignore_errors=True)
         raise
@@ -517,7 +519,7 @@ def _module_from_file(file_path: str) -> str:
 
 
 class StubMarimoRunner:
-    def launch(self, notebook_path: str) -> tuple[str, str]:
+    def launch(self, notebook_path: str, mode: str = "edit") -> tuple[str, str]:
         raise MarimoSpawnError(
             "marimo subprocess manager not yet implemented (issue #88); "
             f"notebook generated at {notebook_path}"
