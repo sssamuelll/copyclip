@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Block, CuadernoQuestion, ToolRow, CuadernoProvidersResponse } from '../types/api'
 import { Cuaderno } from '../components/cuaderno/Cuaderno'
 import { askStream, cuadernoApi } from '../api/cuaderno'
+import { reconcileOnMount, onActiveFrameChange } from '../components/cuaderno/playgroundSlot'
 
 const SESSION_STORAGE_KEY = 'copyclip.cuaderno.session_id'
 
@@ -22,6 +23,9 @@ export function CuadernoPage({ onOpenDashboard }: { onOpenDashboard?: () => void
 
   // Abort an in-flight stream on unmount.
   useEffect(() => () => abortRef.current?.abort(), [])
+
+  // Kill any orphaned playground processes from a previous page load.
+  useEffect(() => { void reconcileOnMount() }, [])
 
   const activeQuestion = useMemo(
     () => questions.find((q) => q.position === activePosition) ?? null,
@@ -59,6 +63,7 @@ export function CuadernoPage({ onOpenDashboard }: { onOpenDashboard?: () => void
   }
 
   const onAsk = (question: string) => {
+    onActiveFrameChange()
     abortRef.current?.abort()
     const ac = new AbortController()
     abortRef.current = ac
@@ -154,6 +159,7 @@ export function CuadernoPage({ onOpenDashboard }: { onOpenDashboard?: () => void
   }
 
   const onSelectFromHistory = (position: number) => {
+    onActiveFrameChange()
     setActivePosition(position)
   }
 

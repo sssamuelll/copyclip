@@ -699,7 +699,15 @@ export type GraphViewWidget = {
   truncated?: boolean
 }
 
-export type Widget = GraphSubsetWidget | SequenceDiagramWidget | CallersTreeWidget | GraphViewWidget
+export type PlaygroundWidgetData = {
+  kind: 'playground'
+  function_ref: FunctionRef
+  breadcrumb: string
+  suggested_inputs?: unknown[]
+  citation?: Citation
+}
+
+export type Widget = GraphSubsetWidget | SequenceDiagramWidget | CallersTreeWidget | GraphViewWidget | PlaygroundWidgetData
 
 export type Block =
   | { kind: 'lead'; text: string }

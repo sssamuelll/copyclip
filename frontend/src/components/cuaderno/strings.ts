@@ -33,6 +33,10 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     provenance_unjudged: 'the reviewer was unavailable — this answer was not checked for responsiveness',
     provenance_artifacts_uncited: 'the diagrams in this answer cite no read code',
     graph_truncated: 'graph truncated to the strongest connections',
+    playground_run: 'run example',
+    playground_preparing: 'preparing…',
+    playground_ended: 'runtime ended — run again to relaunch',
+    playground_evicted: 'paused — another example is running',
   },
   es: {
     gotit_prompt: '¿esto responde tu pregunta?',
@@ -64,6 +68,10 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     provenance_unjudged: 'el revisor no estaba disponible: no se chequeó si la respuesta responde lo que preguntaste',
     provenance_artifacts_uncited: 'los diagramas de esta respuesta no citan código leído',
     graph_truncated: 'grafo truncado a las conexiones más fuertes',
+    playground_run: 'correr ejemplo',
+    playground_preparing: 'preparando…',
+    playground_ended: 'el runtime terminó: corre de nuevo para relanzarlo',
+    playground_evicted: 'en pausa: hay otro ejemplo corriendo',
   },
 }
 

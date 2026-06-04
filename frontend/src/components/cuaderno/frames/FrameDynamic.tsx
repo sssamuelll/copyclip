@@ -5,6 +5,7 @@ import { GraphSubset } from '../widgets/GraphSubset'
 import { SequenceDiagram } from '../widgets/SequenceDiagram'
 import { CallersTree } from '../widgets/CallersTree'
 import { GraphView } from '../widgets/GraphView'
+import { PlaygroundWidget } from '../widgets/PlaygroundWidget'
 
 function statusBanner(
   status: NonNullable<Frame['status']>,
@@ -198,6 +199,10 @@ function BlockRender({
         case 'graph_view':
           return (
             <GraphView widget={block.widget} onOpenCitation={onOpenCitation} lang={lang} />
+          )
+        case 'playground':
+          return (
+            <PlaygroundWidget widget={block.widget} onOpenCitation={onOpenCitation} lang={lang} />
           )
       }
       return null
