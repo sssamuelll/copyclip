@@ -105,3 +105,32 @@ def test_unknown_assert_type_raises():
     import pytest
     with pytest.raises(KeyError):
         run_asserts(_rec(), [{"type": "no_such_assert"}], _ctx())
+
+
+def test_has_artifact_passes_on_widget():
+    r = _rec(blocks=[{"kind": "widget",
+                      "widget": {"kind": "graph_subset",
+                                 "nodes": [{"id": "a", "citation": {"kind": "path", "path": "src/a.py"}}],
+                                 "edges": []}}])
+    res = run_asserts(r, [{"type": "has_artifact", "kind": "graph_subset", "cited": True}], _ctx())
+    assert res[0].outcome == "pass"
+
+
+def test_has_artifact_fails_without_widget():
+    r = _rec(blocks=[{"kind": "paragraph", "text": "hi"}])
+    res = run_asserts(r, [{"type": "has_artifact"}], _ctx())
+    assert res[0].outcome == "fail"
+
+
+def test_has_artifact_cited_fails_on_uncited_widget():
+    r = _rec(blocks=[{"kind": "widget",
+                      "widget": {"kind": "graph_subset", "nodes": [{"id": "a"}], "edges": []}}])
+    res = run_asserts(r, [{"type": "has_artifact", "cited": True}], _ctx())
+    assert res[0].outcome == "fail"
+
+
+def test_has_artifact_wrong_kind_fails():
+    r = _rec(blocks=[{"kind": "widget",
+                      "widget": {"kind": "sequence_diagram", "actors": [], "steps": []}}])
+    res = run_asserts(r, [{"type": "has_artifact", "kind": "graph_subset"}], _ctx())
+    assert res[0].outcome == "fail"
