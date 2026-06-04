@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
 from .language import detect_language, languages_match
 from .read_ledger import ReadLedger
@@ -85,6 +85,25 @@ def _cited_paths(blocks: list[Block]) -> set[str]:
             if isinstance(c, dict) and c.get("kind") == "path" and c.get("path"):
                 paths.add(_norm_path(str(c["path"])))
     return paths
+
+
+def artifacts_cited(blocks: list[Block]) -> Optional[bool]:
+    """Confession axis, never a verdict: None = no widgets in the frame;
+    True = at least one citation collected from widget data; False = widgets
+    present, zero citations. Computed at _seal (the one chokepoint) because
+    cheap and judge verdict dicts replace each other."""
+    found: list[Any] = []
+    has_widget = False
+    for b in blocks:
+        if b.kind != "widget":
+            continue
+        has_widget = True
+        w = b.data.get("widget")
+        if isinstance(w, dict):
+            _walk_citations(w, found)
+    if not has_widget:
+        return None
+    return len(found) > 0
 
 
 @dataclass

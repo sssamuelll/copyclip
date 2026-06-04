@@ -51,3 +51,31 @@ def test_fabricated_grounding_via_widget_seals_ungrounded():
                ledger=ledger)
     assert v.status == FRAME_STATUS_UNGROUNDED
     assert "unread" in v.reason
+
+
+from copyclip.intelligence.cuaderno.quality import artifacts_cited
+
+
+def test_artifacts_cited_none_without_widgets():
+    assert artifacts_cited([Block.paragraph("hi")]) is None
+
+
+def test_artifacts_cited_true_with_cited_widget():
+    w = {"kind": "graph_subset",
+         "nodes": [{"id": "a", "citation": {"kind": "path", "path": "src/a.py"}}],
+         "edges": []}
+    assert artifacts_cited([_widget_block(w)]) is True
+
+
+def test_artifacts_cited_false_with_uncited_widget():
+    w = {"kind": "graph_subset", "nodes": [{"id": "a"}], "edges": []}
+    assert artifacts_cited([_widget_block(w)]) is False
+
+
+def test_seal_injects_artifacts_cited():
+    from copyclip.intelligence.cuaderno.compositor import _seal
+    w = {"kind": "graph_subset", "nodes": [{"id": "a"}], "edges": []}
+    frame = _seal("q?", [_widget_block(w)], "answer", {"source": "cheap"})
+    assert frame["verdict"]["artifacts_cited"] is False
+    frame2 = _seal("q?", [Block.paragraph("hi")], "answer", {"source": "cheap"})
+    assert frame2["verdict"]["artifacts_cited"] is None

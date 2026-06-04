@@ -7,7 +7,7 @@ from typing import Any, Iterator, Optional
 
 from .prompts import SYSTEM_PROMPT, GROUNDING_RETRY_DIRECTIVE, LANGUAGE_RETRY_DIRECTIVE, RESPONSIVENESS_RETRY_FALLBACK
 from .read_ledger import ReadLedger
-from .quality import assess, cheap_verdict_dict
+from .quality import assess, cheap_verdict_dict, artifacts_cited
 from .judge import judge_verdict_dict
 from .language import detect_language
 from .i18n import tr
@@ -68,6 +68,9 @@ def _sealed_frame(question: str, emitted: list[Block], ledger: ReadLedger, judge
 
 
 def _seal(question: str, emitted: list[Block], status: str, verdict: dict) -> dict[str, Any]:
+    # artifacts_cited is injected HERE because the cheap and judge verdict
+    # dicts replace each other — neither layer alone reaches every sealed frame.
+    verdict = {**verdict, "artifacts_cited": artifacts_cited(emitted)}
     return frame_to_dict(Frame(question=question, blocks=emitted, status=status,
                                verdict=verdict, question_language=detect_language(question)))
 
