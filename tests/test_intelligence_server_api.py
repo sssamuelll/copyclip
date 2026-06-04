@@ -85,12 +85,6 @@ def _patch_json_expect_error(url: str, payload: dict):
         return e.code, json.loads(e.read().decode("utf-8"))
 
 
-def _delete_json(url: str):
-    req = request.Request(url, method="DELETE")
-    with request.urlopen(req, timeout=3) as r:
-        return json.loads(r.read().decode("utf-8"))
-
-
 def _post_json(url: str, payload: dict):
     data = json.dumps(payload).encode("utf-8")
     req = request.Request(url, method="POST", data=data, headers={"Content-Type": "application/json"})
@@ -632,63 +626,6 @@ def test_pulls_endpoint_pagination():
         assert len(res["items"]) == 2
 
 
-def test_alert_rules_and_cooldown_evaluation():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
-        root = Path(td)
-        root_path = str(root.absolute())
-        conn = connect(root_path)
-        init_schema(conn)
-        conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root_path, "tmp"))
-        pid = conn.execute("SELECT id FROM projects WHERE root_path=?", (root_path,)).fetchone()[0]
-        conn.execute(
-            "INSERT INTO alert_rules(project_id,name,kind,severity,min_score,cooldown_min,enabled) VALUES(?,?,?,?,?,?,1)",
-            (pid, "high-risk", None, "high", 70, 60),
-        )
-        conn.execute(
-            "INSERT INTO risks(project_id,area,severity,kind,rationale,score) VALUES(?,?,?,?,?,?)",
-            (pid, "src/core.ts", "high", "churn", "spike", 90),
-        )
-        conn.commit()
-
-        port = _free_port()
-        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
-        th.start()
-        _wait_port(port)
-
-        first = _get_json(f"http://127.0.0.1:{port}/api/alerts")
-        assert len(first["fired"]) >= 1
-
-        second = _get_json(f"http://127.0.0.1:{port}/api/alerts")
-        assert len(second["fired"]) == 0
-        assert second["total"] >= 1
-
-
-def test_weekly_export_endpoint_returns_markdown_and_summary():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
-        root = Path(td)
-        root_path = str(root.absolute())
-        conn = connect(root_path)
-        init_schema(conn)
-        conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root_path, "tmp"))
-        pid = conn.execute("SELECT id FROM projects WHERE root_path=?", (root_path,)).fetchone()[0]
-        conn.execute("INSERT INTO commits(project_id,sha,author,date,message) VALUES(?,?,?,?,?)", (pid, "abc123", "dev", "2026-03-04 10:00:00", "feat: x"))
-        conn.execute("INSERT INTO risks(project_id,area,severity,kind,rationale,score) VALUES(?,?,?,?,?,?)", (pid, "src/a.ts", "high", "churn", "hot", 80))
-        conn.execute("INSERT INTO decisions(project_id,title,summary,status,source_type) VALUES(?,?,?,?,?)", (pid, "Use X", "Because", "proposed", "manual"))
-        conn.execute("INSERT INTO alert_events(project_id,rule_id,title,detail) VALUES(?,?,?,?)", (pid, 1, "high-risk: src/a.ts", "detail"))
-        conn.commit()
-
-        port = _free_port()
-        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
-        th.start()
-        _wait_port(port)
-
-        res = _get_json(f"http://127.0.0.1:{port}/api/export/weekly?days=7")
-        assert "markdown" in res
-        assert "Weekly Executive Brief" in res["markdown"]
-        assert "summary" in res
-        assert "commits" in res["summary"]
-
-
 def test_settings_alias_get_and_post():
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)
@@ -710,64 +647,6 @@ def test_settings_alias_get_and_post():
         _post_json(f"http://127.0.0.1:{port}/api/config", {"COPYCLIP_THEME": "midnight"})
         res2 = _get_json(f"http://127.0.0.1:{port}/api/config")
         assert res2.get("COPYCLIP_THEME") == "midnight"
-
-
-def test_alert_rule_patch_and_delete():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
-        root = Path(td)
-        root_path = str(root.absolute())
-        conn = connect(root_path)
-        init_schema(conn)
-        conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root_path, "tmp"))
-        pid = conn.execute("SELECT id FROM projects WHERE root_path=?", (root_path,)).fetchone()[0]
-        cur = conn.execute(
-            "INSERT INTO alert_rules(project_id,name,kind,severity,min_score,cooldown_min,enabled) VALUES(?,?,?,?,?,?,1)",
-            (pid, "r1", "churn", "high", 70, 60),
-        )
-        rid = cur.lastrowid
-        conn.commit()
-
-        port = _free_port()
-        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
-        th.start()
-        _wait_port(port)
-
-        patched = _patch_json(f"http://127.0.0.1:{port}/api/alerts/rules/{rid}", {"enabled": False, "min_score": 80})
-        assert patched["ok"] is True
-
-        rules = _get_json(f"http://127.0.0.1:{port}/api/alerts/rules")
-        row = [r for r in rules["items"] if r["id"] == rid][0]
-        assert row["enabled"] is False
-        assert row["min_score"] == 80
-
-        deleted = _delete_json(f"http://127.0.0.1:{port}/api/alerts/rules/{rid}")
-        assert deleted["ok"] is True
-
-        rules2 = _get_json(f"http://127.0.0.1:{port}/api/alerts/rules")
-        assert not any(r["id"] == rid for r in rules2["items"])
-
-
-def test_alert_scheduler_state_get_and_set():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
-        root = Path(td)
-        root_path = str(root.absolute())
-        conn = connect(root_path)
-        init_schema(conn)
-        conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root_path, "tmp"))
-        conn.commit()
-
-        port = _free_port()
-        th = threading.Thread(target=run_server, args=(root_path, port), daemon=True)
-        th.start()
-        _wait_port(port)
-
-        s1 = _get_json(f"http://127.0.0.1:{port}/api/alerts/scheduler")
-        assert s1["enabled"] is False
-
-        _post_json(f"http://127.0.0.1:{port}/api/alerts/scheduler", {"enabled": True, "interval_sec": 30})
-        s2 = _get_json(f"http://127.0.0.1:{port}/api/alerts/scheduler")
-        assert s2["enabled"] is True
-        assert int(s2["interval_sec"]) >= 15
 
 
 def test_analyze_job_start_and_status_endpoints():

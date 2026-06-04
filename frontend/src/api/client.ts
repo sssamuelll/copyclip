@@ -1,4 +1,4 @@
-import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, AskResponse, RiskTrends, AlertRule, AlertsResponse, WeeklyExport, SchedulerState, AnalyzeJob, ArchaeologyResponse, StoryTimelineResponse, AdvisorCheckResponse, DecisionLinkItem, CognitiveLoadResponse, ModuleSourceResponse, ModuleSymbolsResponse, TreeNode, ReacquaintanceResponse, HandoffPacket, HandoffPacketListResponse, HandoffPacketState, HandoffReviewSummary, DebtBreakdown, RemediationPlan, DebtScopeKind, PlaygroundLaunchRequest, PlaygroundLaunchResponse, PlaygroundStatus } from '../types/api'
+import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, AskResponse, RiskTrends, AnalyzeJob, ArchaeologyResponse, StoryTimelineResponse, AdvisorCheckResponse, DecisionLinkItem, CognitiveLoadResponse, ModuleSourceResponse, ModuleSymbolsResponse, TreeNode, ReacquaintanceResponse, HandoffPacket, HandoffPacketListResponse, HandoffPacketState, HandoffReviewSummary, DebtBreakdown, RemediationPlan, DebtScopeKind, PlaygroundLaunchRequest, PlaygroundLaunchResponse, PlaygroundStatus } from '../types/api'
 
 // --- Debugging Suite Helpers ---
 const logAPI = (method: string, url: string, start: number, payload?: any, response?: any, error?: any) => {
@@ -123,19 +123,10 @@ export const api = {
     postJSON(`/api/decisions/${id}/links`, { link_type, target_pattern }),
   risks: () => getJSON<{ items: RiskItem[]; total?: number; limit?: number; offset?: number }>('/api/risks'),
   riskTrends: () => getJSON<RiskTrends>('/api/risks/trends'),
-  alerts: () => getJSON<AlertsResponse>('/api/alerts'),
-  alertRules: () => getJSON<{ items: AlertRule[] }>('/api/alerts/rules'),
-  schedulerState: () => getJSON<SchedulerState>('/api/alerts/scheduler'),
-  setSchedulerState: (data: Partial<SchedulerState>) => postJSON<{ ok: boolean; scheduler: SchedulerState }>('/api/alerts/scheduler', data),
   startAnalyzeJob: () => postJSON<{ ok: boolean; job_id: string; already_running: boolean }>('/api/analyze/start', {}),
   resumeAnalyzeJob: () => postJSON<{ ok: boolean; job_id: string; already_running: boolean; resume_from?: number }>('/api/analyze/resume', {}),
   cancelAnalyzeJob: () => postJSON<{ ok: boolean; job_id: string; cancel_requested: boolean }>('/api/analyze/cancel', {}),
   analyzeStatus: () => getJSON<{ items: AnalyzeJob[] }>('/api/analyze/status'),
-  upsertAlertRule: (rule: { name: string; kind?: string; severity?: string; min_score?: number; cooldown_min?: number; enabled?: boolean }) => postJSON<{ ok: boolean; name: string }>('/api/alerts/rules', rule),
-  updateAlertRule: (id: number, patch: Partial<{ name: string; kind: string; severity: string; min_score: number; cooldown_min: number; enabled: boolean }>) =>
-    patchJSON<{ ok: boolean; id: number }>(`/api/alerts/rules/${id}`, patch),
-  deleteAlertRule: (id: number) => deleteJSON<{ ok: boolean; id: number }>(`/api/alerts/rules/${id}`),
-  weeklyExport: (days = 7) => getJSON<WeeklyExport>(`/api/export/weekly?days=${days}`),
   issues: () => getJSON<{ items: IssueItem[] }>('/api/issues'),
   files: () => getJSON<{ items: FileItem[] }>('/api/files'),
   heatmap: () => getJSON<{ items: HeatmapItem[] }>('/api/heatmap'),
