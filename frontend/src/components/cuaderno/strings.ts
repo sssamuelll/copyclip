@@ -31,6 +31,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     banner_fallback_text: 'The tutor could not produce an answer for this question this time.',
     provenance_legacy: 'predates grounding checks — provenance not verified',
     provenance_unjudged: 'the reviewer was unavailable — this answer was not checked for responsiveness',
+    provenance_artifacts_uncited: 'the diagrams in this answer cite no read code',
   },
   es: {
     gotit_prompt: '¿esto responde tu pregunta?',
@@ -60,6 +61,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     banner_fallback_text: 'El tutor no pudo responder esta pregunta esta vez.',
     provenance_legacy: 'anterior a los chequeos de calidad, procedencia sin verificar',
     provenance_unjudged: 'el revisor no estaba disponible: no se chequeó si la respuesta responde lo que preguntaste',
+    provenance_artifacts_uncited: 'los diagramas de esta respuesta no citan código leído',
   },
 }
 

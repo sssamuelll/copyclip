@@ -773,7 +773,7 @@ export type Frame = {
   question: string
   blocks: Block[]
   status?: FrameStatus
-  verdict?: Record<string, unknown> | null
+  verdict?: { source?: string; artifacts_cited?: boolean | null; [key: string]: unknown } | null
   question_language?: string | null
 }
 
