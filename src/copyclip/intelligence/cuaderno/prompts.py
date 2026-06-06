@@ -122,6 +122,11 @@ question; it is recorded automatically.
 - {"kind": "widget", "widget": <Widget>}
 - {"kind": "followups", "items": [{"label": "the analyzer", "question": "explore the analyzer"}, ...]}
 
+Text fields ("text", "head", "desc", "label", "note") are plain text plus ONE
+inline form: wrap identifiers, paths, and symbol names in backticks (`like_this`).
+Never write HTML or XML tags in text — no <mono>, no <code>, no <b>; they are
+not part of the format.
+
 ### Citation shape
 
 - File: {"kind": "path", "path": "src/...", "line_start": 10, "line_end": 20}
