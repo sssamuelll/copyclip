@@ -1,4 +1,5 @@
 import type { ToolRow } from '../../../types/api'
+import { renderInline } from '../inline'
 import { t } from '../strings'
 
 type Props = {
@@ -36,7 +37,7 @@ export function FrameMidStream({ question, tools, partial, language }: Props) {
         ))}
       </div>
       <p className="cua-lead">
-        {partial}
+        {renderInline(partial)}
         <span className="streaming-caret" />
       </p>
     </>

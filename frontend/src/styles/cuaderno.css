@@ -261,6 +261,18 @@
 }
 .cua-p strong, .cua-strong { color: var(--ink); font-weight: 600; }
 
+/* inline code — backticks (canonical) or tolerated <mono>/<code> tags in text fields */
+.ic {
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  padding: 1px 5px 2px;
+  overflow-wrap: break-word;
+}
+
 /* numbered list — editorial */
 .cua-list {
   list-style: none;

@@ -1,5 +1,6 @@
 import type { Block, Citation, Frame } from '../../../types/api'
 import { CitationChip } from '../CitationChip'
+import { renderInline } from '../inline'
 import { t } from '../strings'
 import { GraphSubset } from '../widgets/GraphSubset'
 import { SequenceDiagram } from '../widgets/SequenceDiagram'
@@ -107,17 +108,17 @@ function BlockRender({
 }) {
   switch (block.kind) {
     case 'lead':
-      return <p className="cua-lead">{block.text}</p>
+      return <p className="cua-lead">{renderInline(block.text)}</p>
     case 'paragraph':
-      return <p className="cua-p">{block.text}</p>
+      return <p className="cua-p">{renderInline(block.text)}</p>
     case 'ordered_list':
       return (
         <ol className="cua-list">
           {block.items.map((item, i) => (
             <li key={i}>
               <div>
-                <div className="head">{item.head}</div>
-                <div className="desc">{item.desc}</div>
+                <div className="head">{renderInline(item.head)}</div>
+                <div className="desc">{renderInline(item.desc)}</div>
                 {item.citation ? (
                   <CitationChip citation={item.citation} block onClick={onOpenCitation} />
                 ) : null}
@@ -166,7 +167,7 @@ function BlockRender({
                     }`}
               </span>
               {it.note ? (
-                <span style={{ color: 'var(--ink-3)' }}>  {it.note}</span>
+                <span style={{ color: 'var(--ink-3)' }}>  {renderInline(it.note)}</span>
               ) : null}
             </a>
           ))}
@@ -176,7 +177,7 @@ function BlockRender({
       return (
         <div className="callout">
           <div className="kicker">{block.kicker}</div>
-          <p>{block.text}</p>
+          <p>{renderInline(block.text)}</p>
           {block.citations
             ? block.citations.map((c, i) => (
                 <div key={i} style={{ marginTop: i === 0 ? 8 : 4 }}>
@@ -213,7 +214,7 @@ function BlockRender({
           <div className="btns">
             {block.items.map((it, i) => (
               <button key={i} className="fu" onClick={() => onAsk(it.question)}>
-                <span className="arr">↳</span> {it.label}
+                <span className="arr">↳</span> {renderInline(it.label)}
               </button>
             ))}
           </div>
