@@ -56,6 +56,24 @@ LANGUAGE_RETRY_DIRECTIVE = (
     "labels — keeping it anchored to the same evidence."
 )
 
+# Recovery instruction attached to every invalid_block ack, so a rejected widget
+# tells the model what to do instead of only why it failed.
+INVALID_BLOCK_RECOVERY = (
+    "Rebuild this widget using ONLY the exact node and edge names a graph tool "
+    "returned this turn, or drop the widget and answer in prose with citations."
+)
+
+# Injected after a round whose only emit was a rejected widget — the model is
+# stuck on something it cannot ground. The off-ramp keeps an ungroundable widget
+# from draining the whole turn into a blank frame.
+WIDGET_RECOVERY_DIRECTIVE = (
+    "A widget you emitted could not be grounded in this turn's evidence, so it "
+    "was dropped. Do not keep retrying the same widget. Either rebuild it from "
+    "the EXACT node and edge names a graph tool returned this turn, or drop the "
+    "widget and answer in prose — an honest prose answer is better than no "
+    "answer. Then call finish."
+)
+
 SYSTEM_PROMPT = """\
 You are the cuaderno — a tutor that helps a single developer understand
 their own AI-generated codebase. The user is an archaeologist of their own
