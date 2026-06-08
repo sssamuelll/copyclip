@@ -301,9 +301,12 @@ def resolve_function_ref(
     db_kind = row[1]
     db_file = row[2]
     db_line = row[3]
-    # Use db_file (canonical from analyzer) for the module fallback so a
-    # mis-cased input path can't poison the import statement.
-    db_module = row[4] or _module_from_file(db_file)
+    # Derive the importable dotted module from the canonical FILE path, never from
+    # symbols.module: the analyzer stores `module` slash-style at directory
+    # granularity (e.g. 'copyclip/intelligence'), which is neither dotted nor
+    # file-level, so `from {module} import {name}` would be unimportable. The file
+    # path yields the real module ('copyclip.intelligence.analyzer').
+    db_module = _module_from_file(db_file)
 
     # The module string is embedded directly in `from {mod} import ...`.
     # Reject anything that isn't a dotted sequence of identifiers — protects
@@ -338,25 +341,28 @@ app = marimo.App(width="medium")
 
 @app.cell
 def __():
-    # CopyClip auto-loaded cell
-    # Source: {source}
-    # Breadcrumb: {breadcrumb}
+    import marimo as mo
     import sys
     sys.path.insert(0, {project_root!r})
 {imports_block}
-    return ({exported_symbols},)
+    # {source} · {breadcrumb}
+    return mo, {exported_symbols}
 
 
 @app.cell
-def __({exported_symbols}):
-{sample_block}
-    return result, sample,
+def __(mo):
+    # The input — change it and the result below re-runs.
+    sample = {input_element}
+    sample
+    return (sample,)
 
 
 @app.cell
-def __():
-    # Free cell: experiment freely
-    return
+def __({exported_symbols}, sample):
+    value = sample.value
+    result = {call_expr}
+    result
+    return (result,)
 
 
 if __name__ == "__main__":
@@ -378,7 +384,7 @@ def generate_marimo_notebook(
     td = temp_dir or tempfile.mkdtemp(prefix="copyclip-playground-")
     notebook_path = os.path.join(td, "playground.py")
     imports_block, exported_symbols, call_expr = _build_symbol_resolution(resolved)
-    sample_block = _build_sample_block(req.suggested_inputs, call_expr)
+    input_element = _build_input_element(req.suggested_inputs)
     # source is already validated against the PLAYGROUND_SOURCES whitelist, but
     # we sanitize both fields anyway as defense in depth — these end up inside
     # single-line ``#`` comments.
@@ -390,7 +396,8 @@ def generate_marimo_notebook(
         project_root=os.path.abspath(project_root),
         imports_block=imports_block,
         exported_symbols=exported_symbols,
-        sample_block=sample_block,
+        input_element=input_element,
+        call_expr=call_expr,
     )
     Path(notebook_path).write_text(content, encoding="utf-8")
     return notebook_path
@@ -409,41 +416,47 @@ def _build_symbol_resolution(resolved: ResolvedFunction) -> tuple[str, str, str]
     if parent and parent != name:
         imports = f"    from {mod} import {parent}"
         exported = parent
-        call_expr = f"{parent}(...).{name}(sample)"
+        call_expr = f"{parent}(...).{name}(value)"
     else:
         imports = f"    from {mod} import {name}"
         exported = name
-        call_expr = f"{name}(sample)"
+        call_expr = f"{name}(value)"
 
     return imports, exported, call_expr
 
 
-def _build_sample_block(
-    suggested_inputs: list[object] | None, call_expr: str
-) -> str:
-    """Indented body of the second cell. v1: uses only the first suggested input."""
-    indent = "    "
-    if not suggested_inputs:
-        callable_repr = call_expr.split("(", 1)[0]
-        lines = [
-            f"{indent}# Suggested input",
-            f"{indent}# TODO: supply input",
-            f"{indent}sample = None",
-            f"{indent}result = None  # call {callable_repr}(sample) once sample is set",
-        ]
-    else:
-        first = suggested_inputs[0]
-        try:
-            sample_repr = repr(first)
-        except Exception:
-            sample_repr = "None"
-        lines = [
-            f"{indent}# Suggested input",
-            f"{indent}sample = {sample_repr}",
-            f"{indent}result = {call_expr}",
-            f"{indent}result",
-        ]
-    return "\n".join(lines)
+def _build_input_element(suggested_inputs: list[object] | None) -> str:
+    """The RHS of ``sample = ...``: a LIVE marimo input control, so changing it
+    re-runs the function in-process (reactive), never a frozen literal.
+
+    A single string becomes a free-text box the dev can retype — the grabbable
+    input that makes 'change it and watch the branch move' real. Two or more
+    inputs (or a single non-string) become a type-preserving dropdown — the
+    'try this / now try that' contrast. No inputs falls back to an empty text
+    box; the notebook never ships computing ``None``."""
+    if (
+        suggested_inputs
+        and len(suggested_inputs) == 1
+        and isinstance(suggested_inputs[0], str)
+    ):
+        return f'mo.ui.text(value={suggested_inputs[0]!r}, label="input", full_width=True)'
+    if suggested_inputs:
+        seen: set[str] = set()
+        pairs: list[str] = []
+        first_label: str | None = None
+        for x in suggested_inputs:
+            label = x if isinstance(x, str) else repr(x)
+            base, i = label, 2
+            while label in seen:
+                label = f"{base} ({i})"
+                i += 1
+            seen.add(label)
+            if first_label is None:
+                first_label = label
+            pairs.append(f"{label!r}: {x!r}")
+        options = "{" + ", ".join(pairs) + "}"
+        return f'mo.ui.dropdown(options={options}, value={first_label!r}, label="input")'
+    return 'mo.ui.text(value="", label="input", full_width=True)'
 
 
 # ---------------------------------------------------------------------------
