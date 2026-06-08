@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import time
 from typing import Any, Iterator, Optional
@@ -16,12 +17,13 @@ from .judge import judge_verdict_dict
 from .language import detect_language
 from .i18n import tr
 from .schema import (
-    Block, Frame, frame_from_dict, frame_to_dict, validate_block_dict,
+    Block, Frame, Widget, frame_from_dict, frame_to_dict, validate_block_dict,
     FRAME_STATUS_FALLBACK, FRAME_STATUS_ANSWER,
     FRAME_STATUS_UNGROUNDED, FRAME_STATUS_INSUFFICIENT_EVIDENCE, FRAME_STATUS_OFF_TARGET,
 )
 from .tool_catalog import ANSWER_TOOLS, build_tool_definitions, dispatch_tool
 from .widget_checks import GraphEvidence, validate_widget_payload
+from ..playground import FunctionRef, resolve_function_ref
 
 CLOSING_DIRECTIVE = (
     "You have gathered your evidence — the research tools are no longer "
@@ -71,6 +73,140 @@ def _is_visual_request(question: str) -> bool:
 def _is_run_request(question: str) -> bool:
     q = question.lower()
     return any(term in q for term in _RUN_REQUEST_TERMS)
+
+
+# --- The deterministic playground floor (Epic #139) -------------------------
+# A run-request's required output TYPE (a playground widget) is a property the
+# system guarantees, so it must be enforced OUTSIDE the model: when the model
+# answers a run-request in prose and the turn would seal off_target, the SYSTEM
+# constructs the playground from a symbol that RESOLVES against the symbols table.
+# It never invents — if no symbol resolves, the honest off_target stands.
+
+_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _candidate_symbol_names(question: str) -> list[str]:
+    """Identifiers in the question that might name a symbol. Underscore-bearing
+    and longer names rank first — they look most like a symbol reference."""
+    seen: list[str] = []
+    for m in _IDENT_RE.findall(question):
+        if len(m) >= 3 and m not in seen:
+            seen.append(m)
+    seen.sort(key=lambda s: (("_" not in s), -len(s)))
+    return seen
+
+
+def _resolve_floor_symbol(conn: sqlite3.Connection, project_id: int,
+                          names: list[str], ledger: Optional[ReadLedger]):
+    """Resolve the FIRST candidate name that maps to a real symbol. A name that
+    spans multiple files is disambiguated to the one the model actually touched
+    (the ledger); still ambiguous -> skip (the floor declines rather than guess)."""
+    touched: set[str] = set()
+    if ledger is not None:
+        touched = set(ledger.read_paths) | set(ledger.evidence_paths)
+    for name in names:
+        rows = conn.execute(
+            "SELECT file_path FROM symbols WHERE project_id=? AND name=? "
+            "AND kind IN ('function','method','class')",
+            (project_id, name),
+        ).fetchall()
+        files = [r[0] for r in rows]
+        if not files:
+            continue
+        if len(files) == 1:
+            chosen = files[0]
+        else:
+            inter = [f for f in files if f in touched]
+            if len(inter) != 1:
+                continue
+            chosen = inter[0]
+        try:
+            return resolve_function_ref(conn, project_id, FunctionRef(file=chosen, name=name))
+        except Exception:  # noqa: BLE001 — any resolution failure means: do not offer a floor
+            continue
+    return None
+
+
+def _has_playground(emitted: list[Block]) -> bool:
+    for b in emitted:
+        if b.kind == "widget":
+            w = b.data.get("widget")
+            if isinstance(w, dict) and w.get("kind") == "playground":
+                return True
+    return False
+
+
+def _construct_playground_floor(question: str, conn: Optional[sqlite3.Connection],
+                                project_id: Optional[int], ledger: Optional[ReadLedger],
+                                emitted: list[Block]) -> Optional[Block]:
+    """Build the playground Block for a run-request from a resolved symbol, or
+    None when nothing resolves (then the honest off_target stands)."""
+    if conn is None or project_id is None or not _is_run_request(question):
+        return None
+    if _has_playground(emitted):
+        return None
+    resolved = _resolve_floor_symbol(conn, project_id,
+                                     _candidate_symbol_names(question), ledger)
+    if resolved is None:
+        return None
+    fr: dict[str, Any] = {"file": resolved.file, "name": resolved.name}
+    if resolved.line_start is not None:
+        fr["line"] = resolved.line_start
+    if resolved.qualname and resolved.qualname != resolved.name:
+        fr["qualname"] = resolved.qualname
+    lang = detect_language(question)
+    breadcrumb = (f"Ejecuta {resolved.name} con un ejemplo"
+                  if lang == "es" else f"Run {resolved.name} with an example")
+    block = Block.widget(Widget.playground(function_ref=fr, breadcrumb=breadcrumb).to_dict())
+    # Defensive: the floor must meet the same emit-time bar as a model widget.
+    if validate_widget_payload(block.to_dict(), GraphEvidence()) is not None:
+        return None
+    return block
+
+
+def _floor_verdict_dict(prior_status: str) -> dict[str, Any]:
+    """Honest verdict for a floor-sealed answer: the artifact is grounded by DB
+    resolution and responsive by construction; `source` marks it system-built and
+    records what it upgraded from."""
+    return {
+        "question_kind": "code_comprehension",
+        "grounded": True,
+        "responsive": True,
+        "language_ok": True,
+        "world": None,
+        "source": "floor",
+        "reason": f"playground constructed deterministically from a resolved symbol (was {prior_status})",
+    }
+
+
+def _floored_frame(frame_dict: dict[str, Any], question: str,
+                   conn: Optional[sqlite3.Connection], project_id: Optional[int],
+                   ledger: Optional[ReadLedger]) -> dict[str, Any]:
+    """Apply the playground floor to a sealed terminal frame: a run-request that
+    would seal `off_target` (prose, not a runnable artifact) or `fallback` (no
+    answer at all) is upgraded to an `answer` carrying a system-constructed
+    playground — when a named symbol RESOLVES against the symbols table. Off_target
+    keeps its grounded prose and gains the artifact; fallback's 'couldn't finish'
+    message is dropped for the artifact. Any other status, or no resolvable symbol,
+    is returned unchanged — the honest verdict stands. Never invents."""
+    status = frame_dict.get("status")
+    if not _is_run_request(question):
+        return frame_dict
+    if status not in (FRAME_STATUS_OFF_TARGET, FRAME_STATUS_FALLBACK):
+        return frame_dict
+    blocks = [Block.from_dict(b) for b in frame_dict.get("blocks", [])]
+    if _has_playground(blocks):
+        # The model already delivered the runnable artifact: a run-request answered
+        # WITH a playground is responsive by definition. An off_target label here is
+        # the judge mislabeling form as relevance — reclassify, don't relabel.
+        return _seal(question, blocks, FRAME_STATUS_ANSWER, _floor_verdict_dict(status))
+    # fallback's only block is a system 'couldn't finish' message — drop it.
+    base: list[Block] = [] if status == FRAME_STATUS_FALLBACK else blocks
+    floor = _construct_playground_floor(question, conn, project_id, ledger, base)
+    if floor is None:
+        return frame_dict
+    base.append(floor)
+    return _seal(question, base, FRAME_STATUS_ANSWER, _floor_verdict_dict(status))
 
 
 def _fallback_frame(question: str, reason: str) -> Frame:
@@ -310,8 +446,10 @@ def iter_compose_events(
                         yield {"type": "reset"}
                         continue
                     yield {"type": "frame",
-                           "frame": _seal(question, emitted, _judge_status(jv),
-                                          judge_verdict_dict(jv))}
+                           "frame": _floored_frame(
+                               _seal(question, emitted, _judge_status(jv),
+                                     judge_verdict_dict(jv)),
+                               question, conn, project_id, ledger)}
                     return
                 yield {"type": "frame",
                        "frame": _seal(question, emitted, FRAME_STATUS_ANSWER,
@@ -319,8 +457,10 @@ def iter_compose_events(
                 return
             else:
                 yield {"type": "frame",
-                       "frame": frame_to_dict(
-                           _fallback_frame(question, "the model produced no answer blocks"))}
+                       "frame": _floored_frame(
+                           frame_to_dict(
+                               _fallback_frame(question, "the model produced no answer blocks")),
+                           question, conn, project_id, ledger)}
             return
 
         # Continue: ack every tool_use block. Dispatch read tools (with events);
@@ -393,10 +533,14 @@ def iter_compose_events(
 
     # Budget exhausted → fallback frame (terminal; parity with the wrapper below).
     if emitted:
-        yield {"type": "frame", "frame": _sealed_frame(question, emitted, ledger, judge=judge)}
+        yield {"type": "frame",
+               "frame": _floored_frame(_sealed_frame(question, emitted, ledger, judge=judge),
+                                       question, conn, project_id, ledger)}
     else:
         yield {"type": "frame",
-               "frame": frame_to_dict(_fallback_frame(question, "tool-call budget exhausted"))}
+               "frame": _floored_frame(
+                   frame_to_dict(_fallback_frame(question, "tool-call budget exhausted")),
+                   question, conn, project_id, ledger)}
 
 
 def compose_frame(

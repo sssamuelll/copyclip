@@ -50,8 +50,14 @@ against a SHA-pinned corpus of questions, so answer-quality changes are
 observed rather than guessed at.
 
 See `docs/superpowers/specs/2026-05-28-copyclip-cuaderno-conversacional-design.md`
-for the design. Requires `ANTHROPIC_API_KEY` set in env or `.copyclip/config`.
-Run `copyclip start` to onboard.
+for the design. Run `copyclip start` to configure a provider and onboard.
+
+The cuaderno runs on any configured LLM provider (Anthropic, DeepSeek, or
+OpenAI) and is most reliable on Claude: agentic frame composition leans on the
+model volunteering structured artifacts, which weaker models do less
+consistently. Run-requests are the exception — CopyClip constructs the
+playground deterministically from the resolved symbol, so the runnable artifact
+appears on any provider.
 
 ---
 
