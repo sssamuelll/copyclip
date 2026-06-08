@@ -5,7 +5,10 @@ import sqlite3
 import time
 from typing import Any, Iterator, Optional
 
-from .prompts import SYSTEM_PROMPT, GROUNDING_RETRY_DIRECTIVE, LANGUAGE_RETRY_DIRECTIVE, RESPONSIVENESS_RETRY_FALLBACK
+from .prompts import (
+    SYSTEM_PROMPT, GROUNDING_RETRY_DIRECTIVE, LANGUAGE_RETRY_DIRECTIVE,
+    RESPONSIVENESS_RETRY_FALLBACK, INVALID_BLOCK_RECOVERY, WIDGET_RECOVERY_DIRECTIVE,
+)
 from .read_ledger import ReadLedger
 from .quality import assess, cheap_verdict_dict, artifacts_cited
 from .judge import judge_verdict_dict
@@ -144,7 +147,8 @@ def _ack_terminal_tools(turn_content: list[dict[str, Any]],
         if blk.get("name") == "emit_block":
             reason = emit_status.get(tuid)
             results.append(_ack(tuid, {"ok": True}) if reason is None
-                           else _ack(tuid, {"error": "invalid_block", "detail": reason}, is_error=True))
+                           else _ack(tuid, {"error": "invalid_block", "detail": reason,
+                                            "recovery": INVALID_BLOCK_RECOVERY}, is_error=True))
         else:
             results.append(_ack(tuid, {"ok": True}))
     return results
@@ -307,7 +311,8 @@ def iter_compose_events(
                     tool_results.append(_ack(tuid, {"ok": True}))
                 else:
                     tool_results.append(
-                        _ack(tuid, {"error": "invalid_block", "detail": reason}, is_error=True))
+                        _ack(tuid, {"error": "invalid_block", "detail": reason,
+                                    "recovery": INVALID_BLOCK_RECOVERY}, is_error=True))
                 continue
             if name == "finish":
                 tool_results.append(_ack(tuid, {"ok": True}))
@@ -342,6 +347,17 @@ def iter_compose_events(
                        "state": "error", "ms": ms}
 
         messages.append({"role": "user", "content": tool_results})
+
+        # Widget-fixation backstop: if every emit_block this round was rejected,
+        # the round produced no answer block — the model is stuck on a widget it
+        # cannot ground. Offer the prose off-ramp so an ungroundable widget
+        # degrades to an honest answer instead of draining the budget into a
+        # blank frame. Not latched (it neither discards blocks nor costs a round),
+        # so each stuck round renews the offer; skip the closing round, whose
+        # directive already forces composition and which has no next turn to read.
+        if (not is_closing and emit_status
+                and all(reason is not None for reason in emit_status.values())):
+            _inject_directive(messages, WIDGET_RECOVERY_DIRECTIVE)
 
     # Budget exhausted → fallback frame (terminal; parity with the wrapper below).
     if emitted:

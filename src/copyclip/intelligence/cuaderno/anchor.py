@@ -270,9 +270,17 @@ def get_module_graph(
 ) -> dict[str, Any]:
     """Module-level topology aggregated from symbol_edges — both endpoints live
     in the symbols.module namespace, so every node maps to a real file (citation)
-    and stdlib/external import targets never appear. Deterministic caps: modules
-    ranked by edge degree DESC then name ASC; edges pruned to surviving nodes,
-    then capped by weight DESC."""
+    and stdlib/external import targets never appear.
+
+    `scope` is a FOCUS, not an induced-subgraph filter: it selects the modules
+    matching the substring — by module name OR by a backing file path, so
+    'analyzer' resolves the module whose file is analyzer.py even when that module
+    is named after the parent directory — and returns them PLUS their direct
+    neighbors and the edges incident to the focus (an ego graph, radius 1). This
+    is what answers 'the graph around X'; an empty scope returns the whole
+    project. Deterministic caps: focus modules rank first (never pruned out for a
+    higher-degree neighbor), then degree DESC then name ASC; edges pruned to
+    surviving nodes, then capped by weight DESC."""
     rows = conn.execute(
         """
         SELECT s1.module, s2.module, COUNT(*) AS weight
@@ -292,15 +300,38 @@ def get_module_graph(
             (project_id,),
         ).fetchall()
     )
-    mods = set(files)
+    all_mods = set(files)
+
+    focus: set[str] = set()
     if scope:
-        mods = {m for m in mods if scope in m}
-    edges = [(f, t, w) for (f, t, w) in rows if f in mods and t in mods]
+        focus = {m for m in all_mods if scope in m}
+        # Resolve via backing file paths too: a file like analyzer.py lives in a
+        # module named after its parent directory, so a name-only match misses it.
+        for (m,) in conn.execute(
+            "SELECT DISTINCT module FROM symbols "
+            "WHERE project_id=? AND module IS NOT NULL AND file_path LIKE ?",
+            (project_id, f"%{scope}%"),
+        ):
+            if m in all_mods:
+                focus.add(m)
+        if not focus:
+            return {"modules": [], "edges": [], "truncated": False}
+        # Ego graph: edges incident to a focus module, plus the nodes they reach.
+        edges = [(f, t, w) for (f, t, w) in rows if f in focus or t in focus]
+        nodes = set(focus)
+        for f, t, w in edges:
+            nodes.add(f)
+            nodes.add(t)
+        nodes &= all_mods
+    else:
+        nodes = set(all_mods)
+        edges = [(f, t, w) for (f, t, w) in rows if f in nodes and t in nodes]
+
     degree: dict[str, int] = {}
     for f, t, w in edges:
         degree[f] = degree.get(f, 0) + 1
         degree[t] = degree.get(t, 0) + 1
-    ranked = sorted(mods, key=lambda m: (-degree.get(m, 0), m))
+    ranked = sorted(nodes, key=lambda m: (m not in focus, -degree.get(m, 0), m))
     truncated = len(ranked) > max_modules
     keep = set(ranked[:max_modules])
     pruned = [(f, t, w) for (f, t, w) in edges if f in keep and t in keep]

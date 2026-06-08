@@ -830,3 +830,133 @@ def test_graph_evidence_survives_across_rounds(tmp_path: Path):
     assert len(frame["frame"]["blocks"]) == 1, (
         "valid cross-round widget must appear in the sealed frame"
     )
+
+
+# ---------------------------------------------------------------------------
+# Widget-fixation backstop — an ungroundable widget must offer a prose off-ramp
+# instead of silently draining the round budget into a blank frame.
+# ---------------------------------------------------------------------------
+
+_GRAPH_RESULT = {
+    "modules": [
+        {"name": "pkg/a", "file_path": "src/pkg/a.py"},
+        {"name": "pkg/b", "file_path": "src/pkg/b.py"},
+    ],
+    "edges": [{"from": "pkg/a", "to": "pkg/b", "weight": 1}],
+    "truncated": False,
+}
+
+# A graph_view with a reversed edge (b->a) — not in the evidence, so it is
+# rejected at emit time and never becomes a block.
+_BAD_WIDGET = {
+    "kind": "widget",
+    "widget": {
+        "kind": "graph_view",
+        "nodes": [
+            {"id": "pkg/a", "label": "a", "citation": {"kind": "path", "path": "src/pkg/a.py"}},
+            {"id": "pkg/b", "label": "b", "citation": {"kind": "path", "path": "src/pkg/b.py"}},
+        ],
+        "edges": [{"from": "pkg/b", "to": "pkg/a"}],
+    },
+}
+
+
+def _graph_turn():
+    return [
+        _tool_stop("g1", "get_module_graph", {"scope": "pkg"}),
+        _msg_stop("tool_use", [_content("g1", "get_module_graph", {"scope": "pkg"})]),
+    ]
+
+
+def _bad_widget_turn(bid="w1"):
+    # Emits the ungroundable widget WITHOUT finish — stays in tool_use, so the
+    # round is non-terminal and the loop continues (the fixation pattern).
+    return [
+        _tool_stop(bid, "emit_block", _BAD_WIDGET),
+        _msg_stop("tool_use", [_content(bid, "emit_block", _BAD_WIDGET)]),
+    ]
+
+
+def test_invalid_block_ack_carries_recovery_instruction(tmp_path: Path):
+    """When a widget is rejected, its invalid_block ack must carry a `recovery`
+    instruction — not just the bare reason — so the model is told what to do."""
+    turns = [
+        _graph_turn(),
+        _bad_widget_turn(),
+        [  # the model recovers with prose
+            _tool_stop("l1", "emit_block", {"kind": "lead", "text": "ans"}),
+            _tool_stop("f", "finish", {}),
+            _msg_stop("tool_use", [
+                _content("l1", "emit_block", {"kind": "lead", "text": "ans"}),
+                _content("f", "finish", {}),
+            ]),
+        ],
+    ]
+    client = StubStream(turns)
+    with patch(
+        "copyclip.intelligence.cuaderno.compositor.dispatch_tool",
+        side_effect=lambda name, args, **kw: _GRAPH_RESULT,
+    ):
+        list(iter_compose_events(
+            client=client, question="q", project_root=str(tmp_path),
+            project_id=1, conn=None, max_tool_rounds=8,
+        ))
+    # Decode the error acks the model was sent and confirm the rejected widget's
+    # ack carries a recovery instruction, not just a bare reason.
+    error_acks = []
+    for m in client.calls[-1]["messages"]:
+        if m["role"] == "user" and isinstance(m["content"], list):
+            for blk in m["content"]:
+                if isinstance(blk, dict) and blk.get("type") == "tool_result" and blk.get("is_error"):
+                    error_acks.append(json.loads(blk["content"]))
+    invalid = [a for a in error_acks if a.get("error") == "invalid_block"]
+    assert invalid, "the rejected widget must produce an invalid_block ack"
+    assert all("recovery" in a for a in invalid), "invalid_block ack must carry a recovery instruction"
+
+
+def test_all_rejected_round_injects_prose_recovery_directive(tmp_path: Path):
+    """After a round whose only emit was a rejected widget, the compositor must
+    inject a directive telling the model it may answer in prose."""
+    turns = [
+        _graph_turn(),
+        _bad_widget_turn(),
+        [
+            _tool_stop("l1", "emit_block", {"kind": "lead", "text": "ans"}),
+            _tool_stop("f", "finish", {}),
+            _msg_stop("tool_use", [
+                _content("l1", "emit_block", {"kind": "lead", "text": "ans"}),
+                _content("f", "finish", {}),
+            ]),
+        ],
+    ]
+    client = StubStream(turns)
+    with patch(
+        "copyclip.intelligence.cuaderno.compositor.dispatch_tool",
+        side_effect=lambda name, args, **kw: _GRAPH_RESULT,
+    ):
+        list(iter_compose_events(
+            client=client, question="q", project_root=str(tmp_path),
+            project_id=1, conn=None, max_tool_rounds=8,
+        ))
+    serialized = json.dumps(client.calls[2]["messages"])
+    assert "answer in prose" in serialized, (
+        "a stuck-on-widget round must offer the prose off-ramp"
+    )
+
+
+def test_persistent_widget_fixation_keeps_offering_prose_offramp(tmp_path: Path):
+    """A model that fixates on an ungroundable widget every round must be offered
+    the prose off-ramp (at least once) rather than silently draining the budget."""
+    turns = [_graph_turn()] + [_bad_widget_turn(f"w{i}") for i in range(7)]  # 8 rounds
+    client = StubStream(turns)
+    with patch(
+        "copyclip.intelligence.cuaderno.compositor.dispatch_tool",
+        side_effect=lambda name, args, **kw: _GRAPH_RESULT,
+    ):
+        events = list(iter_compose_events(
+            client=client, question="q", project_root=str(tmp_path),
+            project_id=1, conn=None, max_tool_rounds=8,
+        ))
+    offers = json.dumps(client.calls).count("answer in prose")
+    assert offers >= 1, "the prose off-ramp must be offered to a fixating model"
+    assert any(e["type"] == "frame" for e in events), "a terminal frame must still be produced"

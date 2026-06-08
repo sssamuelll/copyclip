@@ -118,16 +118,23 @@ def build_tool_definitions() -> list[dict[str, Any]]:
         {
             "name": "get_module_graph",
             "description": (
-                "Module-level dependency topology (all relations: calls, inheritance) "
-                "across modules, with the file backing each module. Use it to build a "
-                "graph_view widget; emit only nodes/edges this tool returned."
+                "Module-level dependency topology (calls, inheritance) with the file "
+                "backing each module. Pass `scope` to focus on one area: it returns "
+                "the matching modules PLUS their direct neighbors and the edges "
+                "between them — this is how you answer 'the graph around X'. Use it "
+                "to build a graph_view widget; emit only the nodes/edges it returned."
             ),
             "input_schema": {
                 "type": "object",
                 "properties": {
                     "scope": {
                         "type": "string",
-                        "description": "substring filter on module names; empty = whole project",
+                        "description": (
+                            "focus substring, matched against module names AND file "
+                            "paths (so 'analyzer' finds analyzer.py even though its "
+                            "module is the parent dir); returns that neighborhood. "
+                            "Empty = whole project."
+                        ),
                     }
                 },
             },
