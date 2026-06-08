@@ -960,3 +960,43 @@ def test_persistent_widget_fixation_keeps_offering_prose_offramp(tmp_path: Path)
     offers = json.dumps(client.calls).count("answer in prose")
     assert offers >= 1, "the prose off-ramp must be offered to a fixating model"
     assert any(e["type"] == "frame" for e in events), "a terminal frame must still be produced"
+
+
+def test_visual_question_pushes_widget_rebuild_not_prose(tmp_path: Path):
+    """For a 'show me the graph' question, a rejected widget must NOT be told to
+    answer in prose (that earns off_target) — it must be pushed to rebuild the
+    graph_view, since file-granularity evidence makes the widget buildable now."""
+    turns = [
+        _graph_turn(),
+        _bad_widget_turn(),
+        [  # a later turn so the loop terminates cleanly
+            _tool_stop("l1", "emit_block", {"kind": "lead", "text": "ans"}),
+            _tool_stop("f", "finish", {}),
+            _msg_stop("tool_use", [
+                _content("l1", "emit_block", {"kind": "lead", "text": "ans"}),
+                _content("f", "finish", {}),
+            ]),
+        ],
+    ]
+    client = StubStream(turns)
+    with patch(
+        "copyclip.intelligence.cuaderno.compositor.dispatch_tool",
+        side_effect=lambda name, args, **kw: _GRAPH_RESULT,
+    ):
+        list(iter_compose_events(
+            client=client, question="show me the module graph around the analyzer",
+            project_root=str(tmp_path), project_id=1, conn=None, max_tool_rounds=8,
+        ))
+    # Isolate the injected DIRECTIVE (a user text block) from the ack recovery,
+    # which is JSON inside a tool_result.
+    directives = []
+    for m in client.calls[-1]["messages"]:
+        if m["role"] == "user" and isinstance(m["content"], list):
+            for blk in m["content"]:
+                if isinstance(blk, dict) and blk.get("type") == "text":
+                    directives.append(blk["text"])
+    joined = " ".join(directives)
+    assert "rebuild the graph_view" in joined, "a visual question must be pushed to rebuild the widget"
+    # The non-visual directive SELLS prose ("an honest prose answer is better than
+    # no answer"); the visual directive must not — that phrase is the distinguisher.
+    assert "better than no answer" not in joined, "a visual question must NOT sell the prose off-ramp"

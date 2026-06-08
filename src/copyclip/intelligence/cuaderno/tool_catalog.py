@@ -118,11 +118,13 @@ def build_tool_definitions() -> list[dict[str, Any]]:
         {
             "name": "get_module_graph",
             "description": (
-                "Module-level dependency topology (calls, inheritance) with the file "
-                "backing each module. Pass `scope` to focus on one area: it returns "
-                "the matching modules PLUS their direct neighbors and the edges "
-                "between them — this is how you answer 'the graph around X'. Use it "
-                "to build a graph_view widget; emit only the nodes/edges it returned."
+                "Dependency topology (calls, inheritance); every node maps to a real "
+                "file. Granularity follows your `scope`: pass a `scope` to FOCUS on a "
+                "file or symbol — you get that FILE as a node (cited as itself) plus "
+                "its direct-import neighbors, which is how you answer 'the graph "
+                "around X'. Leave `scope` empty for the whole-project overview at "
+                "directory granularity. Build a graph_view from it; emit only the "
+                "exact node/edge ids it returned."
             ),
             "input_schema": {
                 "type": "object",
@@ -130,10 +132,10 @@ def build_tool_definitions() -> list[dict[str, Any]]:
                     "scope": {
                         "type": "string",
                         "description": (
-                            "focus substring, matched against module names AND file "
-                            "paths (so 'analyzer' finds analyzer.py even though its "
-                            "module is the parent dir); returns that neighborhood. "
-                            "Empty = whole project."
+                            "focus substring naming a file or symbol, matched against "
+                            "file paths AND symbol names (so 'analyzer' finds "
+                            "analyzer.py). Returns that file's neighborhood at file "
+                            "granularity. Empty = whole project at directory granularity."
                         ),
                     }
                 },
