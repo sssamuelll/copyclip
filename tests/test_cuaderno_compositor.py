@@ -1000,3 +1000,41 @@ def test_visual_question_pushes_widget_rebuild_not_prose(tmp_path: Path):
     # The non-visual directive SELLS prose ("an honest prose answer is better than
     # no answer"); the visual directive must not — that phrase is the distinguisher.
     assert "better than no answer" not in joined, "a visual question must NOT sell the prose off-ramp"
+
+
+def test_run_question_pushes_playground_emit_not_prose(tmp_path: Path):
+    """For a 'dame un ejemplo ejecutable' question, a rejected widget must NOT be
+    told to answer in prose (that earns off_target) — it must be pushed to emit a
+    playground widget. (Epic #139, Phase 1 — the run-request twin of the graph
+    recovery: a SHOW/RUN request is answered by the artifact, not a description.)"""
+    turns = [
+        _graph_turn(),
+        _bad_widget_turn(),
+        [  # a later turn so the loop terminates cleanly
+            _tool_stop("l1", "emit_block", {"kind": "lead", "text": "ans"}),
+            _tool_stop("f", "finish", {}),
+            _msg_stop("tool_use", [
+                _content("l1", "emit_block", {"kind": "lead", "text": "ans"}),
+                _content("f", "finish", {}),
+            ]),
+        ],
+    ]
+    client = StubStream(turns)
+    with patch(
+        "copyclip.intelligence.cuaderno.compositor.dispatch_tool",
+        side_effect=lambda name, args, **kw: _GRAPH_RESULT,
+    ):
+        list(iter_compose_events(
+            client=client, question="dame un ejemplo ejecutable de _module_from_relpath",
+            project_root=str(tmp_path), project_id=1, conn=None, max_tool_rounds=8,
+        ))
+    directives = []
+    for m in client.calls[-1]["messages"]:
+        if m["role"] == "user" and isinstance(m["content"], list):
+            for blk in m["content"]:
+                if isinstance(blk, dict) and blk.get("type") == "text":
+                    directives.append(blk["text"])
+    joined = " ".join(directives)
+    assert "playground" in joined, "a run request must be pushed to emit a playground widget"
+    assert "better than no answer" not in joined, "a run request must NOT sell the prose off-ramp"
+    assert "rebuild the graph_view" not in joined, "a run request gets the RUN directive, not the graph one"
