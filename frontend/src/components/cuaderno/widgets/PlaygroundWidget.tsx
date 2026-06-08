@@ -25,20 +25,31 @@ export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
     })
   }
 
-  // live: iframe view
+  // live: iframe view — the editorial frame survives the click (header band +
+  // breadcrumb + citation stay), so the running thing reads as one composed
+  // widget, not a foreign window that replaced the page.
   if (isMine && slot.kind === 'live') {
     return (
       <div className="widget">
         <div className="widget-head">
-          <span className="widget-head-name">{widget.function_ref.name}</span>
-          <button
-            className="playground-close"
-            onClick={close}
-            title="close"
-          >
+          <span>
+            <span className="kind">playground</span> ·{' '}
+            <span className="widget-head-name">{widget.function_ref.name}</span>
+          </span>
+          <button className="playground-close" onClick={close} title="close">
             ×
           </button>
         </div>
+        {widget.breadcrumb || widget.citation ? (
+          <div className="playground-live-context">
+            {widget.breadcrumb ? (
+              <span className="playground-breadcrumb">{widget.breadcrumb}</span>
+            ) : null}
+            {widget.citation ? (
+              <CitationChip citation={widget.citation} onClick={onOpenCitation} />
+            ) : null}
+          </div>
+        ) : null}
         <div className="playground-live">
           <iframe
             src={slot.iframeUrl}
@@ -68,7 +79,10 @@ export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
   return (
     <div className="widget">
       <div className="widget-head">
-        <span className="widget-head-name">{widget.function_ref.name}</span>
+        <span>
+          <span className="kind">playground</span> ·{' '}
+          <span className="widget-head-name">{widget.function_ref.name}</span>
+        </span>
       </div>
       <div className="widget-body">
         {widget.citation ? (

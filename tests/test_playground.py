@@ -172,11 +172,34 @@ def test_generate_notebook_writes_valid_python(tmp_path):
     content = Path(nb).read_text(encoding="utf-8")
     ast.parse(content)
     assert "from copyclip.foo import bar" in content
-    assert "result = bar(sample)" in content
-    assert "sample = 42" in content
+    # The input is a live marimo control; the function runs on its current value,
+    # in a separate cell (marimo reactivity = input cell defines, result cell reads).
+    assert "import marimo as mo" in content
+    assert "mo.ui" in content
+    assert "value = sample.value" in content
+    assert "result = bar(value)" in content
+    assert "sample = None" not in content
+
+
+def test_generate_notebook_string_input_is_free_text(tmp_path):
+    """A single string input becomes a free-text box the dev can retype — the
+    grabbable input that makes 'change it and watch the branch move' real."""
+    req = PlaygroundLaunchRequest(
+        source="atlas",
+        function_ref=FunctionRef(file="src/copyclip/foo.py", name="bar"),
+        suggested_inputs=["src/copyclip/foo.py"],
+        breadcrumb="test",
+    )
+    nb = generate_marimo_notebook(req, str(tmp_path), _make_resolved(), temp_dir=str(tmp_path))
+    content = Path(nb).read_text(encoding="utf-8")
+    ast.parse(content)
+    assert "mo.ui.text(value='src/copyclip/foo.py'" in content
+    assert "mo.ui.dropdown" not in content
 
 
 def test_generate_notebook_handles_empty_inputs(tmp_path):
+    """No suggested inputs falls back to an empty free-text box — never a sterile
+    notebook that computes None."""
     req = PlaygroundLaunchRequest(
         source="atlas",
         function_ref=FunctionRef(file="src/copyclip/foo.py", name="bar"),
@@ -185,8 +208,10 @@ def test_generate_notebook_handles_empty_inputs(tmp_path):
     nb = generate_marimo_notebook(req, str(tmp_path), _make_resolved(), temp_dir=str(tmp_path))
     content = Path(nb).read_text(encoding="utf-8")
     ast.parse(content)
-    assert "# TODO: supply input" in content
-    assert "result = bar(sample)" not in content
+    assert 'mo.ui.text(value=""' in content
+    assert "# TODO: supply input" not in content
+    assert "sample = None" not in content
+    assert "result = None" not in content
 
 
 def test_generate_notebook_method_qualname(tmp_path):
@@ -207,10 +232,12 @@ def test_generate_notebook_method_qualname(tmp_path):
     content = Path(nb).read_text(encoding="utf-8")
     ast.parse(content)
     assert "from copyclip.foo import Foo" in content
-    assert "Foo(...).method_name(sample)" in content
+    assert "Foo(...).method_name(value)" in content
 
 
-def test_generate_notebook_uses_first_input_only(tmp_path):
+def test_generate_notebook_offers_all_inputs(tmp_path):
+    """Multiple suggested inputs become a dropdown over ALL of them — the
+    'try this / now try that' contrast, not just the first."""
     req = PlaygroundLaunchRequest(
         source="atlas",
         function_ref=FunctionRef(file="src/copyclip/foo.py", name="bar"),
@@ -220,9 +247,8 @@ def test_generate_notebook_uses_first_input_only(tmp_path):
     nb = generate_marimo_notebook(req, str(tmp_path), _make_resolved(), temp_dir=str(tmp_path))
     content = Path(nb).read_text(encoding="utf-8")
     ast.parse(content)
-    assert "sample = 7" in content
-    assert "sample = 99" not in content
-    assert "sample = 1000" not in content
+    assert "mo.ui.dropdown" in content
+    assert "7" in content and "99" in content and "1000" in content
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +290,32 @@ def test_resolve_function_ref_finds_function():
     assert resolved.kind == "function"
     assert resolved.module == "foo"
     assert resolved.parent_class is None
+
+
+def test_resolve_function_ref_derives_importable_module_from_file():
+    """symbols.module is stored slash-style at DIRECTORY granularity (e.g.
+    'copyclip/intelligence'); the resolver must derive the IMPORTABLE dotted
+    module from the FILE path (copyclip.intelligence.analyzer), or the playground
+    can never import the symbol it was asked to run."""
+    conn = sqlite3.connect(":memory:")
+    init_schema(conn)
+    pid = _seed_project(conn)
+    _seed_symbol(
+        conn,
+        pid,
+        name="_module_from_relpath",
+        kind="function",
+        file_path="src/copyclip/intelligence/analyzer.py",
+        module="copyclip/intelligence",  # slash-style, directory granularity
+    )
+    resolved = resolve_function_ref(
+        conn,
+        pid,
+        FunctionRef(
+            file="src/copyclip/intelligence/analyzer.py", name="_module_from_relpath"
+        ),
+    )
+    assert resolved.module == "copyclip.intelligence.analyzer"
 
 
 def test_resolve_function_ref_method_with_qualname():
@@ -664,13 +716,11 @@ def test_generate_notebook_sanitizes_newline_in_breadcrumb(tmp_path):
     nb = generate_marimo_notebook(req, str(tmp_path), _make_resolved(), temp_dir=str(tmp_path))
     content = Path(nb).read_text(encoding="utf-8")
     ast.parse(content)
-    # The whole payload must collapse to a single `# Breadcrumb:` comment line,
-    # and `os.system` must NOT appear on any non-comment line.
-    breadcrumb_lines = [
-        ln for ln in content.splitlines() if ln.lstrip().startswith("# Breadcrumb:")
-    ]
-    assert len(breadcrumb_lines) == 1
-    assert "os.system" in breadcrumb_lines[0]
+    # The whole payload must collapse to a SINGLE comment line (the newline is
+    # sanitized to a space), and `os.system` must NOT appear on any runnable line.
+    payload_lines = [ln for ln in content.splitlines() if "os.system" in ln]
+    assert len(payload_lines) == 1
+    assert payload_lines[0].lstrip().startswith("#")
     for line in content.splitlines():
         stripped = line.lstrip()
         if stripped.startswith("#"):
