@@ -71,37 +71,68 @@ def test_edges_join_modules_and_nodes_carry_files(seeded):
     assert g["truncated"] is False
 
 
-def test_scope_returns_neighborhood_not_isolated_node(seeded):
-    """A scoped graph is a NEIGHBORHOOD: the focus module PLUS its direct
-    neighbors and the edges incident to it — never an isolated, edge-less node.
-    (Regression: scope='X' used to return only X with zero edges, leaving the
-    model with no graph to render and no way to answer 'the graph around X'.)"""
+def test_empty_scope_keeps_directory_granularity(seeded):
+    """The whole-project overview (empty scope) stays at DIRECTORY granularity —
+    nodes are module names, the right altitude for 'show me the project'."""
+    c, pid = seeded
+    g = get_module_graph(c, pid)
+    names = {m["name"] for m in g["modules"]}
+    assert {"pkg/a", "pkg/b", "pkg/c"} <= names      # modules, not file paths
+    assert not any(n.endswith(".py") for n in names)
+
+
+def test_scope_uses_file_granularity_neighborhood(seeded):
+    """A SCOPED query drops to FILE granularity: the node the user names is the
+    file itself, surrounded by its real-import neighbors. This is the identity
+    fix — 'the analyzer' becomes a node, not a directory it dissolves into."""
     c, pid = seeded
     g = get_module_graph(c, pid, scope="pkg/b")
     names = {m["name"] for m in g["modules"]}
-    assert "pkg/b" in names                      # the focus
-    assert "pkg/a" in names                      # its neighbor (a -> b)
-    assert "pkg/c" not in names                  # not adjacent to b — excluded
-    assert ("pkg/a", "pkg/b") in {(e["from"], e["to"]) for e in g["edges"]}
+    assert "pkg/b.py" in names                       # the focus, as a FILE node
+    assert "pkg/a.py" in names                       # its neighbor (a.py -> b.py)
+    assert "pkg/c.py" not in names                   # not adjacent — excluded
+    assert ("pkg/a.py", "pkg/b.py") in {(e["from"], e["to"]) for e in g["edges"]}
 
 
-def test_scope_resolves_focus_via_file_path(seeded):
-    """The focus substring matches a module's BACKING FILE PATH, not only its
-    collapsed module name — so 'analyzer' finds the module whose file is
-    analyzer.py even though the module name is the parent directory."""
+def test_file_node_cites_itself(seeded):
+    """A file node's citation is the file itself — never a sibling. (Regression:
+    the directory node copyclip/intelligence was cited as agents.py, so 'the
+    analyzer' node pointed at a different file.)"""
+    c, pid = seeded
+    g = get_module_graph(c, pid, scope="pkg/b")
+    assert g["modules"]
+    assert all(m["name"] == m["file_path"] for m in g["modules"])
+
+
+def test_scope_resolves_file_by_path(seeded):
+    """The focus substring matches a file PATH, so 'analyzer' finds analyzer.py
+    directly as its own node."""
     c, pid = seeded
     core = _insert_symbol(c, pid, "run", "svc/core", "svc/special_analyzer.py")
     dep = _insert_symbol(c, pid, "store", "svc/db", "svc/db.py")
-    _insert_edge(c, pid, core, dep)  # svc/core -> svc/db
+    _insert_edge(c, pid, core, dep)
     g = get_module_graph(c, pid, scope="analyzer")
     names = {m["name"] for m in g["modules"]}
-    assert "svc/core" in names                   # resolved by file path
-    assert "svc/db" in names                      # its neighbor
+    assert "svc/special_analyzer.py" in names        # the file itself is the node
+    assert "svc/db.py" in names                       # its neighbor
 
 
-def test_focus_node_survives_truncation():
-    """Under a tight module cap the FOCUS node is never pruned out in favor of a
-    higher-degree neighbor — the user asked about it specifically."""
+def test_scope_resolves_file_by_symbol_name(seeded):
+    """The focus substring also matches a SYMBOL name, resolving 'around <symbol>'
+    to the file that defines it — even when the name is not in the path."""
+    c, pid = seeded
+    ui = _insert_symbol(c, pid, "special_widget", "svc/ui", "svc/ui.py")
+    rend = _insert_symbol(c, pid, "draw", "svc/render", "svc/render.py")
+    _insert_edge(c, pid, ui, rend)
+    g = get_module_graph(c, pid, scope="special_widget")
+    names = {m["name"] for m in g["modules"]}
+    assert "svc/ui.py" in names                       # resolved by symbol name
+    assert "svc/render.py" in names                   # its neighbor
+
+
+def test_focus_file_survives_truncation():
+    """Under a tight cap the focus FILE node is never pruned for a higher-degree
+    neighbor."""
     c = sqlite3.connect(":memory:")
     init_schema(c)
     pid = _make_project(c)
@@ -113,7 +144,7 @@ def test_focus_node_survives_truncation():
     _insert_edge(c, pid, a, cc)
     _insert_edge(c, pid, a, d)
     g = get_module_graph(c, pid, scope="pkg/b", max_modules=1)
-    assert "pkg/b" in {m["name"] for m in g["modules"]}
+    assert "pkg/b.py" in {m["name"] for m in g["modules"]}
     assert g["truncated"] is True
 
 
@@ -184,7 +215,7 @@ def test_dispatch_get_module_graph_not_unknown_tool(seeded):
 
 
 def test_dispatch_get_module_graph_scope_arg(seeded):
-    """Dispatcher passes scope through; scope yields the focus neighborhood."""
+    """Dispatcher passes scope through; a scoped query yields the file neighborhood."""
     c, pid = seeded
     from copyclip.intelligence.cuaderno.tool_catalog import dispatch_tool
     out = dispatch_tool(
@@ -195,7 +226,7 @@ def test_dispatch_get_module_graph_scope_arg(seeded):
         conn=c,
     )
     names = {m["name"] for m in out["modules"]}
-    assert "pkg/b" in names and "pkg/a" in names
+    assert "pkg/b.py" in names and "pkg/a.py" in names
 
 
 # ---------------------------------------------------------------------------

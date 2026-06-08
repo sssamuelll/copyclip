@@ -261,26 +261,42 @@ def git_diff(project_root: str, commit_sha: str, path: Optional[str] = None) -> 
     return {"diff": out}
 
 
-def get_module_graph(
-    conn: sqlite3.Connection,
-    project_id: int,
-    scope: str = "",
-    max_modules: int = 50,
-    max_edges: int = 80,
+def _rank_and_cap(
+    nodes: set[str],
+    edges: list[tuple[str, str, int]],
+    node_file: dict[str, str],
+    focus: set[str],
+    max_nodes: int,
+    max_edges: int,
 ) -> dict[str, Any]:
-    """Module-level topology aggregated from symbol_edges — both endpoints live
-    in the symbols.module namespace, so every node maps to a real file (citation)
-    and stdlib/external import targets never appear.
-
-    `scope` is a FOCUS, not an induced-subgraph filter: it selects the modules
-    matching the substring — by module name OR by a backing file path, so
-    'analyzer' resolves the module whose file is analyzer.py even when that module
-    is named after the parent directory — and returns them PLUS their direct
-    neighbors and the edges incident to the focus (an ego graph, radius 1). This
-    is what answers 'the graph around X'; an empty scope returns the whole
-    project. Deterministic caps: focus modules rank first (never pruned out for a
+    """Shared ego-graph finishing: focus nodes rank first (never pruned out for a
     higher-degree neighbor), then degree DESC then name ASC; edges pruned to
-    surviving nodes, then capped by weight DESC."""
+    surviving nodes, then capped by weight DESC. Each node carries its citation
+    file from node_file."""
+    degree: dict[str, int] = {}
+    for f, t, w in edges:
+        degree[f] = degree.get(f, 0) + 1
+        degree[t] = degree.get(t, 0) + 1
+    ranked = sorted(nodes, key=lambda m: (m not in focus, -degree.get(m, 0), m))
+    truncated = len(ranked) > max_nodes
+    keep = set(ranked[:max_nodes])
+    pruned = [(f, t, w) for (f, t, w) in edges if f in keep and t in keep]
+    pruned.sort(key=lambda e: (-e[2], e[0], e[1]))
+    if len(pruned) > max_edges:
+        truncated = True
+        pruned = pruned[:max_edges]
+    return {
+        "modules": [{"name": m, "file_path": node_file[m]} for m in sorted(keep)],
+        "edges": [{"from": f, "to": t, "weight": w} for (f, t, w) in pruned],
+        "truncated": truncated,
+    }
+
+
+def _directory_graph(
+    conn: sqlite3.Connection, project_id: int, max_nodes: int, max_edges: int
+) -> dict[str, Any]:
+    """Whole-project overview at DIRECTORY granularity: a node is a module
+    (a directory), the right altitude for 'show me the project'."""
     rows = conn.execute(
         """
         SELECT s1.module, s2.module, COUNT(*) AS weight
@@ -300,50 +316,70 @@ def get_module_graph(
             (project_id,),
         ).fetchall()
     )
-    all_mods = set(files)
+    nodes = set(files)
+    edges = [(f, t, w) for (f, t, w) in rows if f in nodes and t in nodes]
+    return _rank_and_cap(nodes, edges, files, set(), max_nodes, max_edges)
 
-    focus: set[str] = set()
-    if scope:
-        focus = {m for m in all_mods if scope in m}
-        # Resolve via backing file paths too: a file like analyzer.py lives in a
-        # module named after its parent directory, so a name-only match misses it.
-        for (m,) in conn.execute(
-            "SELECT DISTINCT module FROM symbols "
-            "WHERE project_id=? AND module IS NOT NULL AND file_path LIKE ?",
-            (project_id, f"%{scope}%"),
-        ):
-            if m in all_mods:
-                focus.add(m)
-        if not focus:
-            return {"modules": [], "edges": [], "truncated": False}
-        # Ego graph: edges incident to a focus module, plus the nodes they reach.
-        edges = [(f, t, w) for (f, t, w) in rows if f in focus or t in focus]
-        nodes = set(focus)
-        for f, t, w in edges:
-            nodes.add(f)
-            nodes.add(t)
-        nodes &= all_mods
-    else:
-        nodes = set(all_mods)
-        edges = [(f, t, w) for (f, t, w) in rows if f in nodes and t in nodes]
 
-    degree: dict[str, int] = {}
-    for f, t, w in edges:
-        degree[f] = degree.get(f, 0) + 1
-        degree[t] = degree.get(t, 0) + 1
-    ranked = sorted(nodes, key=lambda m: (m not in focus, -degree.get(m, 0), m))
-    truncated = len(ranked) > max_modules
-    keep = set(ranked[:max_modules])
-    pruned = [(f, t, w) for (f, t, w) in edges if f in keep and t in keep]
-    pruned.sort(key=lambda e: (-e[2], e[0], e[1]))
-    if len(pruned) > max_edges:
-        truncated = True
-        pruned = pruned[:max_edges]
-    return {
-        "modules": [{"name": m, "file_path": files[m]} for m in sorted(keep)],
-        "edges": [{"from": f, "to": t, "weight": w} for (f, t, w) in pruned],
-        "truncated": truncated,
+def _file_graph(
+    conn: sqlite3.Connection, project_id: int, scope: str, max_nodes: int, max_edges: int
+) -> dict[str, Any]:
+    """Focused ego graph at FILE granularity: a node is a file, cited as itself,
+    so the thing the user names ('the analyzer' = analyzer.py) is a node — not a
+    directory it dissolves into. The focus resolves by file path OR symbol name,
+    so 'around X' works whether X is a file or a function the user remembers."""
+    rows = conn.execute(
+        """
+        SELECT s1.file_path, s2.file_path, COUNT(*) AS weight
+        FROM symbol_edges e
+        JOIN symbols s1 ON e.from_symbol_id = s1.id
+        JOIN symbols s2 ON e.to_symbol_id = s2.id
+        WHERE e.project_id=? AND s1.file_path IS NOT NULL AND s2.file_path IS NOT NULL
+              AND s1.file_path != s2.file_path
+        GROUP BY s1.file_path, s2.file_path
+        """,
+        (project_id,),
+    ).fetchall()
+    focus = {
+        fp
+        for (fp,) in conn.execute(
+            "SELECT DISTINCT file_path FROM symbols "
+            "WHERE project_id=? AND file_path IS NOT NULL "
+            "AND (file_path LIKE ? OR name LIKE ?)",
+            (project_id, f"%{scope}%", f"%{scope}%"),
+        )
     }
+    if not focus:
+        return {"modules": [], "edges": [], "truncated": False}
+    edges = [(f, t, w) for (f, t, w) in rows if f in focus or t in focus]
+    nodes = set(focus)
+    for f, t, w in edges:
+        nodes.add(f)
+        nodes.add(t)
+    node_file = {n: n for n in nodes}  # a file node cites itself, never a sibling
+    return _rank_and_cap(nodes, edges, node_file, focus, max_nodes, max_edges)
+
+
+def get_module_graph(
+    conn: sqlite3.Connection,
+    project_id: int,
+    scope: str = "",
+    max_modules: int = 50,
+    max_edges: int = 80,
+) -> dict[str, Any]:
+    """Dependency topology aggregated from symbol_edges; nodes map to real files
+    (citations) and stdlib/external targets never appear.
+
+    Granularity follows intent: an empty `scope` returns the WHOLE PROJECT at
+    DIRECTORY granularity (a node is a module/folder — the right altitude for an
+    overview). A non-empty `scope` is a FOCUS that drops to FILE granularity — it
+    returns the file the user named (resolved by file path OR symbol name) as a
+    node cited as itself, PLUS its direct-import neighbors (an ego graph, radius
+    1). This is what makes 'the graph around analyzer.py' nameable: the file is a
+    node, not a directory it dissolves into."""
+    if scope:
+        return _file_graph(conn, project_id, scope, max_modules, max_edges)
+    return _directory_graph(conn, project_id, max_modules, max_edges)
 
 
 def find_tests(project_root: str, symbol_name: str) -> dict[str, Any]:

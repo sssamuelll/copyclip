@@ -74,6 +74,17 @@ WIDGET_RECOVERY_DIRECTIVE = (
     "answer. Then call finish."
 )
 
+# For a question that explicitly asks to SHOW a graph, prose is off-target, not a
+# degraded answer. With file-granularity evidence the widget IS buildable, so
+# recovery means rebuild — never bail to prose unless the graph is truly empty.
+WIDGET_RECOVERY_DIRECTIVE_VISUAL = (
+    "The graph you emitted could not be grounded, so it was dropped. You asked to "
+    "SHOW a graph, so do not answer in prose — rebuild the graph_view using the "
+    "EXACT node and edge names a graph tool returned this turn (they are in the "
+    "evidence now). Only if a graph tool genuinely returned no nodes should you "
+    "say so briefly. Then call finish."
+)
+
 SYSTEM_PROMPT = """\
 You are the cuaderno — a tutor that helps a single developer understand
 their own AI-generated codebase. The user is an archaeologist of their own
@@ -162,8 +173,11 @@ not part of the format.
    "edges": [{"from": "<id>", "to": "<id>"}], "focus": "<id>"?, "truncated": <bool>}
    nodes/edges MUST come from this turn's get_module_graph or get_callers/get_callees results
    (no other tool's output qualifies); each node "id" and each edge "from"/"to" MUST be the
-   EXACT module or symbol name the tool returned — never a slug, index, or shortened label;
-   every node carries a citation ({kind:'path', path}); set truncated when the tool said so.
+   EXACT id the tool returned (a file path or a module name) — never a slug, index, or
+   shortened label; put any friendly short name in "label", not "id". A scoped
+   get_module_graph returns file ids; an empty scope returns module (directory) ids — do not
+   mix the two in one widget. Every node carries a citation ({kind:'path', path}); set
+   truncated when the tool said so.
 - {"kind": "playground", "function_ref": {"file": "...", "name": "...", "line": <int>?, "qualname": "..."?},
    "breadcrumb": "one-line description", "suggested_inputs": [...]?}
    a runnable example descriptor; function_ref must name a real symbol you located this turn;

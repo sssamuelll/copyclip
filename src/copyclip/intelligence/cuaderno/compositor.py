@@ -8,6 +8,7 @@ from typing import Any, Iterator, Optional
 from .prompts import (
     SYSTEM_PROMPT, GROUNDING_RETRY_DIRECTIVE, LANGUAGE_RETRY_DIRECTIVE,
     RESPONSIVENESS_RETRY_FALLBACK, INVALID_BLOCK_RECOVERY, WIDGET_RECOVERY_DIRECTIVE,
+    WIDGET_RECOVERY_DIRECTIVE_VISUAL,
 )
 from .read_ledger import ReadLedger
 from .quality import assess, cheap_verdict_dict, artifacts_cited
@@ -45,6 +46,19 @@ def _inject_directive(messages: list[dict[str, Any]], text: str) -> None:
             messages.append({"role": "user", "content": [block]})
     else:
         messages.append({"role": "user", "content": [block]})
+
+
+# A question that explicitly asks to SEE a graph: for these, the prose off-ramp
+# is the wrong exit (prose earns off_target), so recovery pushes a widget rebuild.
+_VISUAL_REQUEST_TERMS = (
+    "show", "draw", "graph", "diagram", "visuali", "chart", "plot",
+    "muestra", "muéstra", "dibuj", "grafic", "grafo", "diagrama", "visualiz",
+)
+
+
+def _is_visual_request(question: str) -> bool:
+    q = question.lower()
+    return any(term in q for term in _VISUAL_REQUEST_TERMS)
 
 
 def _fallback_frame(question: str, reason: str) -> Frame:
@@ -357,7 +371,11 @@ def iter_compose_events(
         # directive already forces composition and which has no next turn to read.
         if (not is_closing and emit_status
                 and all(reason is not None for reason in emit_status.values())):
-            _inject_directive(messages, WIDGET_RECOVERY_DIRECTIVE)
+            _inject_directive(
+                messages,
+                WIDGET_RECOVERY_DIRECTIVE_VISUAL if _is_visual_request(question)
+                else WIDGET_RECOVERY_DIRECTIVE,
+            )
 
     # Budget exhausted → fallback frame (terminal; parity with the wrapper below).
     if emitted:
