@@ -38,6 +38,7 @@ from typing import Literal
 
 import psutil
 
+from .cuaderno.trace import NULL_TRACE
 from .playground import (
     MarimoNotInstalledError,
     MarimoSpawnError,
@@ -127,7 +128,9 @@ class MarimoRunner:
     # Public API (MarimoRunner Protocol + kill_all)
     # ------------------------------------------------------------------
 
-    def launch(self, notebook_path: str, mode: str = "edit") -> tuple[str, str]:
+    def launch(self, notebook_path: str, mode: str = "edit", trace=None) -> tuple[str, str]:
+        if trace is None:
+            trace = NULL_TRACE
         if mode not in ("edit", "run"):
             raise MarimoSpawnError(f"unknown marimo mode: {mode!r}")
         # Reserve a slot under the lock so two concurrent launches can't both
@@ -173,6 +176,7 @@ class MarimoRunner:
                 ) from exc
 
             collector = _StderrCollector(process.stderr)
+            trace.event("launch.spawn", cmd=cmd, port=port, pid=process.pid, mode=mode)
             try:
                 self._wait_for_healthy(process, port, collector)
             except BaseException:

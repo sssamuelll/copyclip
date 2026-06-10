@@ -119,7 +119,7 @@ def iter_ask_events(
         # A real crash (judge raised, persistence failed, ...): label it
         # honestly — this is exactly the case the trace exists to explain.
         outcome = "crash"
-        crash_error = str(exc)
+        crash_error = str(exc) or type(exc).__name__
         raise
     finally:
         # Client disconnect (GeneratorExit) or abnormal stop: persist partial once.
