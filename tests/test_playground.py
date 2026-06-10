@@ -832,6 +832,28 @@ def test_launch_endpoint_rejects_malformed_json():
     assert payload["error"] == "invalid_request"
 
 
+def test_launch_endpoint_rejects_non_dict_json_body():
+    """A POST whose body is valid JSON but not an object (e.g. [1,2,3]) must
+    return 400 invalid_request — not crash with AttributeError."""
+    _, port = _start_server_with_runner(Mock())
+
+    body = json.dumps([1, 2, 3]).encode("utf-8")
+    req = request.Request(
+        f"http://127.0.0.1:{port}/api/playground/launch",
+        method="POST",
+        data=body,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with request.urlopen(req, timeout=3) as r:
+            status, payload = r.status, json.loads(r.read().decode("utf-8"))
+    except HTTPError as exc:
+        body_text = exc.read().decode("utf-8")
+        status, payload = exc.code, json.loads(body_text) if body_text else {}
+    assert status == 400
+    assert payload["error"] == "invalid_request"
+
+
 def test_launch_endpoint_rejects_qualname_injection():
     _, port = _start_server_with_runner(Mock())
 

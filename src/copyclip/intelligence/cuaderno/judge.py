@@ -26,6 +26,7 @@ class JudgeVerdict:
     retry_directive: Optional[str]
     reason: str
     judged: bool = True            # False when this is a fail-open default, not a real judgment
+    raw: Optional[str] = None      # the judge's raw text (trace/debug only; never persisted)
 
 
 def _opt_bool(v: Any) -> Optional[bool]:
@@ -124,7 +125,9 @@ def judge_answer(*, client, question, blocks, ledger, model, max_tokens: int = 5
         v = parse_judge_verdict(text)
     except Exception as exc:  # noqa: BLE001 — fail-open is the whole point
         return _ok_verdict(f"judge unavailable: {exc}")
-    return v if v is not None else _ok_verdict("judge output unparseable")
+    out = v if v is not None else _ok_verdict("judge output unparseable")
+    out.raw = text
+    return out
 
 
 def judge_verdict_dict(v: JudgeVerdict) -> dict[str, Any]:

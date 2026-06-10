@@ -21,6 +21,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
 
+from .cuaderno.trace import NULL_TRACE
+
 
 PLAYGROUND_SOURCES = frozenset(
     {
@@ -181,7 +183,7 @@ class PlaygroundLaunchResponse:
 
 
 class MarimoRunner(Protocol):
-    def launch(self, notebook_path: str, mode: str = "edit") -> tuple[str, str]:
+    def launch(self, notebook_path: str, mode: str = "edit", trace: object = None) -> tuple[str, str]:
         """Return (playground_id, iframe_url) after a healthy spawn."""
         ...
 
@@ -470,6 +472,7 @@ def launch_playground(
     conn: sqlite3.Connection,
     pid: int,
     runner: MarimoRunner,
+    trace: object = None,
 ) -> PlaygroundLaunchResponse:
     """Resolve, generate, launch. May raise PlaygroundError subclasses.
 
@@ -477,15 +480,36 @@ def launch_playground(
     cleaned up best-effort so we don't leak per-request directories in the
     common error path. Crash-cleanup of orphans across CopyClip restarts is
     the runner's responsibility on startup (see spec, "Orphan cleanup").
+
+    `trace` is an optional InteractionTrace (spec 2026-06-10): each stage emits
+    a `launch.*` event; failures emit `launch.error` with the failing stage.
     """
-    resolved = resolve_function_ref(conn, pid, req.function_ref)
-    notebook_path = generate_marimo_notebook(req, project_root, resolved)
+    trace = trace if trace is not None else NULL_TRACE
+    try:
+        resolved = resolve_function_ref(conn, pid, req.function_ref)
+    except Exception as exc:
+        trace.event("launch.error", stage="resolve", error=str(exc) or type(exc).__name__)
+        raise
+    trace.event("launch.resolve", file=resolved.file, name=resolved.name,
+                qualname=resolved.qualname, kind=resolved.kind,
+                module=resolved.module, line_start=resolved.line_start,
+                parent_class=resolved.parent_class)
+    try:
+        notebook_path = generate_marimo_notebook(req, project_root, resolved)
+    except Exception as exc:
+        trace.event("launch.error", stage="notebook", error=str(exc) or type(exc).__name__)
+        raise
+    trace.event("launch.notebook", path=notebook_path,
+                input_element=_build_input_element(req.suggested_inputs),
+                deps_hint=req.deps_hint)
     mode = "run" if req.source == "cuaderno" else "edit"
     try:
-        playground_id, iframe_url = runner.launch(notebook_path, mode=mode)
-    except Exception:
+        playground_id, iframe_url = runner.launch(notebook_path, mode=mode, trace=trace)
+    except Exception as exc:
+        trace.event("launch.error", stage="spawn", error=str(exc) or type(exc).__name__)
         shutil.rmtree(os.path.dirname(notebook_path), ignore_errors=True)
         raise
+    trace.event("launch.ready", playground_id=playground_id, iframe_url=iframe_url)
     return PlaygroundLaunchResponse(
         playground_id=playground_id,
         iframe_url=iframe_url,
@@ -532,7 +556,7 @@ def _module_from_file(file_path: str) -> str:
 
 
 class StubMarimoRunner:
-    def launch(self, notebook_path: str, mode: str = "edit") -> tuple[str, str]:
+    def launch(self, notebook_path: str, mode: str = "edit", trace: object = None) -> tuple[str, str]:
         raise MarimoSpawnError(
             "marimo subprocess manager not yet implemented (issue #88); "
             f"notebook generated at {notebook_path}"
