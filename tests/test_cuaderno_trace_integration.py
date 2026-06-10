@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from copyclip.intelligence.cuaderno.compositor import iter_compose_events
+from copyclip.intelligence.cuaderno.compositor import iter_compose_events, CLOSING_DIRECTIVE
 from copyclip.intelligence.cuaderno.trace import InteractionTrace
 
 
@@ -302,7 +302,7 @@ def test_wire_request_captures_messages_as_sent_to_the_llm(tmp_path, monkeypatch
     ]
     _, lines = _run(tmp_path, [turn], max_tool_rounds=1)  # round 0 IS closing
     req = _by_event(lines, "wire.request")[0]
-    serialized = json.dumps(req["messages"])
-    assert "Compose your answer NOW" in serialized  # the closing directive, as sent
+    serialized = json.dumps(req["messages"], ensure_ascii=False)
+    assert CLOSING_DIRECTIVE in serialized  # the closing directive, as sent
     # tools were clamped to the answer set for the closing round
     assert set(req["tools"]) == {"emit_block", "finish"}

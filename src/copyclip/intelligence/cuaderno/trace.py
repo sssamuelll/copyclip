@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 MAX_TRACE_FILES = 200
-WIRE_ENV_VAR = "COPYCLIP_TRACE_WIRE"
+WIRE_ENV_VAR = "COPYCLIP_TRACE_WIRE"  # wire traces can reach several MB per ask (full messages per round); see spec §5.3
 
 
 def trace_logs_dir(project_root: str) -> Path:

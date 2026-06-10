@@ -397,6 +397,7 @@ def iter_compose_events(
         emit_status: dict[str, Optional[str]] = {}  # tool_use_id -> reason (None = ok)
 
         round_t0 = time.perf_counter()
+        # Captured at the adapter-contract boundary (Anthropic-shaped); provider-specific translation happens below this line and is not traced.
         if trace.wire:
             trace.event("wire.request", round_i=round_i, model=model,
                         system=SYSTEM_PROMPT, messages=messages,
