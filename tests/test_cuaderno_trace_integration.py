@@ -114,3 +114,101 @@ def test_stream_failure_traces_error_event(tmp_path):
     assert len(errs) == 1
     assert "stream failed" in errs[0]["message"] and errs[0]["partial"] is True
     assert errs[0]["sse"] is True
+
+
+def test_tool_run_traced_with_paths_and_content_bearing(tmp_path):
+    (tmp_path / "README.md").write_text("# Hello\n", encoding="utf-8")
+    turns = [
+        [
+            _tool_stop("r1", "read_file", {"path": "README.md"}),
+            _msg_stop("tool_use", [_content("r1", "read_file", {"path": "README.md"})]),
+        ],
+        [
+            _tool_stop("b1", "emit_block", {"kind": "lead", "text": "answer"}),
+            _tool_stop("f", "finish", {}),
+            _msg_stop("tool_use", [
+                _content("b1", "emit_block", {"kind": "lead", "text": "answer"}),
+                _content("f", "finish", {}),
+            ]),
+        ],
+    ]
+    _, lines = _run(tmp_path, turns, max_tool_rounds=8)
+    tools = _by_event(lines, "tool.run")
+    assert len(tools) == 1
+    t = tools[0]
+    assert t["name"] == "read_file" and t["error"] is None
+    assert t["content_bearing"] is True
+    assert "README.md" in t["result_paths"]
+    assert isinstance(t["ms"], int) and t["sse"] is True
+
+
+def test_grounding_retry_traced_with_reason_and_directive(tmp_path):
+    # Two finished answers with ZERO reads: the first triggers the one-shot
+    # grounding retry (reset), the second seals `ungrounded`.
+    answer_turn = lambda bid: [
+        _tool_stop(bid, "emit_block", {"kind": "lead", "text": "claim"}),
+        _tool_stop(f"f{bid}", "finish", {}),
+        _msg_stop("tool_use", [
+            _content(bid, "emit_block", {"kind": "lead", "text": "claim"}),
+            _content(f"f{bid}", "finish", {}),
+        ]),
+    ]
+    events, lines = _run(tmp_path, [answer_turn("b1"), answer_turn("b2")], max_tool_rounds=3)
+    assert any(e["type"] == "reset" for e in events)
+    retries = _by_event(lines, "retry")
+    assert len(retries) == 1
+    r = retries[0]
+    assert r["kind"] == "grounding"
+    assert r["reason"]                      # the QualityVerdict's reason, verbatim
+    assert r["directive"]                   # the injected corrective text
+    assert r["discarded_blocks"] == 1
+    assert r["sse"] is True                 # this IS the reset the frontend saw
+    cheaps = _by_event(lines, "verdict.cheap")
+    assert len(cheaps) == 2                 # one per terminal attempt
+    assert cheaps[0]["status"] == "ungrounded"
+
+
+def test_judge_verdict_traced_including_fail_open(tmp_path):
+    (tmp_path / "README.md").write_text("# Hello\n", encoding="utf-8")
+
+    def failing_judge(q, blocks, ledger):
+        from copyclip.intelligence.cuaderno.judge import _ok_verdict
+        return _ok_verdict("judge unavailable: boom")
+
+    turns = [
+        [
+            _tool_stop("r1", "read_file", {"path": "README.md"}),
+            _msg_stop("tool_use", [_content("r1", "read_file", {"path": "README.md"})]),
+        ],
+        [
+            _tool_stop("b1", "emit_block", {"kind": "lead", "text": "ok"}),
+            _tool_stop("f", "finish", {}),
+            _msg_stop("tool_use", [
+                _content("b1", "emit_block", {"kind": "lead", "text": "ok"}),
+                _content("f", "finish", {}),
+            ]),
+        ],
+    ]
+    _, lines = _run(tmp_path, turns, max_tool_rounds=8, judge=failing_judge)
+    judges = _by_event(lines, "verdict.judge")
+    assert len(judges) == 1
+    j = judges[0]
+    assert j["judged"] is False
+    assert j["decision"] == "ok"
+    assert "judge unavailable" in j["fail_open_error"]
+    assert j["verdict"]["source"] == "unjudged"
+
+
+def test_floor_decline_traced_for_run_request_fallback(tmp_path):
+    # A run-request that produces NO blocks seals `fallback`; the floor is
+    # attempted but declines (conn=None resolves nothing) — and says so.
+    turn = [
+        _tool_stop("f", "finish", {}),
+        _msg_stop("tool_use", [_content("f", "finish", {})]),
+    ]
+    _, lines = _run(tmp_path, [turn], question="run foo now", max_tool_rounds=1)
+    floors = _by_event(lines, "floor")
+    assert len(floors) == 1
+    f = floors[0]
+    assert f["attempted"] is True and f["reclassified"] is False
+    assert f["symbol"] is None and f["decline_reason"]

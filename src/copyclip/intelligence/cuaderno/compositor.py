@@ -183,7 +183,7 @@ def _floor_verdict_dict(prior_status: str) -> dict[str, Any]:
 
 def _floored_frame(frame_dict: dict[str, Any], question: str,
                    conn: Optional[sqlite3.Connection], project_id: Optional[int],
-                   ledger: Optional[ReadLedger]) -> dict[str, Any]:
+                   ledger: Optional[ReadLedger], trace: Any = NULL_TRACE) -> dict[str, Any]:
     """Apply the playground floor to a sealed terminal frame: a run-request that
     would seal `off_target` (prose, not a runnable artifact) or `fallback` (no
     answer at all) is upgraded to an `answer` carrying a system-constructed
@@ -201,12 +201,18 @@ def _floored_frame(frame_dict: dict[str, Any], question: str,
         # The model already delivered the runnable artifact: a run-request answered
         # WITH a playground is responsive by definition. An off_target label here is
         # the judge mislabeling form as relevance — reclassify, don't relabel.
+        trace.event("floor", attempted=True, reclassified=True, symbol=None,
+                    decline_reason=None)
         return _seal(question, blocks, FRAME_STATUS_ANSWER, _floor_verdict_dict(status))
     # fallback's only block is a system 'couldn't finish' message — drop it.
     base: list[Block] = [] if status == FRAME_STATUS_FALLBACK else blocks
     floor = _construct_playground_floor(question, conn, project_id, ledger, base)
     if floor is None:
+        trace.event("floor", attempted=True, reclassified=False, symbol=None,
+                    decline_reason="no symbol resolved against the symbols table")
         return frame_dict
+    trace.event("floor", attempted=True, reclassified=False,
+                symbol=floor.to_dict()["widget"]["function_ref"], decline_reason=None)
     base.append(floor)
     return _seal(question, base, FRAME_STATUS_ANSWER, _floor_verdict_dict(status))
 
@@ -221,16 +227,19 @@ def _fallback_frame(question: str, reason: str) -> Frame:
     )
 
 
-def _sealed_frame(question: str, emitted: list[Block], ledger: ReadLedger, judge=None) -> dict[str, Any]:
+def _sealed_frame(question: str, emitted: list[Block], ledger: ReadLedger, judge=None,
+                  trace: Any = NULL_TRACE) -> dict[str, Any]:
     """Seal a terminal that cannot retry (the budget-exhausted tail). A
     would-be-`answer` is still judged here (Option A — no `answer` escapes the
     judge); a judge `retry` cannot retry (the loop is over) so it seals
     `off_target`."""
     verdict = assess(question=question, blocks=emitted, ledger=ledger)
+    trace.event("verdict.cheap", **asdict(verdict))
     if verdict.status != FRAME_STATUS_ANSWER:
         return _seal(question, emitted, verdict.status, cheap_verdict_dict(verdict))
     if judge is not None:
         jv = judge(question, emitted, ledger)
+        _trace_judge(trace, jv)
         return _seal(question, emitted, _judge_status(jv), judge_verdict_dict(jv))
     return _seal(question, emitted, FRAME_STATUS_ANSWER, cheap_verdict_dict(verdict))
 
@@ -250,6 +259,18 @@ def _judge_status(jv) -> str:
         return (FRAME_STATUS_INSUFFICIENT_EVIDENCE
                 if jv.world == "consulted_empty" else FRAME_STATUS_UNGROUNDED)
     return FRAME_STATUS_OFF_TARGET   # retry with the responsiveness latch spent
+
+
+def _trace_judge(trace, jv) -> None:
+    payload: dict[str, Any] = {
+        "verdict": judge_verdict_dict(jv),
+        "decision": jv.decision,
+        "judged": jv.judged,
+        "fail_open_error": None if jv.judged else jv.reason,
+    }
+    if trace.wire:
+        payload["raw"] = getattr(jv, "raw", None)
+    trace.event("verdict.judge", **payload)
 
 
 _LANGUAGE_NAMES = {"es": "Spanish", "en": "English"}
@@ -402,7 +423,8 @@ def iter_compose_events(
                     turn_content = sev.get("content", []) or []
         except Exception as exc:  # noqa: BLE001 — surface LLM/stream failure as a terminal error
             trace.event("error", message=f"stream failed ({exc})",
-                        partial=len(emitted) > 0, sse=True)
+                        partial=len(emitted) > 0, round_i=round_i,
+                        ms=int((time.perf_counter() - round_t0) * 1000), sse=True)
             yield {
                 "type": "error",
                 "message": f"stream failed ({exc})",
@@ -419,6 +441,7 @@ def iter_compose_events(
         if finish_seen or stop_reason != "tool_use":
             if emitted:
                 verdict = assess(question=question, blocks=emitted, ledger=ledger)
+                trace.event("verdict.cheap", **asdict(verdict))
                 cheap_needs_retry = (verdict.status != FRAME_STATUS_ANSWER
                                      or verdict.language_mismatch)
                 # Only retry if the NEXT round would still be a normal round. The
@@ -434,13 +457,21 @@ def iter_compose_events(
                     # composed grounding/language directive, KEEP tools, spend one
                     # more normal round. Fires at most once.
                     grounding_retry_used = True
+                    discarded = len(emitted)
                     emitted.clear()
                     # Answer the terminal turn's tool_use blocks before re-calling
                     # the model — a dangling tool_call 400s on real APIs.
                     acks = _ack_terminal_tools(turn_content, emit_status)
                     if acks:
                         messages.append({"role": "user", "content": acks})
-                    _inject_directive(messages, _retry_directive(verdict))
+                    directive = _retry_directive(verdict)
+                    _inject_directive(messages, directive)
+                    trace.event(
+                        "retry",
+                        kind=("grounding" if verdict.status != FRAME_STATUS_ANSWER
+                              else "language"),
+                        reason=verdict.reason, directive=directive,
+                        discarded_blocks=discarded, sse=True)
                     yield {"type": "reset"}
                     continue
                 if verdict.status != FRAME_STATUS_ANSWER:
@@ -450,22 +481,27 @@ def iter_compose_events(
                     return
                 if judge is not None:
                     jv = judge(question, emitted, ledger)
+                    _trace_judge(trace, jv)
                     if (jv.decision == "retry" and not responsiveness_retry_used
                             and can_retry):
                         responsiveness_retry_used = True
+                        discarded = len(emitted)
                         emitted.clear()
                         acks = _ack_terminal_tools(turn_content, emit_status)
                         if acks:
                             messages.append({"role": "user", "content": acks})
-                        _inject_directive(
-                            messages, jv.retry_directive or RESPONSIVENESS_RETRY_FALLBACK)
+                        directive = jv.retry_directive or RESPONSIVENESS_RETRY_FALLBACK
+                        _inject_directive(messages, directive)
+                        trace.event("retry", kind="responsiveness", reason=jv.reason,
+                                    directive=directive, discarded_blocks=discarded,
+                                    sse=True)
                         yield {"type": "reset"}
                         continue
                     yield {"type": "frame",
                            "frame": _floored_frame(
                                _seal(question, emitted, _judge_status(jv),
                                      judge_verdict_dict(jv)),
-                               question, conn, project_id, ledger)}
+                               question, conn, project_id, ledger, trace=trace)}
                     return
                 yield {"type": "frame",
                        "frame": _seal(question, emitted, FRAME_STATUS_ANSWER,
@@ -476,7 +512,7 @@ def iter_compose_events(
                        "frame": _floored_frame(
                            frame_to_dict(
                                _fallback_frame(question, "the model produced no answer blocks")),
-                           question, conn, project_id, ledger)}
+                           question, conn, project_id, ledger, trace=trace)}
             return
 
         # Continue: ack every tool_use block. Dispatch read tools (with events);
@@ -510,7 +546,10 @@ def iter_compose_events(
                     name, args, project_root=project_root,
                     project_id=project_id, conn=conn,
                 )
+                paths_before = set(ledger.read_paths) | set(ledger.evidence_paths)
                 ledger.record(name, result)
+                new_paths = sorted(
+                    (set(ledger.read_paths) | set(ledger.evidence_paths)) - paths_before)
                 if name == "get_module_graph":
                     evidence.add_module_graph(result)
                 elif name == "get_callers":
@@ -519,12 +558,19 @@ def iter_compose_events(
                     evidence.add_callees(args.get("symbol", ""), result)
                 ms = int((time.perf_counter() - t0) * 1000)
                 tool_results.append(_ack(tuid, result))
+                trace.event("tool.run", id=tuid, name=name, args=args_str, ms=ms,
+                            error=None,
+                            content_bearing=is_content_bearing_read(name, result),
+                            result_paths=new_paths, sse=True)
                 yield {"type": "tool", "id": tuid, "name": name, "args": args_str,
                        "state": "done", "ms": ms}
             except Exception as exc:  # noqa: BLE001 — surface tool failures to the LLM and the UI
                 ms = int((time.perf_counter() - t0) * 1000)
                 tool_results.append(
                     _ack(tuid, {"error": "tool_failed", "detail": str(exc)}, is_error=True))
+                trace.event("tool.run", id=tuid, name=name, args=args_str, ms=ms,
+                            error=str(exc), content_bearing=False, result_paths=[],
+                            sse=True)
                 yield {"type": "tool", "id": tuid, "name": name, "args": args_str,
                        "state": "error", "ms": ms}
 
@@ -551,13 +597,14 @@ def iter_compose_events(
     # Budget exhausted → fallback frame (terminal; parity with the wrapper below).
     if emitted:
         yield {"type": "frame",
-               "frame": _floored_frame(_sealed_frame(question, emitted, ledger, judge=judge),
-                                       question, conn, project_id, ledger)}
+               "frame": _floored_frame(
+                   _sealed_frame(question, emitted, ledger, judge=judge, trace=trace),
+                   question, conn, project_id, ledger, trace=trace)}
     else:
         yield {"type": "frame",
                "frame": _floored_frame(
                    frame_to_dict(_fallback_frame(question, "tool-call budget exhausted")),
-                   question, conn, project_id, ledger)}
+                   question, conn, project_id, ledger, trace=trace)}
 
 
 def compose_frame(
