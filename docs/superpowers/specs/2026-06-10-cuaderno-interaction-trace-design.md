@@ -97,11 +97,11 @@ Every line carries three fixed fields plus the event payload:
 | `verdict.cheap` | full `QualityVerdict` dict (status, suspicion, language_mismatch, question_language, reason) | `assess()` result |
 | `retry` | kind: grounding \| language \| responsiveness, reason, directive (text injected), discarded_blocks (count), `sse: true` (the `reset`) | both retry latches |
 | `verdict.judge` | parsed `JudgeVerdict` dict + decision, judged (bool), fail_open_error (str or null) | judge call site |
-| `floor` | attempted (bool), symbol (resolved name/file/line or null), decline_reason (str or null), reclassified (bool) | `_floored_frame` |
+| `floor` | attempted (bool — always true when the event exists; a floor that was never applicable writes no event), symbol (resolved function_ref or null), decline_reason (str or null, names the real cause), reclassified (bool) | `_floored_frame` |
 | `seal` | status, verdict (dict), blocks (count), position (int or null), `sse: true` (the `frame`) | seal points / after persist |
 | `persist` | outcome: ok \| partial \| failed, error (str or null) — including the currently-swallowed bare-except at `ask_stream.py:88-91` | `ask_stream` |
-| `error` | message, partial (bool), `sse: true` | stream-failure terminal |
-| `ask.end` | total_ms, outcome (sealed status, or error/disconnect) | footer, `ask_stream` finally |
+| `error` | message, partial (bool), round_i, ms (elapsed in the failed round), `sse: true` | stream-failure terminal |
+| `ask.end` | outcome: the sealed status, or error \| disconnect \| crash \| incomplete (elapsed time is the line's own `t_ms`) | footer, `ask_stream` finally |
 
 ### 5.2 Launch events (always on)
 
@@ -109,11 +109,11 @@ Every line carries three fixed fields plus the event payload:
 |---|---|
 | `launch.start` | source, function_ref (dict), breadcrumb, suggested_inputs |
 | `launch.resolve` | resolved {file, name, qualname, kind, module, line_start, parent_class} or failure reason |
-| `launch.notebook` | notebook path, input elements built (name → ui element kind), deps_hint |
+| `launch.notebook` | notebook path, input_element (the literal marimo input expression embedded in the notebook), deps_hint |
 | `launch.spawn` | cmd, port, pid, mode (run \| edit) |
 | `launch.ready` | playground_id, iframe_url (elapsed time is the line's own `t_ms`) |
-| `launch.error` | stage (request \| resolve \| notebook \| spawn \| ready), error |
-| `launch.end` | total_ms, outcome |
+| `launch.error` | stage (request \| resolve \| notebook \| spawn), error. A spawn that came up but never turned healthy reads as `launch.spawn` followed by `launch.error stage="spawn"` whose error carries the healthcheck detail + stderr tail — there is no separate "ready" stage. |
+| `launch.end` | outcome: ready \| error \| crash (elapsed time is the line's own `t_ms`) |
 
 ### 5.3 Wire events (only with `COPYCLIP_TRACE_WIRE=1`)
 
@@ -132,7 +132,7 @@ Size expectation: semantic-only traces run tens of KB per ask; wire traces can r
 No pipeline restructuring; every hook is a one-line `trace.event(...)` at code that already exists.
 
 - **`ask_stream.py`** — owns the lifecycle. Creates the trace before yielding `meta`, passes it to `iter_compose_events`, traces `seal` (with `position`), `persist`, `error`, and closes in the same `finally` that persists partials on disconnect.
-- **`compositor.py`** — `iter_compose_events(..., trace=None)` (and `compose_frame` passes it through). Hooks at: emit_block accept/reject (~377-386), widget-fixation backstop (~524-532), tool dispatch (~487-513), `assess` (~405), both retry latches (~413-447), judge call (~435-453), floor (~448-464, `_floored_frame`), and each streaming call for `llm.round` / wire events.
+- **`compositor.py`** — `iter_compose_events(..., trace=None)`. (`compose_frame`, the non-streaming drain used by tests and the bench, intentionally takes no trace — bench tracing is a §10 deferral.) Hooks at: emit_block accept/reject (~377-386), widget-fixation backstop (~524-532), tool dispatch (~487-513), `assess` (~405), both retry latches (~413-447), judge call (~435-453), floor (~448-464, `_floored_frame`), and each streaming call for `llm.round` / wire events.
 - **`server.py` launch handler + `playground.py` + `marimo_runner.py`** — `launch_playground(..., trace=None)`; the runner reports spawn/ready/error through it.
 - **Bench** — untouched; calls without `trace`, gets `NullTrace`.
 

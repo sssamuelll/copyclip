@@ -586,7 +586,8 @@ def iter_compose_events(
                 tool_results.append(
                     _ack(tuid, {"error": "tool_failed", "detail": str(exc)}, is_error=True))
                 trace.event("tool.run", id=tuid, name=name, args=args_str, ms=ms,
-                            error=str(exc), content_bearing=False, result_paths=[],
+                            error=str(exc) or type(exc).__name__,
+                            content_bearing=False, result_paths=[],
                             sse=True)
                 yield {"type": "tool", "id": tuid, "name": name, "args": args_str,
                        "state": "error", "ms": ms}
