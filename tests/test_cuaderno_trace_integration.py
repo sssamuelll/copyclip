@@ -2,6 +2,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from copyclip.intelligence.cuaderno.compositor import iter_compose_events, CLOSING_DIRECTIVE
 from copyclip.intelligence.cuaderno.trace import InteractionTrace
 from copyclip.intelligence.db import init_cuaderno_schema
@@ -383,3 +385,58 @@ def test_ask_stream_traces_partial_persist_on_stream_error(tmp_path):
     persist = next(l for l in lines if l["event"] == "persist")
     assert persist["outcome"] == "partial"
     assert lines[-1]["event"] == "ask.end" and lines[-1]["outcome"] == "error"
+
+
+def test_ask_stream_disconnect_traces_footer(tmp_path):
+    conn = _conn()
+    sid = create_session(conn, project_root=str(tmp_path))
+    turns = [
+        [   # non-terminal round: generator stays suspended after the block yield
+            _tool_stop("b1", "emit_block", {"kind": "lead", "text": "x"}),
+            _msg_stop("tool_use", [_content("b1", "emit_block", {"kind": "lead", "text": "x"})]),
+        ],
+    ]
+    gen = iter_ask_events(
+        client=StubStream(turns), question="q", project_root=str(tmp_path),
+        project_id=1, conn=conn, session_id=sid,
+    )
+    assert next(gen)["type"] == "meta"
+    assert next(gen)["type"] == "block"
+    gen.close()  # client disconnect (GeneratorExit at the suspended yield)
+    lines = _ask_trace_lines(tmp_path)
+    assert lines[-1]["event"] == "ask.end" and lines[-1]["outcome"] == "disconnect"
+    persist = next(l for l in lines if l["event"] == "persist")
+    assert persist["outcome"] == "partial" and persist["error"] == "client disconnect"
+
+
+def test_ask_stream_crash_traces_honest_outcome(tmp_path):
+    conn = _conn()
+    sid = create_session(conn, project_root=str(tmp_path))
+    (tmp_path / "README.md").write_text("# X\n", encoding="utf-8")
+
+    def exploding_judge(q, blocks, ledger):
+        raise RuntimeError("judge exploded")
+
+    turns = [
+        [
+            _tool_stop("r1", "read_file", {"path": "README.md"}),
+            _msg_stop("tool_use", [_content("r1", "read_file", {"path": "README.md"})]),
+        ],
+        [
+            _tool_stop("b1", "emit_block", {"kind": "lead", "text": "hi"}),
+            _tool_stop("f", "finish", {}),
+            _msg_stop("tool_use", [
+                _content("b1", "emit_block", {"kind": "lead", "text": "hi"}),
+                _content("f", "finish", {}),
+            ]),
+        ],
+    ]
+    with pytest.raises(RuntimeError, match="judge exploded"):
+        list(iter_ask_events(
+            client=StubStream(turns), question="q", project_root=str(tmp_path),
+            project_id=1, conn=conn, session_id=sid, judge=exploding_judge,
+        ))
+    lines = _ask_trace_lines(tmp_path)
+    assert lines[-1]["event"] == "ask.end" and lines[-1]["outcome"] == "crash"
+    persist = next(l for l in lines if l["event"] == "persist")
+    assert persist["outcome"] == "partial" and "judge exploded" in persist["error"]

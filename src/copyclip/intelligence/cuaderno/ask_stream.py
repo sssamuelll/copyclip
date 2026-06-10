@@ -66,10 +66,11 @@ def iter_ask_events(
         tag=(session_id or "")[:8] or None,
     )
     outcome = "incomplete"
-    yield {"type": "meta", "session_id": session_id, "question_language": lang}
+    crash_error: Optional[str] = None
     emitted: list[dict] = []
     persisted = False
     try:
+        yield {"type": "meta", "session_id": session_id, "question_language": lang}
         for ev in iter_compose_events(
             client=client, question=question, project_root=project_root,
             project_id=project_id, conn=conn, model=model,
@@ -110,16 +111,24 @@ def iter_ask_events(
                 trace.event("persist", outcome="partial", error=ev.get("message"))
                 outcome = "error"
                 yield ev
+    except GeneratorExit:
+        # Client disconnect: the SSE writer closed us mid-stream.
+        outcome = "disconnect"
+        raise
+    except BaseException as exc:
+        # A real crash (judge raised, persistence failed, ...): label it
+        # honestly — this is exactly the case the trace exists to explain.
+        outcome = "crash"
+        crash_error = str(exc)
+        raise
     finally:
         # Client disconnect (GeneratorExit) or abnormal stop: persist partial once.
         if not persisted and emitted:
             try:
                 _persist_partial(conn, session_id, question, emitted)
-                trace.event("persist", outcome="partial", error="client disconnect")
+                trace.event("persist", outcome="partial", error=crash_error or "client disconnect")
             except Exception as exc:
                 # Best-effort: a persistence failure during teardown must not
                 # mask the GeneratorExit (client disconnect) that triggered it.
                 trace.event("persist", outcome="failed", error=str(exc))
-        if outcome == "incomplete":
-            outcome = "disconnect"
         trace.close(outcome=outcome)
