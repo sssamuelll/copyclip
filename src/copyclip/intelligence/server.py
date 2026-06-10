@@ -1626,15 +1626,32 @@ def run_server(
                             400,
                         )
                         return
+                    from .cuaderno.trace import InteractionTrace, trace_logs_dir
+                    ltrace = InteractionTrace.start("launch", trace_logs_dir(root), {
+                        "source": (data or {}).get("source"),
+                        "function_ref": (data or {}).get("function_ref"),
+                        "breadcrumb": (data or {}).get("breadcrumb"),
+                        "suggested_inputs": (data or {}).get("suggested_inputs"),
+                    })
+                    parsed_ok = False
                     try:
                         req = PlaygroundLaunchRequest.from_dict(data)
-                        response = launch_playground(req, root, conn, pid, playground_runner)
+                        parsed_ok = True
+                        response = launch_playground(req, root, conn, pid,
+                                                     playground_runner, trace=ltrace)
                         self._json(response.to_dict())
+                        ltrace.close(outcome="ready")
                     except PlaygroundError as e:
+                        if not parsed_ok:
+                            # request-stage failures never reach launch_playground's
+                            # own launch.error events — record them here.
+                            ltrace.event("launch.error", stage="request",
+                                         error=f"{e.error_code}: {e}")
                         payload = {"error": e.error_code, "message": str(e)}
                         if isinstance(e, MarimoNotInstalledError):
                             payload["install_hint"] = "pip install copyclip[playground]"
                         self._json(payload, e.http_status)
+                        ltrace.close(outcome="error")
                     return
 
                 if parsed.path == "/api/handoff-packets":
@@ -2189,7 +2206,8 @@ def run_server(
                         client=client, question=question,
                         project_root=ctx.root, project_id=pid, conn=conn,
                         session_id=session_id, model=resolved["model"],
-                        judge=_judge,
+                        judge=_judge, provider=resolved["provider"],
+                        judge_model=judge_model,
                     )
                     sse_response(self, events)
                     return
