@@ -266,3 +266,25 @@ def test_budget_exhausted_tail_traces_single_cheap_verdict(tmp_path):
     _, lines = _run(tmp_path, [keep_going("b1"), keep_going("b2")], max_tool_rounds=2)
     cheaps = [l for l in lines if l["event"] == "verdict.cheap"]
     assert len(cheaps) == 1
+
+
+def test_wire_events_only_under_flag(tmp_path, monkeypatch):
+    turn = [
+        _tool_stop("b1", "emit_block", {"kind": "lead", "text": "x"}),
+        _msg_stop("end_turn", [_content("b1", "emit_block", {"kind": "lead", "text": "x"})]),
+    ]
+    # without the flag: no wire events
+    monkeypatch.delenv("COPYCLIP_TRACE_WIRE", raising=False)
+    _, lines = _run(tmp_path / "off", [list(turn)])
+    assert not _by_event(lines, "wire.request") and not _by_event(lines, "wire.response")
+    # with the flag: full request + response per round
+    monkeypatch.setenv("COPYCLIP_TRACE_WIRE", "1")
+    _, lines = _run(tmp_path / "on", [list(turn)])
+    reqs = _by_event(lines, "wire.request")
+    resps = _by_event(lines, "wire.response")
+    assert len(reqs) == 1 and len(resps) == 1
+    assert reqs[0]["model"] and reqs[0]["system"]
+    assert reqs[0]["messages"][0] == {"role": "user", "content": "q"}
+    assert isinstance(reqs[0]["tools"], list) and "emit_block" in reqs[0]["tools"]
+    assert resps[0]["stop_reason"] == "end_turn"
+    assert resps[0]["content"][0]["name"] == "emit_block"

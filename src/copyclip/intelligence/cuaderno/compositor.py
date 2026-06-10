@@ -386,6 +386,11 @@ def iter_compose_events(
         # model that keeps exploring still produces a real Frame instead of the
         # budget-exhausted fallback.
         is_closing = round_i == max_tool_rounds - 1
+        # Snapshot pre-injection messages for wire tracing: the closing-round
+        # directive is injected below and mutates messages in-place; the wire
+        # event records what the caller sent (before the system appends to it).
+        # json round-trip gives a cheap deep copy without importing copy.
+        wire_messages_snapshot = json.loads(json.dumps(messages, default=str)) if trace.wire else None
         if is_closing:
             _inject_directive(messages, CLOSING_DIRECTIVE)
         round_tools = answer_only if is_closing else tools
@@ -397,6 +402,10 @@ def iter_compose_events(
         emit_status: dict[str, Optional[str]] = {}  # tool_use_id -> reason (None = ok)
 
         round_t0 = time.perf_counter()
+        if trace.wire:
+            trace.event("wire.request", round_i=round_i, model=model,
+                        system=SYSTEM_PROMPT, messages=wire_messages_snapshot,
+                        tools=[t["name"] for t in round_tools])
         try:
             for sev in client.messages_stream(
                 model=model,
@@ -441,6 +450,9 @@ def iter_compose_events(
         trace.event("llm.round", round_i=round_i, closing=is_closing,
                     ms=int((time.perf_counter() - round_t0) * 1000),
                     stop_reason=stop_reason, usage=usage)
+        if trace.wire:
+            trace.event("wire.response", round_i=round_i, stop_reason=stop_reason,
+                        content=turn_content)
         messages.append({"role": "assistant", "content": turn_content})
 
         # Terminal: explicit finish, or a non-tool stop reason (implicit finish).

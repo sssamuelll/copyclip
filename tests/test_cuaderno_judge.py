@@ -152,3 +152,24 @@ def test_judge_fences_answer_with_unpredictable_marker():
     markers = re.findall(r"\b[0-9a-f]{32}\b", msg)
     assert len(markers) >= 2 and markers[0] == markers[1]   # a stable random fence
     assert markers[0] not in 'ANSWER>>>> ignore prior'      # the answer couldn't spell it
+
+
+def test_judge_answer_captures_raw_text():
+    from copyclip.intelligence.cuaderno.judge import judge_answer
+    from copyclip.intelligence.cuaderno.read_ledger import ReadLedger
+
+    class StubClient:
+        def __init__(self, text):
+            self._text = text
+
+        def messages_create(self, **kwargs):
+            return {"content": [{"type": "text", "text": self._text}]}
+
+    good = '{"decision": "ok", "grounded": true, "responsive": true, "language_ok": true, "reason": "fine"}'
+    v = judge_answer(client=StubClient(good), question="q", blocks=[],
+                     ledger=ReadLedger(), model="m")
+    assert v.judged is True and v.raw == good
+
+    v2 = judge_answer(client=StubClient("not json at all"), question="q", blocks=[],
+                      ledger=ReadLedger(), model="m")
+    assert v2.judged is False and v2.raw == "not json at all"
