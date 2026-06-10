@@ -66,7 +66,7 @@ iter_compose_events(…, trace=…)             launch_playground(…, trace=…
 ### 4.2 File layout, naming, retention
 
 - Directory: `<project_root>/.copyclip/logs/cuaderno/` (sibling of `intelligence.db`'s `.copyclip/` home; `.copyclip/` is already covered by `.gitignore:130`, so traces are never committed).
-- Names: `ask_<YYYYMMDDTHHMMSSZ>_<session_id[:8]>.jsonl`, `launch_<YYYYMMDDTHHMMSSZ>_<playground_id[:8]>.jsonl`. UTC timestamps sort lexicographically, so "the latest ask" is the last `ask_*` file.
+- Names: `ask_<YYYYMMDDTHHMMSSZ>_<session_id[:8]>.jsonl`, `launch_<YYYYMMDDTHHMMSSZ>_<tag>.jsonl` where `tag` is a random 8-hex id (the playground_id does not exist until spawn; `launch.ready` carries the real id). UTC timestamps sort lexicographically, so "the latest ask" is the last `ask_*` file. A same-second name collision gets a `-2`, `-3`… suffix instead of clobbering.
 - Retention: at each `start`, if the directory holds more than **200** files, delete the oldest by name until 200 remain. Constant `MAX_TRACE_FILES = 200` in `trace.py`; no config knob in v1.
 
 ### 4.3 Line format
@@ -111,7 +111,7 @@ Every line carries three fixed fields plus the event payload:
 | `launch.resolve` | resolved {file, name, qualname, kind, module, line_start, parent_class} or failure reason |
 | `launch.notebook` | notebook path, input elements built (name → ui element kind), deps_hint |
 | `launch.spawn` | cmd, port, pid, mode (run \| edit) |
-| `launch.ready` | playground_id, iframe_url, ms |
+| `launch.ready` | playground_id, iframe_url (elapsed time is the line's own `t_ms`) |
 | `launch.error` | stage (resolve \| notebook \| spawn \| ready), error |
 | `launch.end` | total_ms, outcome |
 
