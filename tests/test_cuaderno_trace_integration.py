@@ -277,9 +277,10 @@ def test_wire_events_only_under_flag(tmp_path, monkeypatch):
     monkeypatch.delenv("COPYCLIP_TRACE_WIRE", raising=False)
     _, lines = _run(tmp_path / "off", [list(turn)])
     assert not _by_event(lines, "wire.request") and not _by_event(lines, "wire.response")
-    # with the flag: full request + response per round
+    # with the flag: full request + response per round. max_tool_rounds=2 so
+    # round 0 is NOT the closing round and no directive is injected.
     monkeypatch.setenv("COPYCLIP_TRACE_WIRE", "1")
-    _, lines = _run(tmp_path / "on", [list(turn)])
+    _, lines = _run(tmp_path / "on", [list(turn)], max_tool_rounds=2)
     reqs = _by_event(lines, "wire.request")
     resps = _by_event(lines, "wire.response")
     assert len(reqs) == 1 and len(resps) == 1
@@ -288,3 +289,20 @@ def test_wire_events_only_under_flag(tmp_path, monkeypatch):
     assert isinstance(reqs[0]["tools"], list) and "emit_block" in reqs[0]["tools"]
     assert resps[0]["stop_reason"] == "end_turn"
     assert resps[0]["content"][0]["name"] == "emit_block"
+
+
+def test_wire_request_captures_messages_as_sent_to_the_llm(tmp_path, monkeypatch):
+    # On the CLOSING round the system injects CLOSING_DIRECTIVE into the
+    # trailing user turn before calling the LLM. The wire capture must show
+    # the request AS SENT — directive included — or the trace lies.
+    monkeypatch.setenv("COPYCLIP_TRACE_WIRE", "1")
+    turn = [
+        _tool_stop("b1", "emit_block", {"kind": "lead", "text": "x"}),
+        _msg_stop("end_turn", [_content("b1", "emit_block", {"kind": "lead", "text": "x"})]),
+    ]
+    _, lines = _run(tmp_path, [turn], max_tool_rounds=1)  # round 0 IS closing
+    req = _by_event(lines, "wire.request")[0]
+    serialized = json.dumps(req["messages"])
+    assert "Compose your answer NOW" in serialized  # the closing directive, as sent
+    # tools were clamped to the answer set for the closing round
+    assert set(req["tools"]) == {"emit_block", "finish"}
