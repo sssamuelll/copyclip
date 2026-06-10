@@ -1627,11 +1627,12 @@ def run_server(
                         )
                         return
                     from .cuaderno.trace import InteractionTrace, trace_logs_dir
+                    hdr = data if isinstance(data, dict) else {}
                     ltrace = InteractionTrace.start("launch", trace_logs_dir(root), {
-                        "source": (data or {}).get("source"),
-                        "function_ref": (data or {}).get("function_ref"),
-                        "breadcrumb": (data or {}).get("breadcrumb"),
-                        "suggested_inputs": (data or {}).get("suggested_inputs"),
+                        "source": hdr.get("source"),
+                        "function_ref": hdr.get("function_ref"),
+                        "breadcrumb": hdr.get("breadcrumb"),
+                        "suggested_inputs": hdr.get("suggested_inputs"),
                     })
                     parsed_ok = False
                     try:
@@ -1652,6 +1653,10 @@ def run_server(
                             payload["install_hint"] = "pip install copyclip[playground]"
                         self._json(payload, e.http_status)
                         ltrace.close(outcome="error")
+                    finally:
+                        # Idempotent: a no-op when ready/error already sealed it; on a
+                        # propagating crash it writes the footer and frees the handle.
+                        ltrace.close(outcome="crash")
                     return
 
                 if parsed.path == "/api/handoff-packets":

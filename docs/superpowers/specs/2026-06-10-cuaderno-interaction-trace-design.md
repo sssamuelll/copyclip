@@ -112,7 +112,7 @@ Every line carries three fixed fields plus the event payload:
 | `launch.notebook` | notebook path, input elements built (name → ui element kind), deps_hint |
 | `launch.spawn` | cmd, port, pid, mode (run \| edit) |
 | `launch.ready` | playground_id, iframe_url (elapsed time is the line's own `t_ms`) |
-| `launch.error` | stage (resolve \| notebook \| spawn \| ready), error |
+| `launch.error` | stage (request \| resolve \| notebook \| spawn \| ready), error |
 | `launch.end` | total_ms, outcome |
 
 ### 5.3 Wire events (only with `COPYCLIP_TRACE_WIRE=1`)

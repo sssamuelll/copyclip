@@ -723,7 +723,9 @@ def test_launch_emits_launch_spawn_event(monkeypatch, tmp_path):
     """MarimoRunner.launch must emit exactly one launch.spawn event whose
     pid, port (derived from the iframe URL), and mode match, and whose cmd
     is a list containing 'marimo'."""
-    _patch_healthy_spawn(monkeypatch)
+    fake_proc = _FakeProcess()
+    fake_proc.pid = 4242
+    _patch_healthy_spawn(monkeypatch, fake_proc)
     r = MarimoRunner()
     monkeypatch.setattr(r, "_probe_url", lambda url: True)
     nb = _make_notebook(tmp_path, "trace-spawn")
@@ -735,8 +737,8 @@ def test_launch_emits_launch_spawn_event(monkeypatch, tmp_path):
     assert len(spawn_events) == 1, f"expected 1 launch.spawn, got {spawn_events}"
 
     _, payload = spawn_events[0]
-    # pid comes from the fake process (FakeProcess.pid == 0, but must be present)
-    assert "pid" in payload
+    # pid must equal the fake process pid exactly
+    assert payload["pid"] == fake_proc.pid
     # port must match what's in the returned URL
     url_port = int(url.rstrip("/").rsplit(":", 1)[-1])
     assert payload["port"] == url_port
