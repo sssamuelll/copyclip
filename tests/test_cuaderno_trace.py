@@ -109,3 +109,25 @@ def test_disable_survives_broken_stderr(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.stderr", broken)
     t.event("x")   # must not raise even though stderr is closed
     assert t.enabled is False
+
+
+def test_retention_prunes_oldest_beyond_cap(tmp_path, monkeypatch):
+    monkeypatch.setattr("copyclip.intelligence.cuaderno.trace.MAX_TRACE_FILES", 5)
+    for i in range(7):
+        (tmp_path / f"ask_20260101T00000{i}Z_aaaa.jsonl").write_text("{}", encoding="utf-8")
+    t = InteractionTrace.start("ask", tmp_path, {})
+    t.close()
+    files = sorted(p.name for p in tmp_path.glob("*.jsonl"))
+    assert len(files) == 5
+    survivors = {f"ask_20260101T00000{i}Z_aaaa.jsonl" for i in (3, 4, 5, 6)}
+    assert survivors.issubset(set(files))  # the 3 oldest were pruned, newest 4 + new file remain
+
+
+def test_same_second_same_tag_does_not_clobber(tmp_path):
+    # If both starts land in the same UTC second the second file gets a `-2`
+    # suffix; if the clock ticks they differ anyway. Either way: two files.
+    t1 = InteractionTrace.start("ask", tmp_path, {}, tag="aaaa")
+    t2 = InteractionTrace.start("ask", tmp_path, {}, tag="aaaa")
+    t1.close()
+    t2.close()
+    assert len(list(tmp_path.glob("ask_*.jsonl"))) == 2
