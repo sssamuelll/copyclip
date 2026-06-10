@@ -4,6 +4,7 @@ import json
 import re
 import sqlite3
 import time
+from dataclasses import asdict
 from typing import Any, Iterator, Optional
 
 from .prompts import (
@@ -11,7 +12,8 @@ from .prompts import (
     RESPONSIVENESS_RETRY_FALLBACK, INVALID_BLOCK_RECOVERY, WIDGET_RECOVERY_DIRECTIVE,
     WIDGET_RECOVERY_DIRECTIVE_VISUAL, WIDGET_RECOVERY_DIRECTIVE_RUN,
 )
-from .read_ledger import ReadLedger
+from .read_ledger import ReadLedger, is_content_bearing_read
+from .trace import NULL_TRACE
 from .quality import assess, cheap_verdict_dict, artifacts_cited
 from .judge import judge_verdict_dict
 from .language import detect_language
@@ -328,6 +330,7 @@ def iter_compose_events(
     max_tokens: int = 8192,
     judge: Any = None,  # Optional (question, blocks, ledger) -> JudgeVerdict
     ledger: Optional[ReadLedger] = None,
+    trace: Any = None,
 ) -> Iterator[dict[str, Any]]:
     """Run the agentic loop as a generator of events.
 
@@ -346,6 +349,7 @@ def iter_compose_events(
     messages: list[dict[str, Any]] = [{"role": "user", "content": question}]
     emitted: list[Block] = []
     ledger = ledger if ledger is not None else ReadLedger()
+    trace = trace if trace is not None else NULL_TRACE
     grounding_retry_used = False
     responsiveness_retry_used = False
     evidence = GraphEvidence()  # graph-tool results seen this TURN — accumulates across rounds
@@ -361,9 +365,11 @@ def iter_compose_events(
 
         turn_content: list[dict[str, Any]] = []
         stop_reason: Optional[str] = None
+        usage: Any = None
         finish_seen = False
         emit_status: dict[str, Optional[str]] = {}  # tool_use_id -> reason (None = ok)
 
+        round_t0 = time.perf_counter()
         try:
             for sev in client.messages_stream(
                 model=model,
@@ -383,13 +389,20 @@ def iter_compose_events(
                         if reason is None:
                             b = Block.from_dict(inp)
                             emitted.append(b)
+                            trace.event("block.accept", block=b.to_dict(), sse=True)
                             yield {"type": "block", "block": b.to_dict()}
+                        else:
+                            trace.event("block.reject", block=inp, reason=reason,
+                                        recovery=INVALID_BLOCK_RECOVERY)
                     elif blk.get("type") == "tool_use" and blk.get("name") == "finish":
                         finish_seen = True
                 elif sev.get("type") == "message_stop":
                     stop_reason = sev.get("stop_reason")
+                    usage = sev.get("usage")
                     turn_content = sev.get("content", []) or []
         except Exception as exc:  # noqa: BLE001 — surface LLM/stream failure as a terminal error
+            trace.event("error", message=f"stream failed ({exc})",
+                        partial=len(emitted) > 0, sse=True)
             yield {
                 "type": "error",
                 "message": f"stream failed ({exc})",
@@ -397,6 +410,9 @@ def iter_compose_events(
             }
             return
 
+        trace.event("llm.round", round_i=round_i, closing=is_closing,
+                    ms=int((time.perf_counter() - round_t0) * 1000),
+                    stop_reason=stop_reason, usage=usage)
         messages.append({"role": "assistant", "content": turn_content})
 
         # Terminal: explicit finish, or a non-tool stop reason (implicit finish).
@@ -524,11 +540,12 @@ def iter_compose_events(
         if (not is_closing and emit_status
                 and all(reason is not None for reason in emit_status.values())):
             if _is_visual_request(question):
-                directive = WIDGET_RECOVERY_DIRECTIVE_VISUAL
+                directive, variant = WIDGET_RECOVERY_DIRECTIVE_VISUAL, "visual"
             elif _is_run_request(question):
-                directive = WIDGET_RECOVERY_DIRECTIVE_RUN
+                directive, variant = WIDGET_RECOVERY_DIRECTIVE_RUN, "run"
             else:
-                directive = WIDGET_RECOVERY_DIRECTIVE
+                directive, variant = WIDGET_RECOVERY_DIRECTIVE, "generic"
+            trace.event("recovery.directive", variant=variant)
             _inject_directive(messages, directive)
 
     # Budget exhausted → fallback frame (terminal; parity with the wrapper below).
