@@ -95,6 +95,43 @@ def test_spawn_failure_traces_launch_error_stage_spawn(tmp_path):
     assert err["stage"] == "spawn" and "boom" in err["error"]
 
 
+def test_notebook_stage_failure_traces_launch_error(tmp_path, monkeypatch):
+    """When generate_marimo_notebook raises, launch.error with stage='notebook'
+    must be recorded and the exception must propagate."""
+    monkeypatch.setattr(
+        "copyclip.intelligence.playground.generate_marimo_notebook",
+        lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")),
+    )
+    trace = InteractionTrace.start("launch", tmp_path / "logs", {})
+    with pytest.raises(OSError, match="disk full"):
+        launch_playground(_req(), str(tmp_path), _conn_with_symbol(), 1,
+                          FakeRunner(), trace=trace)
+    trace.close(outcome="error")
+    lines = _lines(trace)
+    err = next((l for l in lines if l.get("event") == "launch.error"), None)
+    assert err is not None, "launch.error event was not emitted"
+    assert err["stage"] == "notebook"
+    assert "disk full" in err["error"]
+
+
 def test_launch_without_trace_still_works(tmp_path):
-    resp = launch_playground(_req(), str(tmp_path), _conn_with_symbol(), 1, FakeRunner())
-    assert resp.playground_id == "pgid123"
+    real_paths: list[str] = []
+    import copyclip.intelligence.playground as _pg
+    _original = _pg.generate_marimo_notebook
+
+    def _recording(*args, **kwargs):
+        path = _original(*args, **kwargs)
+        real_paths.append(path)
+        return path
+
+    import shutil as _shutil
+    _pg.generate_marimo_notebook = _recording
+    try:
+        resp = launch_playground(_req(), str(tmp_path), _conn_with_symbol(), 1, FakeRunner())
+        assert resp.playground_id == "pgid123"
+    finally:
+        _pg.generate_marimo_notebook = _original
+        for p in real_paths:
+            nb_dir = os.path.dirname(p)
+            if os.path.isdir(nb_dir):
+                _shutil.rmtree(nb_dir, ignore_errors=True)

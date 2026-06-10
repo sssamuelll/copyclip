@@ -702,3 +702,48 @@ def test_list_returns_instances(monkeypatch, tmp_path):
     assert items[0]["id"] == pid
     assert items[0]["status"] == "running"
     r.kill_all()
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: launch.spawn trace emission
+# ---------------------------------------------------------------------------
+
+
+class _RecordingTrace:
+    """Minimal trace recorder: appends (name, payload) tuples to .events."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict]] = []
+
+    def event(self, name: str, /, **payload) -> None:
+        self.events.append((name, payload))
+
+
+def test_launch_emits_launch_spawn_event(monkeypatch, tmp_path):
+    """MarimoRunner.launch must emit exactly one launch.spawn event whose
+    pid, port (derived from the iframe URL), and mode match, and whose cmd
+    is a list containing 'marimo'."""
+    _patch_healthy_spawn(monkeypatch)
+    r = MarimoRunner()
+    monkeypatch.setattr(r, "_probe_url", lambda url: True)
+    nb = _make_notebook(tmp_path, "trace-spawn")
+
+    trace = _RecordingTrace()
+    playground_id, url = r.launch(nb, mode="run", trace=trace)
+
+    spawn_events = [(n, p) for n, p in trace.events if n == "launch.spawn"]
+    assert len(spawn_events) == 1, f"expected 1 launch.spawn, got {spawn_events}"
+
+    _, payload = spawn_events[0]
+    # pid comes from the fake process (FakeProcess.pid == 0, but must be present)
+    assert "pid" in payload
+    # port must match what's in the returned URL
+    url_port = int(url.rstrip("/").rsplit(":", 1)[-1])
+    assert payload["port"] == url_port
+    # mode must match what was requested
+    assert payload["mode"] == "run"
+    # cmd must be a list that contains 'marimo'
+    assert isinstance(payload["cmd"], list)
+    assert "marimo" in payload["cmd"]
+
+    r.kill_all()
