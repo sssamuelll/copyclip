@@ -86,3 +86,26 @@ def test_wire_flag_read_from_env_at_start(tmp_path, monkeypatch):
 def test_trace_logs_dir_layout(tmp_path):
     d = trace_logs_dir(str(tmp_path))
     assert d == tmp_path / ".copyclip" / "logs" / "cuaderno"
+
+
+def test_event_payload_may_contain_name_and_event_keys(tmp_path):
+    t = InteractionTrace.start("ask", tmp_path, {})
+    t.event("tool.run", name="read_file", event="weird", seq=999)  # must not raise
+    assert t.enabled is True
+    t.close()
+    lines = _read_lines(next(tmp_path.glob("*.jsonl")))
+    row = lines[1]
+    assert row["event"] == "tool.run"   # fixed field wins
+    assert row["seq"] == 1              # fixed field wins
+    assert row["name"] == "read_file"   # payload key preserved
+
+
+def test_disable_survives_broken_stderr(tmp_path, monkeypatch):
+    import io
+    t = InteractionTrace.start("ask", tmp_path, {})
+    t._fh.close()  # next write fails -> _disable -> WARN print
+    broken = io.StringIO()
+    broken.close()
+    monkeypatch.setattr("sys.stderr", broken)
+    t.event("x")   # must not raise even though stderr is closed
+    assert t.enabled is False

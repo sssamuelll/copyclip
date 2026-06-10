@@ -34,7 +34,7 @@ class NullTrace:
     enabled = False
     path: Optional[Path] = None
 
-    def event(self, name: str, **payload: Any) -> None:
+    def event(self, name: str, /, **payload: Any) -> None:  # fix 1: positional-only
         return None
 
     def close(self, **payload: Any) -> None:
@@ -75,12 +75,20 @@ class InteractionTrace:
             _prune(d)
             stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
             safe_tag = tag or uuid.uuid4().hex[:8]
-            path = d / f"{kind}_{stamp}_{safe_tag}.jsonl"
+            base = f"{kind}_{stamp}_{safe_tag}"
+            # fix 4: retry on FileExistsError instead of disabling (TOCTOU)
+            path = d / f"{base}.jsonl"
             i = 2
-            while path.exists():
-                path = d / f"{kind}_{stamp}_{safe_tag}-{i}.jsonl"
-                i += 1
-            t._fh = path.open("x", encoding="utf-8")
+            fh = None
+            while True:
+                try:
+                    fh = path.open("x", encoding="utf-8", newline="\n")  # fix 6: LF-only
+                    break
+                except FileExistsError:
+                    path = d / f"{base}-{i}.jsonl"
+                    i += 1
+                    # any other exception falls through to the outer except -> disable
+            t._fh = fh
             t.path = path
             t.enabled = True
             t.event(f"{kind}.start", **{**(header or {}), "wire": t.wire})
@@ -88,15 +96,16 @@ class InteractionTrace:
             t._disable(f"trace start failed: {exc!r}")
         return t
 
-    def event(self, name: str, **payload: Any) -> None:
+    def event(self, name: str, /, **payload: Any) -> None:  # fix 1: positional-only
         if not self.enabled or self._fh is None:
             return
         try:
+            # fix 5: fixed fields always win over payload keys
             line = json.dumps(
-                {"seq": self._seq,
+                {**payload,
+                 "seq": self._seq,
                  "t_ms": int((time.perf_counter() - self._t0) * 1000),
-                 "event": name,
-                 **payload},
+                 "event": name},
                 ensure_ascii=False, default=str,
             )
             self._fh.write(line + "\n")
@@ -124,14 +133,24 @@ class InteractionTrace:
                 fh.close()
             except Exception:
                 pass
-        print(f"WARN trace disabled: {why}", file=sys.stderr)
+        # fix 2: guard the print in case stderr is broken
+        try:
+            print(f"WARN trace disabled: {why}", file=sys.stderr)
+        except Exception:
+            pass
 
 
 def _prune(d: Path) -> None:
-    """Keep the directory under MAX_TRACE_FILES, oldest-first by name (the UTC
-    timestamp prefix makes lexicographic == chronological). Called before each
-    new file is created, so we prune to MAX-1 and the new file lands at MAX."""
-    files = sorted(p for p in d.glob("*.jsonl") if p.is_file())
+    """Keep the directory under MAX_TRACE_FILES, oldest-first by name. Files are
+    named `<kind>_<UTCstamp>_<tag>.jsonl`; sorting by the part after the first
+    underscore (timestamp + tag) is kind-agnostic and stays chronological even
+    when ask_ and launch_ files coexist. Called before each new file is created,
+    so we prune to MAX-1 and the new file lands at MAX."""
+    # fix 3: sort by timestamp portion (after kind prefix) so pruning is kind-agnostic
+    files = sorted(
+        (p for p in d.glob("*.jsonl") if p.is_file()),
+        key=lambda p: p.name.split("_", 1)[-1],
+    )
     excess = len(files) - (MAX_TRACE_FILES - 1)
     for p in files[: max(0, excess)]:
         try:
