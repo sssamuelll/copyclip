@@ -140,17 +140,19 @@ def _has_playground(emitted: list[Block]) -> bool:
 
 def _construct_playground_floor(question: str, conn: Optional[sqlite3.Connection],
                                 project_id: Optional[int], ledger: Optional[ReadLedger],
-                                emitted: list[Block]) -> Optional[Block]:
+                                emitted: list[Block]) -> tuple[Optional[Block], Optional[str]]:
     """Build the playground Block for a run-request from a resolved symbol, or
-    None when nothing resolves (then the honest off_target stands)."""
-    if conn is None or project_id is None or not _is_run_request(question):
-        return None
+    (None, reason) when nothing resolves (then the honest off_target stands)."""
+    if conn is None or project_id is None:
+        return None, "no project connection (floor cannot consult the symbols table)"
+    if not _is_run_request(question):
+        return None, "not a run request"
     if _has_playground(emitted):
-        return None
+        return None, "playground already present"
     resolved = _resolve_floor_symbol(conn, project_id,
                                      _candidate_symbol_names(question), ledger)
     if resolved is None:
-        return None
+        return None, "no candidate symbol resolved (unmatched or ambiguous across files)"
     fr: dict[str, Any] = {"file": resolved.file, "name": resolved.name}
     if resolved.line_start is not None:
         fr["line"] = resolved.line_start
@@ -161,9 +163,10 @@ def _construct_playground_floor(question: str, conn: Optional[sqlite3.Connection
                   if lang == "es" else f"Run {resolved.name} with an example")
     block = Block.widget(Widget.playground(function_ref=fr, breadcrumb=breadcrumb).to_dict())
     # Defensive: the floor must meet the same emit-time bar as a model widget.
-    if validate_widget_payload(block.to_dict(), GraphEvidence()) is not None:
-        return None
-    return block
+    reason = validate_widget_payload(block.to_dict(), GraphEvidence())
+    if reason is not None:
+        return None, f"constructed playground failed widget validation: {reason}"
+    return block, None
 
 
 def _floor_verdict_dict(prior_status: str) -> dict[str, Any]:
@@ -201,15 +204,18 @@ def _floored_frame(frame_dict: dict[str, Any], question: str,
         # The model already delivered the runnable artifact: a run-request answered
         # WITH a playground is responsive by definition. An off_target label here is
         # the judge mislabeling form as relevance — reclassify, don't relabel.
-        trace.event("floor", attempted=True, reclassified=True, symbol=None,
+        pg_ref = next((b.data["widget"].get("function_ref") for b in blocks
+                       if b.kind == "widget" and isinstance(b.data.get("widget"), dict)
+                       and b.data["widget"].get("kind") == "playground"), None)
+        trace.event("floor", attempted=True, reclassified=True, symbol=pg_ref,
                     decline_reason=None)
         return _seal(question, blocks, FRAME_STATUS_ANSWER, _floor_verdict_dict(status))
     # fallback's only block is a system 'couldn't finish' message — drop it.
     base: list[Block] = [] if status == FRAME_STATUS_FALLBACK else blocks
-    floor = _construct_playground_floor(question, conn, project_id, ledger, base)
+    floor, decline = _construct_playground_floor(question, conn, project_id, ledger, base)
     if floor is None:
         trace.event("floor", attempted=True, reclassified=False, symbol=None,
-                    decline_reason="no symbol resolved against the symbols table")
+                    decline_reason=decline)
         return frame_dict
     trace.event("floor", attempted=True, reclassified=False,
                 symbol=floor.to_dict()["widget"]["function_ref"], decline_reason=None)
@@ -558,8 +564,11 @@ def iter_compose_events(
                     evidence.add_callees(args.get("symbol", ""), result)
                 ms = int((time.perf_counter() - t0) * 1000)
                 tool_results.append(_ack(tuid, result))
+                # result_paths is the LEDGER DELTA: paths this call newly
+                # contributed to grounding. A re-read of an already-traced
+                # path legitimately shows [] here.
                 trace.event("tool.run", id=tuid, name=name, args=args_str, ms=ms,
-                            error=None,
+                            error=(result.get("error") if isinstance(result, dict) else None),
                             content_bearing=is_content_bearing_read(name, result),
                             result_paths=new_paths, sse=True)
                 yield {"type": "tool", "id": tuid, "name": name, "args": args_str,

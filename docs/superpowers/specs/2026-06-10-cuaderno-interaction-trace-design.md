@@ -93,7 +93,7 @@ Every line carries three fixed fields plus the event payload:
 | `block.accept` | block (full dict), `sse: true` | `compositor` emit_block accepted |
 | `block.reject` | block (full dict), reason (the `validate_block_dict` / `validate_widget_payload` string), recovery (which recovery text was sent to the model) | `compositor` emit_block rejected |
 | `recovery.directive` | variant: visual \| run \| generic | widget-fixation backstop |
-| `tool.run` | id, name, args (short label), ms, error (str or null), content_bearing (bool), result_paths (file paths the result carried), `sse: true` | `compositor` tool dispatch |
+| `tool.run` | id, name, args (short label), ms, error (str or null), content_bearing (bool), result_paths (paths newly contributed to the ledger by this call — a delta; re-reads of already-traced paths show []), `sse: true` | `compositor` tool dispatch |
 | `verdict.cheap` | full `QualityVerdict` dict (status, suspicion, language_mismatch, question_language, reason) | `assess()` result |
 | `retry` | kind: grounding \| language \| responsiveness, reason, directive (text injected), discarded_blocks (count), `sse: true` (the `reset`) | both retry latches |
 | `verdict.judge` | parsed `JudgeVerdict` dict + decision, judged (bool), fail_open_error (str or null) | judge call site |

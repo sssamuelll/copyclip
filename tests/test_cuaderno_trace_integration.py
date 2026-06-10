@@ -212,3 +212,57 @@ def test_floor_decline_traced_for_run_request_fallback(tmp_path):
     f = floors[0]
     assert f["attempted"] is True and f["reclassified"] is False
     assert f["symbol"] is None and f["decline_reason"]
+
+
+def test_responsiveness_retry_traced(tmp_path):
+    (tmp_path / "README.md").write_text("# Hello\n", encoding="utf-8")
+    from copyclip.intelligence.cuaderno.judge import JudgeVerdict
+
+    calls = {"n": 0}
+
+    def retry_then_ok(q, blocks, ledger):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return JudgeVerdict(question_kind="code_comprehension", grounded=True,
+                                responsive=False, language_ok=True, decision="retry",
+                                world=None, retry_directive="answer HOW, not WHAT",
+                                reason="describes instead of explaining")
+        return JudgeVerdict(question_kind="code_comprehension", grounded=True,
+                            responsive=True, language_ok=True, decision="ok",
+                            world=None, retry_directive=None, reason="fine")
+
+    read_turn = [
+        _tool_stop("r1", "read_file", {"path": "README.md"}),
+        _msg_stop("tool_use", [_content("r1", "read_file", {"path": "README.md"})]),
+    ]
+    answer_turn = lambda bid: [
+        _tool_stop(bid, "emit_block", {"kind": "lead", "text": "x"}),
+        _tool_stop(f"f{bid}", "finish", {}),
+        _msg_stop("tool_use", [
+            _content(bid, "emit_block", {"kind": "lead", "text": "x"}),
+            _content(f"f{bid}", "finish", {}),
+        ]),
+    ]
+    _, lines = _run(tmp_path, [read_turn, answer_turn("b1"), answer_turn("b2")],
+                    max_tool_rounds=8, judge=retry_then_ok)
+    retries = [l for l in lines if l["event"] == "retry"]
+    assert len(retries) == 1
+    r = retries[0]
+    assert r["kind"] == "responsiveness"
+    assert r["directive"] == "answer HOW, not WHAT"
+    assert r["discarded_blocks"] == 1 and r["sse"] is True
+    judges = [l for l in lines if l["event"] == "verdict.judge"]
+    assert len(judges) == 2 and judges[0]["decision"] == "retry" and judges[1]["decision"] == "ok"
+
+
+def test_budget_exhausted_tail_traces_single_cheap_verdict(tmp_path):
+    # Rounds never reach an explicit terminal: every round keeps stop_reason
+    # "tool_use" without finish. The budget tail seals via _sealed_frame, which
+    # must trace exactly ONE verdict.cheap (no double-fire with the loop's).
+    keep_going = lambda bid: [
+        _tool_stop(bid, "emit_block", {"kind": "lead", "text": "x"}),
+        _msg_stop("tool_use", [_content(bid, "emit_block", {"kind": "lead", "text": "x"})]),
+    ]
+    _, lines = _run(tmp_path, [keep_going("b1"), keep_going("b2")], max_tool_rounds=2)
+    cheaps = [l for l in lines if l["event"] == "verdict.cheap"]
+    assert len(cheaps) == 1
