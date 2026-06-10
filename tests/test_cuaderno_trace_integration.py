@@ -1,8 +1,12 @@
 import json
+import sqlite3
 from pathlib import Path
 
 from copyclip.intelligence.cuaderno.compositor import iter_compose_events, CLOSING_DIRECTIVE
 from copyclip.intelligence.cuaderno.trace import InteractionTrace
+from copyclip.intelligence.db import init_cuaderno_schema
+from copyclip.intelligence.cuaderno.persistence import create_session
+from copyclip.intelligence.cuaderno.ask_stream import iter_ask_events
 
 
 class StubStream:
@@ -306,3 +310,76 @@ def test_wire_request_captures_messages_as_sent_to_the_llm(tmp_path, monkeypatch
     assert CLOSING_DIRECTIVE in serialized  # the closing directive, as sent
     # tools were clamped to the answer set for the closing round
     assert set(req["tools"]) == {"emit_block", "finish"}
+
+
+def _conn():
+    c = sqlite3.connect(":memory:")
+    init_cuaderno_schema(c)
+    return c
+
+
+def _ask_trace_lines(tmp_path):
+    files = sorted((tmp_path / ".copyclip" / "logs" / "cuaderno").glob("ask_*.jsonl"))
+    assert files, "no trace file written"
+    return [json.loads(l) for l in files[-1].read_text(encoding="utf-8").splitlines()]
+
+
+def test_ask_stream_writes_full_trace_lifecycle(tmp_path):
+    conn = _conn()
+    sid = create_session(conn, project_root=str(tmp_path))
+    (tmp_path / "README.md").write_text("# X\n", encoding="utf-8")
+    turns = [
+        [
+            _tool_stop("r1", "read_file", {"path": "README.md"}),
+            _msg_stop("tool_use", [_content("r1", "read_file", {"path": "README.md"})]),
+        ],
+        [
+            _tool_stop("b1", "emit_block", {"kind": "lead", "text": "hi"}),
+            _tool_stop("f", "finish", {}),
+            _msg_stop("tool_use", [
+                _content("b1", "emit_block", {"kind": "lead", "text": "hi"}),
+                _content("f", "finish", {}),
+            ]),
+        ],
+    ]
+    events = list(iter_ask_events(
+        client=StubStream(turns), question="q", project_root=str(tmp_path),
+        project_id=1, conn=conn, session_id=sid,
+        provider="anthropic", judge_model="judge-m",
+    ))
+    assert events[0]["type"] == "meta"
+    lines = _ask_trace_lines(tmp_path)
+    names = [l["event"] for l in lines]
+    assert names[0] == "ask.start" and names[-1] == "ask.end"
+    start = lines[0]
+    assert start["question"] == "q" and start["session_id"] == sid
+    assert start["provider"] == "anthropic" and start["judge_model"] == "judge-m"
+    assert start["model"] and start["max_tool_rounds"] == 8
+    seal = next(l for l in lines if l["event"] == "seal")
+    assert seal["status"] == "answer" and seal["position"] == 1
+    assert seal["blocks"] == 1 and seal["sse"] is True and seal["verdict"]
+    persist = next(l for l in lines if l["event"] == "persist")
+    assert persist["outcome"] == "ok" and persist["error"] is None
+    assert lines[-1]["outcome"] == "answer"
+
+
+def test_ask_stream_traces_partial_persist_on_stream_error(tmp_path):
+    conn = _conn()
+    sid = create_session(conn, project_root=str(tmp_path))
+    turns = [
+        [   # round 0 continues; round 1 raises (StubStream exhausted)
+            _tool_stop("b1", "emit_block", {"kind": "lead", "text": "x"}),
+            _msg_stop("tool_use", [_content("b1", "emit_block", {"kind": "lead", "text": "x"})]),
+        ],
+    ]
+    events = list(iter_ask_events(
+        client=StubStream(turns), question="q", project_root=str(tmp_path),
+        project_id=1, conn=conn, session_id=sid,
+    ))
+    assert events[-1]["type"] == "error"
+    lines = _ask_trace_lines(tmp_path)
+    names = [l["event"] for l in lines]
+    assert "error" in names                          # traced by the compositor
+    persist = next(l for l in lines if l["event"] == "persist")
+    assert persist["outcome"] == "partial"
+    assert lines[-1]["event"] == "ask.end" and lines[-1]["outcome"] == "error"

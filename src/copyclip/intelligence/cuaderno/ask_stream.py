@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 from typing import Any, Iterator, Optional
 
@@ -8,6 +9,7 @@ from .i18n import tr
 from .language import detect_language
 from .persistence import save_question
 from .schema import Block, Frame, FRAME_STATUS_PARTIAL, frame_from_dict
+from .trace import InteractionTrace, trace_logs_dir
 
 
 def _persist_partial(conn, session_id: str, question: str, emitted: list[dict],
@@ -34,6 +36,8 @@ def iter_ask_events(
     max_tool_rounds: int = 8,
     max_tokens: int = 8192,
     judge: Any = None,
+    provider: Optional[str] = None,
+    judge_model: Optional[str] = None,
 ) -> Iterator[dict[str, Any]]:
     """Wrap iter_compose_events for the HTTP layer.
 
@@ -42,9 +46,27 @@ def iter_ask_events(
     - On a terminal `error` with partial=True (or on client disconnect, which
       arrives as GeneratorExit in the finally), persists the partial Frame from
       the blocks already emitted.
+    - Owns the InteractionTrace lifecycle: one JSONL debug timeline per ask in
+      `<project_root>/.copyclip/logs/cuaderno/` (spec 2026-06-10). The trace can
+      never break this path — it swallows its own failures.
     """
-    yield {"type": "meta", "session_id": session_id,
-           "question_language": detect_language(question)}
+    lang = detect_language(question)
+    trace = InteractionTrace.start(
+        "ask", trace_logs_dir(project_root),
+        {
+            "question": question,
+            "session_id": session_id,
+            "question_language": lang,
+            "model": model,
+            "judge_model": judge_model,
+            "provider": provider,
+            "max_tool_rounds": max_tool_rounds,
+            "copyclip_version": os.environ.get("COPYCLIP_VERSION", "dev"),
+        },
+        tag=(session_id or "")[:8] or None,
+    )
+    outcome = "incomplete"
+    yield {"type": "meta", "session_id": session_id, "question_language": lang}
     emitted: list[dict] = []
     persisted = False
     try:
@@ -52,7 +74,7 @@ def iter_ask_events(
             client=client, question=question, project_root=project_root,
             project_id=project_id, conn=conn, model=model,
             max_tool_rounds=max_tool_rounds, max_tokens=max_tokens,
-            judge=judge,
+            judge=judge, trace=trace,
         ):
             if ev["type"] == "block":
                 emitted.append(ev["block"])
@@ -70,6 +92,12 @@ def iter_ask_events(
                 frame = frame_from_dict(ev["frame"])
                 position = save_question(conn, session_id, question, frame)
                 persisted = True
+                trace.event("seal", status=ev["frame"].get("status"),
+                            verdict=ev["frame"].get("verdict"),
+                            blocks=len(ev["frame"].get("blocks") or []),
+                            position=position, sse=True)
+                trace.event("persist", outcome="ok", error=None)
+                outcome = ev["frame"].get("status") or "answer"
                 yield {"type": "frame", "position": position, "frame": ev["frame"]}
             elif ev["type"] == "error":
                 # Always persist the turn so it is never silently lost — a stream
@@ -79,13 +107,19 @@ def iter_ask_events(
                 # question in the conversation.
                 _persist_partial(conn, session_id, question, emitted, message=ev.get("message"))
                 persisted = True
+                trace.event("persist", outcome="partial", error=ev.get("message"))
+                outcome = "error"
                 yield ev
     finally:
         # Client disconnect (GeneratorExit) or abnormal stop: persist partial once.
         if not persisted and emitted:
             try:
                 _persist_partial(conn, session_id, question, emitted)
-            except Exception:
+                trace.event("persist", outcome="partial", error="client disconnect")
+            except Exception as exc:
                 # Best-effort: a persistence failure during teardown must not
                 # mask the GeneratorExit (client disconnect) that triggered it.
-                pass
+                trace.event("persist", outcome="failed", error=str(exc))
+        if outcome == "incomplete":
+            outcome = "disconnect"
+        trace.close(outcome=outcome)
