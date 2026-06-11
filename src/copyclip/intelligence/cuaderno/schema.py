@@ -205,4 +205,13 @@ def validate_block_dict(d: Any) -> Optional[str]:
     kind = d.get("kind")
     if kind not in KNOWN_BLOCK_KINDS:
         return f"unknown or missing block kind: {kind!r}"
+    if kind == "callout":
+        # A callout is the cuaderno's claim block (a risk, a recovered decision,
+        # an explicit commitment). In an evidence-first surface a claim without
+        # evidence is fabrication, so a callout MUST carry at least one citation.
+        citations = d.get("citations")
+        if not isinstance(citations, list) or not any(
+            isinstance(c, dict) and (c.get("path") or c.get("commit")) for c in citations
+        ):
+            return "callout must carry at least one citation (a claim needs evidence)"
     return None

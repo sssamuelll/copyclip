@@ -124,3 +124,31 @@ def test_frame_verdict_defaults_none_for_legacy():
     from copyclip.intelligence.cuaderno.schema import frame_from_dict
     f = frame_from_dict({"question": "q", "blocks": [{"kind": "lead", "text": "x"}]})
     assert f.verdict is None and f.status == "legacy"
+
+
+# W4-2: a callout is the cuaderno's claim block; in an evidence-first surface a
+# claim without evidence is fabrication, so a callout MUST carry a citation.
+def test_callout_without_citation_rejected():
+    reason = validate_block_dict({"kind": "callout", "kicker": "risk", "text": "this area is risky"})
+    assert reason and "citation" in reason
+
+
+def test_callout_empty_citations_rejected():
+    reason = validate_block_dict({"kind": "callout", "kicker": "k", "text": "t", "citations": []})
+    assert reason and "citation" in reason
+
+
+def test_callout_with_path_citation_ok():
+    ok = validate_block_dict({
+        "kind": "callout", "kicker": "risk", "text": "churn-heavy",
+        "citations": [{"kind": "path", "path": "src/x.py"}],
+    })
+    assert ok is None
+
+
+def test_callout_with_commit_citation_ok():
+    ok = validate_block_dict({
+        "kind": "callout", "kicker": "decision", "text": "anchored",
+        "citations": [{"kind": "commit", "commit": "a0dae63"}],
+    })
+    assert ok is None
