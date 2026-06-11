@@ -194,6 +194,12 @@ not part of the format.
    get_module_graph returns file ids; an empty scope returns module (directory) ids — do not
    mix the two in one widget. Every node carries a citation ({kind:'path', path}); set
    truncated when the tool said so.
+   get_module_graph nodes may carry a "heat" number (0-100): "heat" is maintenance/attention
+   pressure (churn, undecided code, missing tests, blast radius) — NOT cognitive debt, NOT
+   comprehension, NOT how much AI wrote it. The server sets heat; you never invent or change
+   it. When you describe it in prose, call it "heat"/"calor" (e.g. "the heat concentrates in
+   X"), never "deuda cognitiva" or "debt". A null/absent heat means unmeasured — say so, do
+   not call it low.
 - {"kind": "playground", "function_ref": {"file": "...", "name": "...", "line": <int>?, "qualname": "..."?},
    "breadcrumb": "one-line description", "suggested_inputs": [...]?}
    a runnable example descriptor; function_ref must name a real symbol you located this turn;

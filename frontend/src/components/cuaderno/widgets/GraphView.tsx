@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import type { GraphViewWidget, Citation } from '../../../types/api'
-import { fogFill, fogBorder, scoreToBand } from '../../../utils/debt'
+import { fogFill, fogBorder, relativeBand } from '../../../utils/debt'
 import { t } from '../strings'
 
 // ── layout constants (roster-ratified for frame-scale use) ──────────────────
@@ -22,6 +22,14 @@ type Props = {
 
 export function GraphView({ widget, onOpenCitation, lang }: Props) {
   const { nodes, edges } = widget
+
+  // Heat is banded RELATIVE to the scores shown, so the hottest node paints
+  // brightest even when the absolute distribution is compressed.
+  const measuredScores = nodes
+    .map((n) => n.heat)
+    .filter((s): s is number => typeof s === 'number')
+  const heatMin = measuredScores.length ? Math.min(...measuredScores) : 0
+  const heatMax = measuredScores.length ? Math.max(...measuredScores) : 0
 
   // ── adjacency ─────────────────────────────────────────────────────────────
   const outgoing = useMemo(() => {
@@ -294,8 +302,8 @@ export function GraphView({ widget, onOpenCitation, lang }: Props) {
               //   null   -> dashed third state ("unmeasured" — never reads as low)
               //   absent -> plain node (a symbol/non-fog node; no debt concept)
               // A focused node shows selection (accent) over the fog.
-              const score = node.cognitive_debt_score
-              const band = typeof score === 'number' ? scoreToBand(score) : null
+              const score = node.heat
+              const band = typeof score === 'number' ? relativeBand(score, heatMin, heatMax) : null
               const unmeasured = score === null
               const fill = isFocused
                 ? 'var(--accent)'

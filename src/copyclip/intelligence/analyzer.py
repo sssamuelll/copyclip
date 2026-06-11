@@ -361,6 +361,32 @@ def _analyze_git_folder(project_root: str, project_id: int, conn) -> Dict:
 
 # Brief: analyze
 
+def _persist_composite_scores(conn, project_id: int) -> None:
+    """Final pass: overwrite each file's cognitive_debt with the LIVE 8-factor
+    composite (build_debt_breakdown), not the dead single-factor scalar. One
+    number, one engine — the cuaderno fog, the MCP map, and handoff risks all
+    read this column, so feeding it from the live model collapses the two debt
+    lineages at once. Must run AFTER insights, churn, decisions and tests are
+    built (the composite reads them); a single file's failure never aborts the
+    pass."""
+    from .cognitive_debt import build_debt_breakdown
+
+    rows = conn.execute(
+        "SELECT path FROM analysis_file_insights WHERE project_id=?",
+        (project_id,),
+    ).fetchall()
+    for (path,) in rows:
+        try:
+            value = build_debt_breakdown(conn, project_id, "file", path)["score"]["value"]
+        except Exception:  # noqa: BLE001 — one file's score must not abort the pass
+            continue
+        conn.execute(
+            "UPDATE analysis_file_insights SET cognitive_debt=? WHERE project_id=? AND path=?",
+            (round(float(value or 0.0), 2), project_id, path),
+        )
+    conn.commit()
+
+
 async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, checkpoint_every: int = 500, checkpoint_cb=None, should_cancel=None) -> Dict[str, int]:
     root = os.path.abspath(project_root)
     conn = connect(root)
@@ -1009,6 +1035,10 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
                 ins.get("last_human_ts"),
             ),
         )
+
+    # Collapse to one debt engine: the persisted column now holds the live
+    # 8-factor composite, read by the fog, the MCP map, and handoff risks.
+    _persist_composite_scores(conn, project_id)
 
     summary = {
         "files": indexed,

@@ -90,8 +90,8 @@ def _ev_with_debt():
     ev = GraphEvidence()
     ev.add_module_graph({
         "modules": [
-            {"name": "pkg/a", "file_path": "src/pkg/a/zzz.py", "cognitive_debt_score": 90.0},
-            {"name": "pkg/b", "file_path": "src/pkg/b.py", "cognitive_debt_score": None},
+            {"name": "pkg/a", "file_path": "src/pkg/a/zzz.py", "heat": 90.0},
+            {"name": "pkg/b", "file_path": "src/pkg/b.py", "heat": None},
         ],
         "edges": [{"from": "pkg/a", "to": "pkg/b", "weight": 1}],
         "truncated": False,
@@ -102,8 +102,8 @@ def _ev_with_debt():
 def test_add_module_graph_records_node_meta():
     ev = _ev_with_debt()
     assert ev.node_meta["pkg/a"] == {"file_path": "src/pkg/a/zzz.py",
-                                     "cognitive_debt_score": 90.0}
-    assert ev.node_meta["pkg/b"]["cognitive_debt_score"] is None
+                                     "heat": 90.0}
+    assert ev.node_meta["pkg/b"]["heat"] is None
 
 
 def test_stamp_overwrites_fabricated_fog():
@@ -112,10 +112,10 @@ def test_stamp_overwrites_fabricated_fog():
     w = {"kind": "graph_view",
          "nodes": [{"id": "pkg/a", "label": "a",
                     "citation": {"kind": "path", "path": "src/pkg/a/zzz.py"},
-                    "cognitive_debt_score": 5.0}],   # the model lies: claims 5.0
+                    "heat": 5.0}],   # the model lies: claims 5.0
          "edges": []}
     stamp_widget_payload({"kind": "widget", "widget": w}, ev)
-    assert w["nodes"][0]["cognitive_debt_score"] == 90.0   # authoritative wins
+    assert w["nodes"][0]["heat"] == 90.0   # authoritative wins
 
 
 def test_stamp_sets_authoritative_citation():
@@ -135,10 +135,10 @@ def test_stamp_unmeasured_node_score_is_none():
     w = {"kind": "graph_view",
          "nodes": [{"id": "pkg/b", "label": "b",
                     "citation": {"kind": "path", "path": "src/pkg/b.py"},
-                    "cognitive_debt_score": 12.0}],   # model invents a number
+                    "heat": 12.0}],   # model invents a number
          "edges": []}
     stamp_widget_payload({"kind": "widget", "widget": w}, ev)
-    assert w["nodes"][0]["cognitive_debt_score"] is None   # absence, not a value
+    assert w["nodes"][0]["heat"] is None   # absence, not a value
 
 
 def test_stamp_symbol_node_drops_fog_and_keeps_citation():
@@ -152,8 +152,8 @@ def test_stamp_symbol_node_drops_fog_and_keeps_citation():
     w = {"kind": "graph_view",
          "nodes": [{"id": "main", "label": "main",
                     "citation": {"kind": "path", "path": "src/m.py", "line_start": 2},
-                    "cognitive_debt_score": 7.0}],   # model fabrication
+                    "heat": 7.0}],   # model fabrication
          "edges": []}
     stamp_widget_payload({"kind": "widget", "widget": w}, ev)
-    assert "cognitive_debt_score" not in w["nodes"][0]   # dropped, not nulled
+    assert "heat" not in w["nodes"][0]   # dropped, not nulled
     assert w["nodes"][0]["citation"] == {"kind": "path", "path": "src/m.py", "line_start": 2}
