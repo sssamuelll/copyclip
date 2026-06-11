@@ -6,52 +6,63 @@ import sqlite3
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from copyclip.intelligence.db import connect, init_schema
-from copyclip.mcp_server import handle_call_tool, handle_list_tools
+from copyclip.mcp_server import handle_call_tool, handle_list_tools, server
 
 @pytest.fixture
 def temp_project(tmp_path):
     """Setup a temporary project with a copyclip intelligence DB."""
     root = tmp_path / "my_project"
     root.mkdir()
-    
+
     # Pre-create the .copyclip folder so sqlite can open the file
     dot_copyclip = root / ".copyclip"
     dot_copyclip.mkdir()
     db_file = dot_copyclip / "intelligence.db"
-    
+
     # Initialize DB
     with patch("copyclip.intelligence.db.db_path", return_value=str(db_file)):
         conn = sqlite3.connect(str(db_file))
         conn.row_factory = sqlite3.Row
         init_schema(conn)
-        
+
         # Seed project
-        conn.execute("INSERT INTO projects(root_path, name, story) VALUES(?,?,?)", 
+        conn.execute("INSERT INTO projects(root_path, name, story) VALUES(?,?,?)",
                     (str(root), "Test Project", "The soul of testing"))
-        
+
         # Seed an accepted decision
         conn.execute("INSERT INTO decisions(project_id, title, summary, status) VALUES(?,?,?,?)",
                     (1, "No Singletons", "We strictly avoid singletons in this project.", "accepted"))
-        
-        # Seed cognitive debt data
+
+        # Seed a heat row (the cognitive_debt column now holds the live composite).
         conn.execute("INSERT INTO analysis_file_insights(project_id, path, module, cognitive_debt) VALUES(?,?,?,?)",
                     (1, "src/auth.py", "auth", 75.5))
-        
+
         conn.commit()
         conn.close()
-        
+
     return root
+
+
+def test_server_identity_is_not_oracle():
+    """Wave 5: the MCP server is renamed off 'Oracle'/'Authority'. It exposes
+    bounded tools, not an oracle that decides for the human."""
+    assert server.name == "copyclip"
+    assert "oracle" not in server.name.lower()
+    assert "authority" not in server.name.lower()
+
 
 @pytest.mark.asyncio
 async def test_list_tools():
-    """Verify all 5 tools are exposed via MCP."""
+    """Verify the core tools are exposed via MCP."""
     tools = await handle_list_tools()
     names = [t.name for t in tools]
     assert "get_intent_manifesto" in names
     assert "get_context_bundle" in names
     assert "audit_proposal" in names
     assert "log_decision_proposal" in names
-    assert "get_cognitive_load" in names
+    assert "get_heat" in names
+    # The retired vocabulary must not leak as a tool name.
+    assert "get_cognitive_load" not in names
 
 @pytest.mark.asyncio
 async def test_get_intent_manifesto(temp_project):
@@ -60,7 +71,7 @@ async def test_get_intent_manifesto(temp_project):
     with patch("copyclip.intelligence.db.db_path", return_value=str(db_file)):
         res = await handle_call_tool("get_intent_manifesto", {"path": str(temp_project)})
         content = res[0].text
-        
+
         assert "PROJECT INTENT MANIFESTO" in content
         assert "Test Project" in content
         assert "The soul of testing" in content
@@ -78,7 +89,9 @@ async def test_log_decision_proposal(temp_project):
         }
         res = await handle_call_tool("log_decision_proposal", args)
         assert "Success: Decision" in res[0].text
-        
+        # The retired dashboard surface must not be named to the agent.
+        assert "Dashboard" not in res[0].text
+
         # Verify in DB
         from copyclip.intelligence.db import connect as real_connect
         conn = real_connect(str(temp_project))
@@ -88,32 +101,35 @@ async def test_log_decision_proposal(temp_project):
         conn.close()
 
 @pytest.mark.asyncio
-async def test_get_cognitive_load(temp_project):
-    """Test retrieving the 'Fog of War' map via MCP."""
+async def test_get_heat(temp_project):
+    """Test retrieving the heat (maintenance/attention pressure) map via MCP."""
     db_file = temp_project / ".copyclip" / "intelligence.db"
     with patch("copyclip.intelligence.db.db_path", return_value=str(db_file)):
-        res = await handle_call_tool("get_cognitive_load", {"path": str(temp_project)})
+        res = await handle_call_tool("get_heat", {"path": str(temp_project)})
         content = res[0].text
-        
-        assert "FOG OF WAR" in content
+
+        assert "HEAT MAP" in content
         assert "auth" in content
         assert "🔴 HIGH" in content
-        assert "Debt: 75.5" in content
+        assert "Heat: 75.5" in content
+        # The retired comprehension/debt framing must be gone.
+        assert "FOG OF WAR" not in content
+        assert "Debt:" not in content
 
 @pytest.mark.asyncio
 async def test_audit_proposal_semantic(temp_project):
     """Test the semantic audit loop (Phase 2)."""
     db_file = temp_project / ".copyclip" / "intelligence.db"
-    
+
     # We mock the LLM call
     mock_client = AsyncMock()
     mock_client.minimize_code_contextually.return_value = "Status: REJECTED\nScore: 90\nReason: This diff introduces a Singleton pattern."
-    
+
     with patch("copyclip.intelligence.db.db_path", return_value=str(db_file)), \
          patch("copyclip.llm.config.load_config", return_value={}), \
          patch("copyclip.llm.provider_config.resolve_provider", return_value={"name": "openai", "model": "test-model"}), \
          patch("copyclip.llm_client.LLMClientFactory.create", return_value=mock_client):
-        
+
         # Link 'src/auth.py' to Decision #1 (No Singletons)
         from copyclip.intelligence.db import connect as real_connect
         conn = real_connect(str(temp_project))
@@ -121,7 +137,7 @@ async def test_audit_proposal_semantic(temp_project):
                     (1, 1, "file_glob", "src/auth.py"))
         conn.commit()
         conn.close()
-        
+
         diff = """
 --- a/src/auth.py
 +++ b/src/auth.py
@@ -132,10 +148,10 @@ async def test_audit_proposal_semantic(temp_project):
 +            cls._instance = super().__new__(cls)
 +        return cls._instance
         """
-        
+
         args = {"path": str(temp_project), "proposed_diff": diff}
         res = await handle_call_tool("audit_proposal", args)
-        
+
         assert "INTENT AUDIT REPORT" in res[0].text
         assert "REJECTED" in res[0].text
         assert "Score: 90" in res[0].text
