@@ -3,10 +3,11 @@ import type { Block, CuadernoQuestion, ToolRow, CuadernoProvidersResponse } from
 import { Cuaderno } from '../components/cuaderno/Cuaderno'
 import { askStream, cuadernoApi } from '../api/cuaderno'
 import { reconcileOnMount, onActiveFrameChange } from '../components/cuaderno/playgroundSlot'
+import type { SurvivorPage } from '../nav'
 
 const SESSION_STORAGE_KEY = 'copyclip.cuaderno.session_id'
 
-export function CuadernoPage({ onOpenDashboard }: { onOpenDashboard?: () => void } = {}) {
+export function CuadernoPage({ onNavigate }: { onNavigate?: (target: SurvivorPage) => void } = {}) {
   const [sessionId, setSessionId] = useState<string | null>(() =>
     localStorage.getItem(SESSION_STORAGE_KEY),
   )
@@ -204,7 +205,7 @@ export function CuadernoPage({ onOpenDashboard }: { onOpenDashboard?: () => void
         toolCalls={toolCalls}
         providers={providers}
         onSetProvider={onSetProvider}
-        onOpenDashboard={onOpenDashboard}
+        onNavigate={onNavigate}
         onAsk={onAsk}
         onSelectFromHistory={onSelectFromHistory}
         onSetGotIt={onSetGotIt}
