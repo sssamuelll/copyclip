@@ -142,6 +142,92 @@ def build_tool_definitions() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "get_decisions",
+            "description": (
+                "Read the decision-ledger — the architectural decisions the human "
+                "recorded (and their status). Optionally filter by status "
+                "(proposed | accepted | resolved | ...). Cite a decision by its id."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "description": "Filter by status. Optional."},
+                    "limit":  {"type": "integer", "default": 50},
+                },
+            },
+        },
+        {
+            "name": "get_reverse_dependents",
+            "description": (
+                "Modules transitively impacted if a file changes (reverse-dependents "
+                "/ blast radius). Resolves the path to its module, then walks the "
+                "dependency graph upward. Use this for 'what breaks if I touch X'."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {"path": {"type": "string", "description": "Project-relative file path."}},
+                "required": ["path"],
+            },
+        },
+        {
+            "name": "git_archaeology",
+            "description": (
+                "A file's recent commit history crossed with the decisions that "
+                "reference it. Connects 'what changed here' to 'which decision you "
+                "made about it' — the commit↔decision link git_log alone can't give."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {"file": {"type": "string", "description": "Project-relative file path."}},
+                "required": ["file"],
+            },
+        },
+        {
+            "name": "get_story_snapshots",
+            "description": (
+                "Narrative snapshots of how the project shifted over time (focus "
+                "areas, major changes, open questions) — the connective tissue "
+                "between work bursts. Empty until analysis has run; says so."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {"limit": {"type": "integer", "default": 5}},
+            },
+        },
+        {
+            "name": "get_reacquaintance_briefing",
+            "description": (
+                "Re-entry briefing after a gap: top changes, what to read first, "
+                "relevant decisions, top risk — what reconnects you to your "
+                "intention across bursts. Use for 'catch me up' / 'what did I miss'."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "mode":       {"type": "string", "description": "baseline: last_seen | checkpoint | window. Default last_seen."},
+                    "window":     {"type": "string", "description": "lookback window, e.g. '7d'. Default 7d."},
+                    "checkpoint": {"type": "string", "description": "checkpoint name when mode=checkpoint. Optional."},
+                },
+            },
+        },
+        {
+            "name": "get_risks",
+            "description": (
+                "Read the project's risk signals (churn, test_gap, complexity, "
+                "intent_drift), highest score first. Each row is a deterministic "
+                "heuristic over real git data, citable by `area` (file path). Use "
+                "for 'what's risky' — emit cited callout blocks, never invent severity."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "kind":     {"type": "string", "description": "churn | test_gap | complexity | intent_drift. Optional."},
+                    "severity": {"type": "string", "description": "Filter by severity. Optional."},
+                    "limit":    {"type": "integer", "default": 50},
+                },
+            },
+        },
+        {
             "name": "emit_block",
             "description": (
                 "Emit ONE block of your answer. Call once per block, in order. "
@@ -205,4 +291,27 @@ def dispatch_tool(
         return anchor.find_tests(project_root, args["symbol"])
     if name == "get_module_graph":
         return anchor.get_module_graph(conn, project_id, args.get("scope", ""))
+    if name == "get_decisions":
+        return anchor.get_decisions(
+            conn, project_id, status=args.get("status"), limit=args.get("limit", 50)
+        )
+    if name == "get_reverse_dependents":
+        return anchor.get_reverse_dependents(conn, project_id, args["path"])
+    if name == "git_archaeology":
+        return anchor.git_archaeology(project_root, conn, project_id, args["file"])
+    if name == "get_story_snapshots":
+        return anchor.get_story_snapshots(conn, project_id, limit=args.get("limit", 5))
+    if name == "get_reacquaintance_briefing":
+        return anchor.get_reacquaintance_briefing(
+            project_root,
+            mode=args.get("mode", "last_seen"),
+            window=args.get("window", "7d"),
+            checkpoint=args.get("checkpoint"),
+        )
+    if name == "get_risks":
+        return anchor.get_risks(
+            conn, project_id,
+            kind=args.get("kind"), severity=args.get("severity"),
+            limit=args.get("limit", 50),
+        )
     return {"error": "unknown_tool", "name": name}
