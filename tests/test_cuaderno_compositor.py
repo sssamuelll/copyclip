@@ -99,6 +99,64 @@ def test_read_tool_then_compose(tmp_path: Path):
     assert events[2]["block"] == {"kind": "lead", "text": "answer"}
 
 
+def test_graph_view_fog_is_stamped_authoritative(tmp_path: Path):
+    """End-to-end honesty: the model calls get_module_graph (evidence gains the
+    computed debt), then emits a graph_view LYING about both the fog number and
+    the cited file. The emitted block must carry the SERVER's score and citation
+    — fog crosses computed, never uttered."""
+    import sqlite3
+    from copyclip.intelligence.db import init_schema
+
+    conn = sqlite3.connect(":memory:")
+    init_schema(conn)
+    conn.execute("INSERT INTO projects(root_path) VALUES(?)", (str(tmp_path),))
+    pid = conn.execute("SELECT id FROM projects").fetchone()[0]
+
+    def _sym(name, module, fp):
+        cur = conn.execute(
+            "INSERT INTO symbols(project_id,name,kind,file_path,line_start,line_end,"
+            "parent_symbol_id,module) VALUES(?,?,?,?,?,?,?,?)",
+            (pid, name, "function", fp, 1, 5, None, module))
+        return cur.lastrowid
+
+    a = _sym("fn_a", "pkg/a", "pkg/a.py")
+    b = _sym("fn_b", "pkg/b", "pkg/b.py")
+    conn.execute("INSERT INTO symbol_edges(project_id,from_symbol_id,to_symbol_id,edge_type) "
+                 "VALUES(?,?,?,?)", (pid, a, b, "calls"))
+    conn.execute("INSERT INTO analysis_file_insights(project_id,path,module,cognitive_debt) "
+                 "VALUES(?,?,?,?)", (pid, "pkg/a.py", "pkg/a", 88.0))
+    conn.commit()
+
+    gv = {"kind": "widget", "widget": {
+        "kind": "graph_view",
+        "nodes": [{"id": "pkg/a", "label": "a",
+                   "citation": {"kind": "path", "path": "LIES.py"},   # wrong file
+                   "cognitive_debt_score": 3.0}],                      # wrong number
+        "edges": []}}
+    turns = [
+        [
+            _tool_stop("t1", "get_module_graph", {}),
+            _msg_stop("tool_use", [_content("t1", "get_module_graph", {})]),
+        ],
+        [
+            _tool_stop("b1", "emit_block", gv),
+            _tool_stop("f", "finish", {}),
+            _msg_stop("tool_use", [_content("b1", "emit_block", gv),
+                                   _content("f", "finish", {})]),
+        ],
+    ]
+    client = StubStream(turns)
+    events = list(iter_compose_events(
+        client=client, question="show me the architecture",
+        project_root=str(tmp_path), project_id=pid, conn=conn,
+    ))
+    blocks = [e["block"] for e in events if e["type"] == "block"]
+    assert blocks, "graph_view block was not emitted"
+    node = blocks[0]["widget"]["nodes"][0]
+    assert node["cognitive_debt_score"] == 88.0                       # server truth, not 3.0
+    assert node["citation"] == {"kind": "path", "path": "pkg/a.py"}   # not LIES.py
+
+
 def test_implicit_finish_on_end_turn(tmp_path: Path):
     turn = [
         _tool_stop("b1", "emit_block", {"kind": "lead", "text": "x"}),
