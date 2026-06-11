@@ -804,6 +804,27 @@
   z-index: 1;
 }
 
+/* decision status change — the cuaderno's only write, behind a human click */
+.decision-confirm { margin-top: 10px; }
+.decision-confirm-btn {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.decision-confirm-btn:disabled { opacity: 0.6; cursor: default; }
+.decision-confirm.done {
+  margin-top: 10px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--accent-ink);
+}
+.decision-confirm-err { margin-left: 10px; font-size: 12px; color: var(--ink-3); }
+
 /* diff widget */
 .diff {
   font-family: var(--font-mono);
