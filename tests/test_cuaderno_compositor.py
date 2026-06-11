@@ -131,7 +131,7 @@ def test_graph_view_fog_is_stamped_authoritative(tmp_path: Path):
         "kind": "graph_view",
         "nodes": [{"id": "pkg/a", "label": "a",
                    "citation": {"kind": "path", "path": "LIES.py"},   # wrong file
-                   "cognitive_debt_score": 3.0}],                      # wrong number
+                   "heat": 3.0}],                      # wrong number
         "edges": []}}
     turns = [
         [
@@ -153,7 +153,7 @@ def test_graph_view_fog_is_stamped_authoritative(tmp_path: Path):
     blocks = [e["block"] for e in events if e["type"] == "block"]
     assert blocks, "graph_view block was not emitted"
     node = blocks[0]["widget"]["nodes"][0]
-    assert node["cognitive_debt_score"] == 88.0                       # server truth, not 3.0
+    assert node["heat"] == 88.0                       # server truth, not 3.0
     assert node["citation"] == {"kind": "path", "path": "pkg/a.py"}   # not LIES.py
 
 

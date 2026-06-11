@@ -603,11 +603,11 @@ def _file_graph(
 def _attach_debt(
     conn: sqlite3.Connection, project_id: int, result: dict[str, Any]
 ) -> dict[str, Any]:
-    """Attach each node's cognitive_debt_score from analysis_file_insights, keyed
-    by the node's own citation file (file_path). The score is thus re-derivable
-    from the same row the node cites — one referent, one query. A file with no
-    analysis row gets a TYPED UNKNOWN (None), never 0: absence of measurement
-    must never read as low debt."""
+    """Attach each node's `heat` from analysis_file_insights, keyed by the node's
+    own citation file (file_path). Heat is the live composite (maintenance
+    pressure: churn/decisions/tests), re-derivable from the same row the node
+    cites — one referent, one query. A file with no analysis row gets a TYPED
+    UNKNOWN (None), never 0: absence of measurement must never read as low heat."""
     modules = result.get("modules") or []
     if not modules:
         return result
@@ -618,7 +618,7 @@ def _attach_debt(
         ).fetchall()
     )
     for m in modules:
-        m["cognitive_debt_score"] = debt.get(m["file_path"])
+        m["heat"] = debt.get(m["file_path"])
     return result
 
 

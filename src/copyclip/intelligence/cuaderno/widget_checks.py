@@ -14,9 +14,9 @@ class GraphEvidence:
     def __init__(self) -> None:
         self.nodes: set[str] = set()
         self.edges: set[tuple[str, str]] = set()
-        # Per module-node authoritative metadata: name -> {file_path, cognitive_debt_score}.
-        # This is the channel the STAMP reads so the fog and citation that cross to
-        # the human are the server's computation, not the model's utterance.
+        # Per module-node authoritative metadata: name -> {file_path, heat}.
+        # This is the channel the STAMP reads so the heat and citation that cross
+        # to the human are the server's computation, not the model's utterance.
         self.node_meta: dict[str, dict] = {}
 
     def add_module_graph(self, result: dict) -> None:
@@ -26,7 +26,7 @@ class GraphEvidence:
                 self.nodes.add(name)
                 self.node_meta[name] = {
                     "file_path": m.get("file_path"),
-                    "cognitive_debt_score": m.get("cognitive_debt_score"),
+                    "heat": m.get("heat"),
                 }
         for e in result.get("edges") or []:
             if isinstance(e, dict) and e.get("from") and e.get("to"):
@@ -108,16 +108,16 @@ def _stamp_graph_view(w: dict, ev: GraphEvidence) -> None:
             continue
         meta = ev.node_meta.get(str(n.get("id")))
         if meta is None:
-            # Not a fog-bearing node (e.g. a symbol from get_callers/get_callees):
-            # debt is per-file, so this node has no debt CONCEPT. Drop any
-            # model-supplied score — a fabrication can't cross, and the node is
+            # Not a heat-bearing node (e.g. a symbol from get_callers/get_callees):
+            # heat is per-file, so this node has no heat CONCEPT. Drop any
+            # model-supplied value — a fabrication can't cross, and the node is
             # not mislabeled "unmeasured" (absent != null). Citation untouched.
-            n.pop("cognitive_debt_score", None)
+            n.pop("heat", None)
             continue
-        # A module/file node: the score is the server's (number = measured,
+        # A module/file node: the heat is the server's (number = measured,
         # None = the module exists but wasn't analyzed — a typed unknown), and
-        # the citation is the same row the score came from (one referent).
-        n["cognitive_debt_score"] = meta.get("cognitive_debt_score")
+        # the citation is the same row the heat came from (one referent).
+        n["heat"] = meta.get("heat")
         file_path = meta.get("file_path")
         if file_path:
             n["citation"] = {"kind": "path", "path": file_path}

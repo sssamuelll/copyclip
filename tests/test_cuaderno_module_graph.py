@@ -205,7 +205,7 @@ def test_same_module_edges_are_excluded(seeded):
 
 
 # ---------------------------------------------------------------------------
-# Fog: cognitive_debt_score on nodes (W4-3)
+# Fog: heat on nodes (W4-3)
 # A node's fog must be re-derivable from its own citation. In file mode the node
 # IS the file, so its score is that file's measured cognitive_debt. Absence of
 # measurement is a TYPED UNKNOWN (None), never 0 — "unmeasured" must never read
@@ -217,7 +217,7 @@ def test_file_node_carries_measured_debt_score(seeded):
     _insert_insight(c, pid, "pkg/b.py", 42.0)
     g = get_module_graph(c, pid, scope="pkg/b")
     node = next(m for m in g["modules"] if m["name"] == "pkg/b.py")
-    assert node["cognitive_debt_score"] == 42.0
+    assert node["heat"] == 42.0
 
 
 def test_unmeasured_file_node_score_is_none(seeded):
@@ -227,8 +227,8 @@ def test_unmeasured_file_node_score_is_none(seeded):
     _insert_insight(c, pid, "pkg/b.py", 42.0)  # b measured; a is not
     g = get_module_graph(c, pid, scope="pkg/b")
     a = next(m for m in g["modules"] if m["name"] == "pkg/a.py")
-    assert "cognitive_debt_score" in a
-    assert a["cognitive_debt_score"] is None
+    assert "heat" in a
+    assert a["heat"] is None
 
 
 def test_analyzed_clean_file_scores_zero_not_none(seeded):
@@ -238,8 +238,8 @@ def test_analyzed_clean_file_scores_zero_not_none(seeded):
     _insert_insight(c, pid, "pkg/b.py", 0.0)
     g = get_module_graph(c, pid, scope="pkg/b")
     node = next(m for m in g["modules"] if m["name"] == "pkg/b.py")
-    assert node["cognitive_debt_score"] == 0.0
-    assert node["cognitive_debt_score"] is not None
+    assert node["heat"] == 0.0
+    assert node["heat"] is not None
 
 
 def test_directory_node_cites_max_debt_file():
@@ -259,7 +259,7 @@ def test_directory_node_cites_max_debt_file():
     g = get_module_graph(c, pid)  # directory mode
     node = next(m for m in g["modules"] if m["name"] == "pkg/a")
     assert node["file_path"] == "pkg/a/zzz.py"        # cites the MAX-debt file
-    assert node["cognitive_debt_score"] == 90.0       # fog == that file's debt
+    assert node["heat"] == 90.0       # fog == that file's debt
 
 
 def test_directory_module_without_analysis_falls_back_to_min():
@@ -275,7 +275,7 @@ def test_directory_module_without_analysis_falls_back_to_min():
     g = get_module_graph(c, pid)  # no analysis rows at all
     node = next(m for m in g["modules"] if m["name"] == "pkg/a")
     assert node["file_path"] == "pkg/a/aaa.py"        # MIN fallback
-    assert node["cognitive_debt_score"] is None       # typed unknown
+    assert node["heat"] is None       # typed unknown
 
 
 # ---------------------------------------------------------------------------
