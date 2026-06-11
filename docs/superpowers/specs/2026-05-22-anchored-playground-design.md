@@ -1,8 +1,8 @@
 # Anchored Playground — Design Spec
 
 **Date**: 2026-05-22
-**Status**: Approved for implementation
-**Tracking**: Epic #86 — child issues #87 (backend), #88 (subprocess), #89 (frontend), #90 (Atlas connector), #91-#96 (follow-up connectors)
+**Status**: Superseded by the 2026-06-04 cuaderno-shell consensus. The playground was not cut — it was reborn inside the cuaderno (a single anchored slot), and the dashboard connectors this spec describes target a surface that no longer exists. The forward arc is Cruces / Junctions v0.1 (#146). Kept as a historical design record.
+**Tracking**: Epic #86 and children #87-#96 closed as superseded (Wave 5, 2026-06).
 
 ## Why
 
