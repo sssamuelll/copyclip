@@ -63,12 +63,12 @@ def test_quick_debt_signal_returns_severity_and_primary_signal(tmp_path):
     conn.close()
 
     assert signal is not None
-    # Under the v1 factor model the dark file lands in "high" or "critical"
-    # depending on how aged the seeded blame is at test runtime; the heaviest
-    # weighted factor for this fixture is the agent-authored ratio.
+    # Under the v2 factor model the dark file still lands "high"/"critical"; with
+    # the dead agent_authored_ratio removed, the heaviest surviving factor for
+    # this fixture is review staleness (the human-recency signal).
     assert signal["value"] >= 50
     assert signal["severity"] in {"high", "critical"}
-    assert signal["primary_signal"] == "agent_authored_ratio"
+    assert signal["primary_signal"] == "review_staleness"
 
 
 def test_quick_debt_signal_returns_none_for_unknown_path(tmp_path):

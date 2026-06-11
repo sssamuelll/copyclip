@@ -18,17 +18,23 @@ import math
 from typing import Any, Iterable
 
 
-CONTRACT_VERSION = "v1"
+# v2 (Pulso heat cleanup): the dead agent_authored_ratio factor is removed — it
+# was git-blame author-matched, which reads 0 here (the human commits the AI's
+# work under his own name), so it only diluted the score. Its 0.22 weight is
+# redistributed to the CONTINUOUS, discriminating factors (churn, staleness,
+# ownership, blast, novelty), NOT the binary gap factors — amplifying a binary
+# near-constant is whack-a-mole. decision_gap also gains an activation-gate (it
+# leaves the denominator when the project links no decisions at all).
+CONTRACT_VERSION = "v2"
 
 COGNITIVE_DEBT_FACTORS: list[dict[str, Any]] = [
-    {"id": "churn_pressure", "label": "Churn pressure", "weight": 0.18},
-    {"id": "agent_authored_ratio", "label": "Agent-authored ratio", "weight": 0.22},
-    {"id": "review_staleness", "label": "Review staleness", "weight": 0.15},
+    {"id": "churn_pressure", "label": "Churn pressure", "weight": 0.26},
+    {"id": "review_staleness", "label": "Review staleness", "weight": 0.22},
     {"id": "test_evidence_gap", "label": "Test evidence gap", "weight": 0.12},
     {"id": "decision_gap", "label": "Decision gap", "weight": 0.13},
-    {"id": "ownership_ambiguity", "label": "Ownership ambiguity", "weight": 0.08},
-    {"id": "blast_radius", "label": "Blast radius", "weight": 0.07},
-    {"id": "novelty_recency", "label": "Novelty recency", "weight": 0.05},
+    {"id": "ownership_ambiguity", "label": "Ownership ambiguity", "weight": 0.10},
+    {"id": "blast_radius", "label": "Blast radius", "weight": 0.09},
+    {"id": "novelty_recency", "label": "Novelty recency", "weight": 0.08},
 ]
 
 FACTOR_WEIGHT = {f["id"]: f["weight"] for f in COGNITIVE_DEBT_FACTORS}
@@ -180,6 +186,25 @@ def _decision_links_for_file(conn, project_id: int, path: str) -> list[int]:
     return [int(r[0]) for r in rows if r[0] is not None]
 
 
+def _project_uses_decisions(conn, project_id: int) -> bool:
+    """True iff the project links any accepted/resolved decision to any file.
+    When False, a per-file decision_gap is a project-level documentation fact in
+    disguise, not a discriminating signal — so the factor deactivates."""
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM decisions d
+        LEFT JOIN decision_refs dr ON dr.decision_id = d.id AND dr.ref_type='file'
+        LEFT JOIN decision_links dl ON dl.decision_id = d.id AND dl.project_id = d.project_id AND dl.link_type='file'
+        WHERE d.project_id=? AND d.status IN ('accepted', 'resolved')
+          AND (dr.ref_value IS NOT NULL OR dl.target_pattern IS NOT NULL)
+        LIMIT 1
+        """,
+        (project_id,),
+    ).fetchone()
+    return row is not None
+
+
 def _module_has_tests(conn, project_id: int, module: str, files: Iterable[str]) -> bool:
     for path in files:
         lowered = path.lower()
@@ -228,7 +253,7 @@ def _factor_item(
     }
 
 
-def _build_file_factors(conn, project_id: int, path: str, *, lookback_days: int, now_ts: float) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _build_file_factors(conn, project_id: int, path: str, *, lookback_days: int, now_ts: float, project_uses_decisions: bool | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     insight = _file_insight(conn, project_id, path)
     if insight is None:
         insight = {"module": None, "complexity": None, "cognitive_debt": None, "agent_line_ratio": None, "last_human_ts": None}
@@ -252,29 +277,6 @@ def _build_file_factors(conn, project_id: int, path: str, *, lookback_days: int,
         rationale=f"{churn_count} recorded change(s) for this file.",
         evidence=[f"file:{path}"],
     ))
-
-    # agent_authored_ratio
-    agent_ratio = insight.get("agent_line_ratio")
-    if agent_ratio is not None:
-        agent_pct = _clamp(float(agent_ratio) * 100.0)
-        factors.append(_factor_item(
-            "agent_authored_ratio",
-            normalized=agent_pct,
-            raw_signal={"agent_line_ratio": round(float(agent_ratio), 4)},
-            available=True,
-            rationale=f"{agent_pct:.1f}% of current lines are agent-authored.",
-            evidence=[f"file:{path}", "blame:agent"],
-        ))
-        _append_evidence(evidence_index, {"id": "blame:agent", "type": "blame", "label": "agent-authored lines", "ref": "blame:agent"})
-    else:
-        factors.append(_factor_item(
-            "agent_authored_ratio",
-            normalized=None,
-            raw_signal={"agent_line_ratio": None},
-            available=False,
-            rationale="No blame data available for this file.",
-            evidence=[],
-        ))
 
     # review_staleness
     last_human_ts = insight.get("last_human_ts")
@@ -314,16 +316,23 @@ def _build_file_factors(conn, project_id: int, path: str, *, lookback_days: int,
         evidence=[f"module:{module}"] if module else [f"file:{path}"],
     ))
 
-    # decision_gap
+    # decision_gap — gated: a per-file decision gap only discriminates in a
+    # project that links decisions at all. Where the project links none, the
+    # factor would fire on ~every file (a project-level documentation fact in a
+    # per-file costume) and saturate the score, so it deactivates and leaves the
+    # denominator instead of firing at 100.
+    if project_uses_decisions is None:
+        project_uses_decisions = _project_uses_decisions(conn, project_id)
     decisions = _decision_links_for_file(conn, project_id, path)
-    decision_coverage = 1.0 if decisions else 0.0
     factors.append(_factor_item(
         "decision_gap",
-        normalized=(1.0 - decision_coverage) * 100.0,
-        raw_signal={"linked_decisions": decisions},
-        available=True,
+        normalized=(0.0 if decisions else 100.0),
+        raw_signal={"linked_decisions": decisions, "project_uses_decisions": project_uses_decisions},
+        available=bool(project_uses_decisions),
         rationale=(
-            f"File is linked to {len(decisions)} accepted/resolved decision(s)." if decisions else "No accepted decision is linked to this file."
+            f"File is linked to {len(decisions)} accepted/resolved decision(s)." if decisions
+            else ("No accepted decision is linked to this file." if project_uses_decisions
+                  else "Project links no decisions to code; decision gap not scored per file.")
         ),
         evidence=[f"file:{path}"] + [f"decision:{d}" for d in decisions],
     ))
@@ -450,8 +459,10 @@ def _aggregate_module_from_files(conn, project_id: int, module: str, files: list
     combined_factors: dict[str, dict[str, Any]] = {}
     combined_evidence: list[dict[str, Any]] = []
 
+    # Compute the project-level decision-gate ONCE, not once per file.
+    uses_decisions = _project_uses_decisions(conn, project_id)
     for path in files:
-        factors, evidence_index = _build_file_factors(conn, project_id, path, lookback_days=lookback_days, now_ts=now_ts)
+        factors, evidence_index = _build_file_factors(conn, project_id, path, lookback_days=lookback_days, now_ts=now_ts, project_uses_decisions=uses_decisions)
         file_score, _ = _compose_score(factors)
         per_file_breakdowns.append({"path": path, "score": file_score, "severity": _severity_for(file_score)})
         for ev in evidence_index:

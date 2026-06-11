@@ -59,7 +59,7 @@ Labels are stable. Tuning factor weights does not change bucket semantics.
   "meta": {
     "project": "copyclip",
     "generated_at": "2026-04-20T10:00:00Z",
-    "contract_version": "v1",
+    "contract_version": "v2",
     "scope_kind": "file",
     "scope_id": "src/copyclip/mcp_server.py"
   },
@@ -83,27 +83,30 @@ Factors are measured independently, normalized to `[0, 100]`, weighted, and summ
 
 | `factor_id`              | Signal source                                                    | Normalization                                                   | Weight |
 |--------------------------|------------------------------------------------------------------|-----------------------------------------------------------------|--------|
-| `churn_pressure`         | `file_changes` rows over the lookback window                     | `min(100, churn_count * churn_unit)`                            | 0.18   |
-| `agent_authored_ratio`   | `git blame` agent-authored lines / total lines                   | `ratio * 100`                                                   | 0.22   |
-| `review_staleness`       | days since last human-authored line                              | `min(100, days_since_human / 60 * 100)`                         | 0.15   |
+| `churn_pressure`         | `file_changes` rows over the lookback window                     | `min(100, churn_count * churn_unit)`                            | 0.26   |
+| `review_staleness`       | days since last human-authored line                              | `min(100, days_since_human / 60 * 100)`                         | 0.22   |
 | `test_evidence_gap`      | linked test files / (files × 1) over the module or file's module | `(1 - coverage_hint) * 100`                                     | 0.12   |
-| `decision_gap`           | decisions linked to the area vs touched decisions across churn   | `(1 - decision_link_ratio) * 100`                               | 0.13   |
-| `ownership_ambiguity`    | distinct authors + tenure dispersion in blame                    | `min(100, distinct_authors * tenure_weight)`                    | 0.08   |
-| `blast_radius`           | module fan-out and import-graph depth                            | `min(100, (fan_out_normalized + import_depth_normalized) * 50)` | 0.07   |
-| `novelty_recency`        | `commits` whose SHA first introduced the file, within window     | `age_recency_bump()`                                            | 0.05   |
+| `decision_gap`           | decisions linked to the area (gated, see below)                  | `0` if linked, else `100`                                       | 0.13   |
+| `ownership_ambiguity`    | distinct authors + tenure dispersion in blame                    | `min(100, distinct_authors * tenure_weight)`                    | 0.10   |
+| `blast_radius`           | module fan-out and import-graph depth                            | `min(100, (fan_out_normalized + import_depth_normalized) * 50)` | 0.09   |
+| `novelty_recency`        | `commits` whose SHA first introduced the file, within window     | `age_recency_bump()`                                            | 0.08   |
 
-Weights sum to `1.00`. The default weights above are the v1 baseline; different weight profiles may exist later (e.g. delegation-mode vs review-mode) but the contract version must be bumped when profiles change.
+Weights sum to `1.00`. **v2** removed `agent_authored_ratio` (it was git-blame author-matched, which reads ~0 when the human commits the AI's work under his own name — a dead, diluting signal; its `Co-Authored-By` replacement lives in the separate Pulso "Last contact" metric, not here). Its 0.22 weight was redistributed to the continuous, discriminating factors, not the binary gap factors.
+
+**`decision_gap` activation-gate (v2):** the factor deactivates (`signal_available=false`, leaving the denominator) when the project links *no* accepted/resolved decisions to any file at all — there, a per-file decision gap is a project-level documentation fact in disguise, not a discriminating signal. When the project does use decisions, a file lacking one is a real gap and fires at `100`.
+
+Different weight profiles may exist later (e.g. delegation-mode vs review-mode) but the contract version must be bumped when profiles change.
 
 ### Factor breakdown item shape
 
 ```json
 {
-  "factor_id": "agent_authored_ratio",
-  "label": "Agent-authored ratio",
+  "factor_id": "review_staleness",
+  "label": "Review staleness",
   "weight": 0.22,
-  "raw_signal": { "agent_lines": 140, "total_lines": 220 },
-  "normalized_contribution": 63.6,
-  "weighted_contribution": 14.0,
+  "raw_signal": { "days_since_human": 42.0 },
+  "normalized_contribution": 70.0,
+  "weighted_contribution": 15.4,
   "signal_available": true,
   "rationale": "63.6% of current lines were authored by external agents.",
   "evidence": ["file:src/copyclip/mcp_server.py", "blame:agent"]
