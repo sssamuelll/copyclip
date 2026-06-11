@@ -209,15 +209,15 @@ def _risk_dark_zones(
             {
                 "risk_id": f"debt:{path}",
                 "area": path,
-                "kind": "cognitive_debt",
+                "kind": "heat",
                 "severity": "high" if debt >= 80 else "medium",
                 "score": round(debt, 2),
-                "why_it_matters": f"This area has elevated cognitive debt ({debt:.1f}).",
+                "why_it_matters": f"This area has elevated heat ({debt:.1f}).",
                 "recommended_guardrail": "Prefer minimal bounded changes and explicit human review.",
                 "evidence": [f"risk:debt:{path}", f"file:{path}"],
             }
         )
-        _append_evidence(evidence_index, _evidence_item(f"risk:debt:{path}", "risk", f"cognitive_debt in {path}", f"debt:{path}"))
+        _append_evidence(evidence_index, _evidence_item(f"risk:debt:{path}", "risk", f"heat in {path}", f"debt:{path}"))
         _append_evidence(evidence_index, _evidence_item(f"file:{path}", "file", path, path))
     return risks[:5]
 
@@ -551,10 +551,10 @@ def _file_risk_signals(conn, project_id: int, path: str) -> dict[str, Any] | Non
     return {
         "risk_id": int(risk_row[0]) if has_risk else None,
         "severity": str(risk_row[1]) if has_risk else ("high" if debt >= 80 else "medium"),
-        "kind": str(risk_row[2]) if has_risk else "cognitive_debt",
+        "kind": str(risk_row[2]) if has_risk else "heat",
         "rationale": str(risk_row[3]) if has_risk and risk_row[3] else None,
         "risk_score": int(risk_row[4] or 0) if has_risk else None,
-        "cognitive_debt": round(debt, 2) if debt else None,
+        "heat": round(debt, 2) if debt else None,
     }
 
 
@@ -697,8 +697,8 @@ def build_handoff_review_summary(
             reason_parts.append(f"kind={signals['kind']}")
         if signals.get("severity"):
             reason_parts.append(f"severity={signals['severity']}")
-        if signals.get("cognitive_debt") is not None:
-            reason_parts.append(f"cognitive_debt={signals['cognitive_debt']}")
+        if signals.get("heat") is not None:
+            reason_parts.append(f"heat={signals['heat']}")
         reason_prefix = "Acknowledged dark zone touched" if expected else "Unexpected dark zone entry"
         dark_zone_entry.append({
             "area": touched,

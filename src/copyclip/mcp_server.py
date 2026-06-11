@@ -20,9 +20,10 @@ from copyclip.reader import read_files_concurrently
 from copyclip.minimizer import minimize_content
 
 # Brief: CopyClip MCP Server
-# This server acts as the "Intent Oracle" for external agents.
+# This server exposes bounded, audited project views to external agents — tools,
+# not an authority. The audit verdict returns to the human, not the agent.
 
-server = Server("copyclip-intent-oracle")
+server = Server("copyclip")
 
 @server.list_tools()
 async def handle_list_tools() -> List[types.Tool]:
@@ -77,8 +78,8 @@ async def handle_list_tools() -> List[types.Tool]:
             },
         ),
         types.Tool(
-            name="get_cognitive_load",
-            description="Get the 'Fog of War' map (cognitive debt score) for modules and files.",
+            name="get_heat",
+            description="Get the heat map (maintenance/attention pressure per module and file).",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -156,9 +157,9 @@ async def handle_call_tool(
         summary = arguments.get("summary", "")
         return await _log_decision_proposal(path, title, summary)
 
-    if name == "get_cognitive_load":
+    if name == "get_heat":
         path = os.path.abspath(arguments.get("path", "."))
-        return await _get_cognitive_load(path)
+        return await _get_heat(path)
 
     if name == "list_handoff_packets":
         path = os.path.abspath(arguments.get("path", "."))
@@ -335,39 +336,40 @@ async def _log_decision_proposal(root: str, title: str, summary: str) -> List[ty
         conn.commit()
         conn.close()
         
-        return [types.TextContent(type="text", text=f"Success: Decision #{cur.lastrowid} proposed. Review it in the CopyClip Dashboard.")]
+        return [types.TextContent(type="text", text=f"Success: Decision #{cur.lastrowid} proposed. Review it in the CopyClip cuaderno.")]
     except Exception as e:
         return [types.TextContent(type="text", text=f"Error proposing decision: {str(e)}")]
 
-async def _get_cognitive_load(root: str) -> List[types.TextContent]:
-    """Logic for Cognitive Load map tool."""
+async def _get_heat(root: str) -> List[types.TextContent]:
+    """Logic for the heat (maintenance/attention pressure) map tool. The
+    cognitive_debt column holds the live composite (build_debt_breakdown)."""
     try:
         conn = connect(root)
         init_schema(conn)
-        
+
         rows = conn.execute(
             """
-            SELECT module, AVG(cognitive_debt) as avg_debt, COUNT(*) as files
+            SELECT module, AVG(cognitive_debt) as avg_heat, COUNT(*) as files
             FROM analysis_file_insights
             WHERE project_id = (SELECT id FROM projects WHERE root_path=?)
             GROUP BY module
-            ORDER BY avg_debt DESC
+            ORDER BY avg_heat DESC
             """, (root,)
         ).fetchall()
-        
+
         conn.close()
-        
-        output = ["# 🌫️ FOG OF WAR: COGNITIVE DEBT MAP", "> Higher debt means the code is less understood by the human developer."]
+
+        output = ["# 🔥 HEAT MAP", "> Higher heat means more maintenance and attention pressure on this code — not that it is less understood."]
         if rows:
             for r in rows:
-                status = "🔴 HIGH" if r['avg_debt'] > 65 else ("🟡 MED" if r['avg_debt'] > 35 else "🟢 LOW")
-                output.append(f"- **{r['module']}**: {status} (Debt: {r['avg_debt']:.1f}, Files: {r['files']})")
+                status = "🔴 HIGH" if r['avg_heat'] > 65 else ("🟡 MED" if r['avg_heat'] > 35 else "🟢 LOW")
+                output.append(f"- **{r['module']}**: {status} (Heat: {r['avg_heat']:.1f}, Files: {r['files']})")
         else:
-            output.append("- No cognitive debt data available. Run 'copyclip analyze' first.")
-            
+            output.append("- No heat data available. Run 'copyclip analyze' first.")
+
         return [types.TextContent(type="text", text="\n".join(output))]
     except Exception as e:
-        return [types.TextContent(type="text", text=f"Error reading cognitive map: {str(e)}")]
+        return [types.TextContent(type="text", text=f"Error reading heat map: {str(e)}")]
 
 def _project_id_for_root(conn, root: str) -> int | None:
     row = conn.execute("SELECT id FROM projects WHERE root_path=?", (root,)).fetchone()
