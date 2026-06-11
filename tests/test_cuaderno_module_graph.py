@@ -36,6 +36,16 @@ def _insert_edge(conn, pid, from_id, to_id, edge_type="calls"):
     conn.commit()
 
 
+def _insert_insight(conn, pid, path, debt, module=None):
+    """Seed an analysis_file_insights row (a FILE's measured cognitive_debt)."""
+    conn.execute(
+        "INSERT INTO analysis_file_insights(project_id, path, module, cognitive_debt) "
+        "VALUES(?, ?, ?, ?)",
+        (pid, path, module, debt),
+    )
+    conn.commit()
+
+
 @pytest.fixture
 def seeded():
     """Project with 3 modules (pkg/a, pkg/b, pkg/c), one symbol each,
@@ -192,6 +202,80 @@ def test_same_module_edges_are_excluded(seeded):
     g = get_module_graph(c, pid)
     for e in g["edges"]:
         assert e["from"] != e["to"]
+
+
+# ---------------------------------------------------------------------------
+# Fog: cognitive_debt_score on nodes (W4-3)
+# A node's fog must be re-derivable from its own citation. In file mode the node
+# IS the file, so its score is that file's measured cognitive_debt. Absence of
+# measurement is a TYPED UNKNOWN (None), never 0 — "unmeasured" must never read
+# as "low debt".
+# ---------------------------------------------------------------------------
+
+def test_file_node_carries_measured_debt_score(seeded):
+    c, pid = seeded
+    _insert_insight(c, pid, "pkg/b.py", 42.0)
+    g = get_module_graph(c, pid, scope="pkg/b")
+    node = next(m for m in g["modules"] if m["name"] == "pkg/b.py")
+    assert node["cognitive_debt_score"] == 42.0
+
+
+def test_unmeasured_file_node_score_is_none(seeded):
+    """A file with no analysis row carries the key with value None (typed
+    unknown), not a fabricated 0 and not an absent key."""
+    c, pid = seeded
+    _insert_insight(c, pid, "pkg/b.py", 42.0)  # b measured; a is not
+    g = get_module_graph(c, pid, scope="pkg/b")
+    a = next(m for m in g["modules"] if m["name"] == "pkg/a.py")
+    assert "cognitive_debt_score" in a
+    assert a["cognitive_debt_score"] is None
+
+
+def test_analyzed_clean_file_scores_zero_not_none(seeded):
+    """A file analyzed and found clean (debt 0.0) is DISTINCT from an unmeasured
+    file (None). Absence must never collapse into low debt."""
+    c, pid = seeded
+    _insert_insight(c, pid, "pkg/b.py", 0.0)
+    g = get_module_graph(c, pid, scope="pkg/b")
+    node = next(m for m in g["modules"] if m["name"] == "pkg/b.py")
+    assert node["cognitive_debt_score"] == 0.0
+    assert node["cognitive_debt_score"] is not None
+
+
+def test_directory_node_cites_max_debt_file():
+    """D: a MODULE node cites its MAX-debt file (not the alphabetical MIN), so the
+    fog the user sees is re-derivable by opening the very file the node cites —
+    the brightest node IS the worst file, and that file is what opens."""
+    c = sqlite3.connect(":memory:")
+    init_schema(c)
+    pid = _make_project(c)
+    # module pkg/a has two files; aaa.py is the alphabetical MIN, zzz.py the worst
+    a1 = _insert_symbol(c, pid, "fn_a1", "pkg/a", "pkg/a/aaa.py")
+    _insert_symbol(c, pid, "fn_a2", "pkg/a", "pkg/a/zzz.py")
+    b = _insert_symbol(c, pid, "fn_b", "pkg/b", "pkg/b.py")
+    _insert_edge(c, pid, a1, b)  # a -> b keeps pkg/a in the graph
+    _insert_insight(c, pid, "pkg/a/aaa.py", 10.0)
+    _insert_insight(c, pid, "pkg/a/zzz.py", 90.0)
+    g = get_module_graph(c, pid)  # directory mode
+    node = next(m for m in g["modules"] if m["name"] == "pkg/a")
+    assert node["file_path"] == "pkg/a/zzz.py"        # cites the MAX-debt file
+    assert node["cognitive_debt_score"] == 90.0       # fog == that file's debt
+
+
+def test_directory_module_without_analysis_falls_back_to_min():
+    """An unanalyzed module keeps the MIN citation (current behavior) and a typed
+    unknown score — never a silent MIN-as-fog leak, never a fabricated 0."""
+    c = sqlite3.connect(":memory:")
+    init_schema(c)
+    pid = _make_project(c)
+    a1 = _insert_symbol(c, pid, "fn_a1", "pkg/a", "pkg/a/aaa.py")
+    _insert_symbol(c, pid, "fn_a2", "pkg/a", "pkg/a/zzz.py")
+    b = _insert_symbol(c, pid, "fn_b", "pkg/b", "pkg/b.py")
+    _insert_edge(c, pid, a1, b)
+    g = get_module_graph(c, pid)  # no analysis rows at all
+    node = next(m for m in g["modules"] if m["name"] == "pkg/a")
+    assert node["file_path"] == "pkg/a/aaa.py"        # MIN fallback
+    assert node["cognitive_debt_score"] is None       # typed unknown
 
 
 # ---------------------------------------------------------------------------

@@ -693,7 +693,10 @@ export type CallersTreeWidget = {
 
 export type GraphViewWidget = {
   kind: 'graph_view'
-  nodes: Array<{ id: string; label: string; citation?: Citation }>
+  // cognitive_debt_score is the server-stamped fog: a number = measured debt,
+  // null = unmeasured (typed unknown — never rendered as low). Never set by the
+  // model; the compositor stamps it from this turn's evidence.
+  nodes: Array<{ id: string; label: string; citation?: Citation; cognitive_debt_score?: number | null }>
   edges: Array<{ from: string; to: string; weight?: number }>
   focus?: string
   truncated?: boolean

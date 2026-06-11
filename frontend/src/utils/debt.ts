@@ -9,6 +9,17 @@ export function fogToSeverity(level: FogLevel | string | undefined | null): Debt
   return 'low'
 }
 
+// Map a 0-100 cognitive_debt_score to a severity band. Mirrors the backend's
+// canonical SEVERITY_BUCKETS (critical 75 / high 50 / medium 25 / low) so the
+// cyan a node is painted matches the computed severity — quantized into legible
+// bands, never a smooth ramp.
+export function scoreToBand(score: number): DebtSeverity {
+  if (score >= 75) return 'critical'
+  if (score >= 50) return 'high'
+  if (score >= 25) return 'medium'
+  return 'low'
+}
+
 export function fogClass(input: { severity?: DebtSeverity | string; fog_level?: FogLevel | string }): FogClass {
   const sev = input.severity ?? fogToSeverity(input.fog_level)
   if (sev === 'critical') return 'fog-critical'

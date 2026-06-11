@@ -25,6 +25,11 @@
   /* sparing complementary accent (kept rare) */
   --accent-2:     oklch(0.52 0.10 200); /* slate-teal for "got it / didn't" */
 
+  /* cognitive-debt fog — a NEUTRAL data signal, deliberately outside the warm
+     editorial accent: cyan says "this is just data, not an alert". Self-contained
+     here so the cuaderno never depends on the dying styles.css. */
+  --accent-cyan:  #06b6d4;
+
   /* radii + shadow */
   --radius-sm: 4px;
   --radius:    8px;
@@ -58,6 +63,9 @@
   --accent-ink:   oklch(0.84 0.10 45);
 
   --accent-2:     oklch(0.74 0.08 200);
+
+  /* brighter cyan for legibility on dark paper */
+  --accent-cyan:  #22d3ee;
 
   --shadow-1: 0 1px 0 rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.35);
   --shadow-2: 0 6px 20px rgba(0,0,0,0.55), 0 1px 0 rgba(0,0,0,0.5);

@@ -24,7 +24,7 @@ from .schema import (
     FRAME_STATUS_UNGROUNDED, FRAME_STATUS_INSUFFICIENT_EVIDENCE, FRAME_STATUS_OFF_TARGET,
 )
 from .tool_catalog import ANSWER_TOOLS, build_tool_definitions, dispatch_tool
-from .widget_checks import GraphEvidence, validate_widget_payload
+from .widget_checks import GraphEvidence, validate_widget_payload, stamp_widget_payload
 from ..playground import FunctionRef, resolve_function_ref
 
 CLOSING_DIRECTIVE = (
@@ -419,6 +419,10 @@ def iter_compose_events(
                             reason = validate_widget_payload(inp, evidence)
                         emit_status[blk["id"]] = reason
                         if reason is None:
+                            # Evidence-bearing values (fog score + citation) are the
+                            # server's, not the model's: stamp from this turn's
+                            # evidence so a fabricated number cannot cross.
+                            stamp_widget_payload(inp, evidence)
                             b = Block.from_dict(inp)
                             emitted.append(b)
                             trace.event("block.accept", block=b.to_dict(), sse=True)

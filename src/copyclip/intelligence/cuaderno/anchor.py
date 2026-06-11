@@ -505,6 +505,39 @@ def _rank_and_cap(
     }
 
 
+def _module_citation_files(
+    conn: sqlite3.Connection, project_id: int
+) -> dict[str, str]:
+    """Per module, the file it cites. A module is a SET; its citation must be a
+    chosen representative, and the honest representative is the module's MAX-debt
+    file — so the fog painted on the node is re-derivable by opening the very file
+    the node cites (one referent). When no file in the module has been analyzed,
+    fall back to MIN(file_path) (the prior, arbitrary-but-stable representative)
+    and let _attach_debt mark the score as a typed unknown."""
+    rows = conn.execute(
+        """
+        SELECT DISTINCT s.module, s.file_path, afi.cognitive_debt
+        FROM symbols s
+        LEFT JOIN analysis_file_insights afi
+          ON afi.project_id = s.project_id AND afi.path = s.file_path
+        WHERE s.project_id=? AND s.module IS NOT NULL
+        """,
+        (project_id,),
+    ).fetchall()
+    by_mod: dict[str, list[tuple[str, Optional[float]]]] = {}
+    for module, file_path, debt in rows:
+        by_mod.setdefault(module, []).append((file_path, debt))
+    citation: dict[str, str] = {}
+    for module, files in by_mod.items():
+        analyzed = [(fp, d) for fp, d in files if d is not None]
+        if analyzed:
+            # highest debt wins; ties broken by path for determinism
+            citation[module] = sorted(analyzed, key=lambda x: (-x[1], x[0]))[0][0]
+        else:
+            citation[module] = min(fp for fp, _ in files)
+    return citation
+
+
 def _directory_graph(
     conn: sqlite3.Connection, project_id: int, max_nodes: int, max_edges: int
 ) -> dict[str, Any]:
@@ -522,13 +555,7 @@ def _directory_graph(
         """,
         (project_id,),
     ).fetchall()
-    files = dict(
-        conn.execute(
-            "SELECT module, MIN(file_path) FROM symbols "
-            "WHERE project_id=? AND module IS NOT NULL GROUP BY module",
-            (project_id,),
-        ).fetchall()
-    )
+    files = _module_citation_files(conn, project_id)
     nodes = set(files)
     edges = [(f, t, w) for (f, t, w) in rows if f in nodes and t in nodes]
     return _rank_and_cap(nodes, edges, files, set(), max_nodes, max_edges)
@@ -573,6 +600,28 @@ def _file_graph(
     return _rank_and_cap(nodes, edges, node_file, focus, max_nodes, max_edges)
 
 
+def _attach_debt(
+    conn: sqlite3.Connection, project_id: int, result: dict[str, Any]
+) -> dict[str, Any]:
+    """Attach each node's cognitive_debt_score from analysis_file_insights, keyed
+    by the node's own citation file (file_path). The score is thus re-derivable
+    from the same row the node cites — one referent, one query. A file with no
+    analysis row gets a TYPED UNKNOWN (None), never 0: absence of measurement
+    must never read as low debt."""
+    modules = result.get("modules") or []
+    if not modules:
+        return result
+    debt = dict(
+        conn.execute(
+            "SELECT path, cognitive_debt FROM analysis_file_insights WHERE project_id=?",
+            (project_id,),
+        ).fetchall()
+    )
+    for m in modules:
+        m["cognitive_debt_score"] = debt.get(m["file_path"])
+    return result
+
+
 def get_module_graph(
     conn: sqlite3.Connection,
     project_id: int,
@@ -591,8 +640,10 @@ def get_module_graph(
     1). This is what makes 'the graph around analyzer.py' nameable: the file is a
     node, not a directory it dissolves into."""
     if scope:
-        return _file_graph(conn, project_id, scope, max_modules, max_edges)
-    return _directory_graph(conn, project_id, max_modules, max_edges)
+        result = _file_graph(conn, project_id, scope, max_modules, max_edges)
+    else:
+        result = _directory_graph(conn, project_id, max_modules, max_edges)
+    return _attach_debt(conn, project_id, result)
 
 
 def find_tests(project_root: str, symbol_name: str) -> dict[str, Any]:
