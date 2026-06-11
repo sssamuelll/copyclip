@@ -264,14 +264,16 @@ def get_last_contact(
     *,
     limit: int = 20,
 ) -> dict[str, Any]:
-    """Read the Pulso 'Last contact' readings — files an AI burst last shaped that
-    the human has NOT returned to, longest gap first. Reads the persisted
-    `pulso_last_contact_days` (never the dead blame column). Silent files (no AI
-    burst, or the human already returned) are absent, not zero. Each row is
-    citable by `file_path`.
+    """Read the Pulso 'Last visit' readings — files an AI burst last shaped that
+    the human has NOT returned to, longest gap first. A return is a git commit OR
+    a ratified decision touching the file (`last_contact_source` says which).
+    Reads the persisted `pulso_last_contact_days` (never the dead blame column).
+    Silent files (no AI burst, or the human already returned) are absent, not
+    zero. Each row is citable by `file_path`.
 
-    Recency only: this proves elapsed time since the human's last touch, NOT that
-    the human understands the code. A timestamp cannot witness comprehension."""
+    Recency only: this proves elapsed time since the human last visited the file
+    (committed it, or ratified a decision on it), NOT that the human understands
+    the code. A visit proves you were here, not that you hold it."""
     from ..pulso import build_last_contact
 
     rows = conn.execute(
@@ -287,6 +289,8 @@ def get_last_contact(
             "file_path": path,
             "last_contact_days": days,
             "ai_burst_days": detail["ai_burst_days"] if detail else None,
+            "last_contact_source": detail["last_contact_source"] if detail else None,
+            "reviewed_days": detail.get("reviewed_days") if detail else None,
             "never_human_touched": detail["never_human_touched"] if detail else None,
         })
     return {"last_contact": items}

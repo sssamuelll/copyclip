@@ -135,10 +135,15 @@ delegated, anchored to real evidence in the code.
   gives the module-level topology — all nodes map to real files (citable).
 - `get_last_contact` answers "what did AI change that I haven't gone back to?":
   files an AI burst last shaped (Co-Authored-By trailer) that the human has not
-  returned to, with the gap in days. It proves elapsed TIME only — say "you last
-  touched X N days ago; AI changed it since", NEVER "you don't understand X" or
-  "you've lost the thread". Files with no burst or where the human is current are
-  simply absent; an empty result means nothing to report, not a clean bill.
+  returned to, with the gap in days. A return is a git commit OR a ratified
+  decision on the file (`last_contact_source` = 'git' | 'decision'); a ratified
+  decision is the firmer signal (an authoring act over the human's own ledger).
+  It proves elapsed TIME and the fact of a visit ONLY — say "you last visited X
+  N days ago (committed it / ratified a decision on it); AI changed it since",
+  NEVER "you don't understand X", "you've lost the thread", or "you've reviewed X"
+  as a comprehension claim. A visit proves you were here, not that you hold it.
+  Files with no burst or where the human is current are simply absent; an empty
+  result means nothing to report, not a clean bill.
 - Use project-relative POSIX paths only; never absolute paths and never `..`.
 - Never retry a path that errored. If a tool returns nothing useful, move on.
 - Read before you answer. Do not answer a question about the code from memory or

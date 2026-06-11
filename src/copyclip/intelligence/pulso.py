@@ -32,6 +32,27 @@ def _parse_git_iso(value: str | None) -> datetime | None:
         return None
 
 
+def _last_ratified_decision(conn, project_id: int, path: str) -> datetime | None:
+    """The most recent time the human RATIFIED a decision directly linked to this
+    file — the strongest witness act the cuaderno records (an authoring write over
+    the human's own ledger, already timestamped). 'status_change' is the human's
+    PATCH (DecisionConfirm); 'created'/'ref_added'/'link_added' are system writes.
+    Only DIRECT decision_refs (ref_type='file') count — never decision_links globs,
+    which are fuzzy and would overclaim the file edge. Witnesses review, not
+    comprehension."""
+    row = conn.execute(
+        """
+        SELECT MAX(dh.created_at)
+        FROM decision_history dh
+        JOIN decisions d ON d.id = dh.decision_id
+        JOIN decision_refs dr ON dr.decision_id = d.id AND dr.ref_type = 'file' AND dr.ref_value = ?
+        WHERE d.project_id = ? AND dh.action = 'status_change'
+        """,
+        (path, project_id),
+    ).fetchone()
+    return _parse_git_iso(row[0]) if row and row[0] else None
+
+
 def build_last_contact(
     conn, project_id: int, path: str, *, now: datetime | None = None
 ) -> dict[str, Any] | None:
@@ -71,16 +92,31 @@ def build_last_contact(
     if last_ai is None:
         return None
 
+    # v0.2: the human "returns" to a file via a commit OR a ratified decision (the
+    # strongest cuaderno witness). Take the later of the two as the contact event;
+    # on a tie, prefer the ratification (the firmer, authoring act).
+    last_review = _last_ratified_decision(conn, project_id, path)
+    last_return: datetime | None = None
+    source: str | None = None
+    if last_human is not None:
+        last_return, source = last_human, "git"
+    if last_review is not None and (last_return is None or last_review >= last_return):
+        last_return, source = last_review, "decision"
+
     # The human already returned since the most recent burst -> current, silent.
-    if last_human is not None and last_human >= last_ai:
+    if last_return is not None and last_return >= last_ai:
         return None
 
     def days_since(dt: datetime) -> int:
         return max(0, (now - dt).days)
 
-    contact_anchor = last_human if last_human is not None else last_ai
+    contact_anchor = last_return if last_return is not None else last_ai
     return {
         "last_contact_days": days_since(contact_anchor),
         "ai_burst_days": days_since(last_ai),
+        # 'git' (a commit) | 'decision' (a ratified decision) | None (never returned;
+        # gap measured since the burst). This proves return/review, never comprehension.
+        "last_contact_source": source,
+        "reviewed_days": days_since(last_review) if last_review is not None else None,
         "never_human_touched": last_human is None,
     }
