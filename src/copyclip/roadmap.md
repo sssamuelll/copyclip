@@ -1,42 +1,40 @@
-# 🚀 CopyClip → Capability Roadmap
+# 🚀 CopyClip — Capability Roadmap
 
-> Note: runtime/package version is currently `v0.4.0`. The milestones below describe product capability progress, not a strict semver changelog.
+> Runtime/package version is currently `v0.4.0`. This describes product capability
+> direction, not a strict semver changelog.
 
-## Scheduled: dashboard retirement — Friday 2026-06-19
+## The surface: the cuaderno
 
-Ratified 2026-06-04 (cuaderno-shell consensus, Wave 5): the legacy App.tsx
-router, the Sidebar, and the remaining dashboard pages are deleted on
-2026-06-19, after every surviving route is re-homed to a tutor tool or a
-side surface. Until then the dashboard is reachable only through the
-cuaderno's existing toggle — it is an escape hatch, not a peer. No
-indefinite coexistence.
+CopyClip **is** the cuaderno — an evidence-first tutor over a codebase you
+increasingly did not write by hand. It keeps the author's intention connected
+across the bursts of AI-assisted development; the gap between bursts is where
+ownership leaks. Everything it shows is anchored to real code, git, or the
+decision ledger — *exposición, no autoría*.
 
-## ✅ Completed (current shipped baseline)
-- [x] **Project Memory:** Dynamic chat-first interface with component injection.
-- [x] **MCP integration:** Robust server for external agent alignment and semantic auditing.
-- [x] **Codebase Map:** 3D Three.js engine with Sitting Tree and Constellation algorithms.
-- [x] **Vivid UX:** Interactive parallax, planetary scaling, and high-fidelity sidebar restoration.
-- [x] **Project Timeline:** Unified event timeline (commits + decisions + narrative).
-- [x] **Interactive Setup:** In-situ LLM configuration (DeepSeek, OpenAI, etc.) with persistence.
-- [x] **Cognitive Load Tracker:** Visualizing "Unfamiliar Code" based on agentic code ratio.
+The legacy dashboard (the `App.tsx` router, the Sidebar, and the absorbed pages)
+was retired in Wave 5 (2026-06). Each question class it answered now lives in a
+cited tutor tool or widget; three auxiliary views survive — **codebase map**,
+**safe handoff**, **settings** — reached from the cuaderno's ⊞ menu. MCP exposes
+the same bounded, audited views to external agents.
 
----
+## ✅ Shipped baseline
+- [x] **Cuaderno:** evidence-first tutor; answers stream as cited blocks + widgets; the human ratifies decision status (the one write).
+- [x] **MCP server:** bounded, audited project views for external agents (intent manifesto, context bundle, audit, heat, handoff).
+- [x] **Codebase map:** interactive graph of the codebase (a survivor side surface).
+- [x] **Safe handoff:** bounded delegation packets with pre-delegation review.
+- [x] **Heat:** maintenance/attention pressure per file, from the live composite engine.
+- [x] **In-situ setup + background analysis:** LLM config and re-index from settings; analysis follows the rhythm of bursts.
 
-## 🌟 Priorities (Short-Term)
-1. **Interactive Artifacts:** Allow clicking Codebase Map nodes to trigger chat actions (e.g., "Summarize this module").
-2. **Planning Bi-directionality:** Enable drag-and-drop between Kanban columns to update DB status.
-3. **Audit Webhooks:** Automatic auditing of incoming Git commits via background workers.
-4. **Enhanced 3D Layers:** Filter Codebase Map nodes by author (Human vs. Agent) or specific architectural decisions.
+## 🎯 Forward (≤3)
+1. **Cruces / Junctions v0.1** ([#146]) — in the playground, show *which branch executed the input you just edited*, as a computed value, never narrated. High-level debugging anchored to a real run.
+2. **Pulso** ([#152]) — continuous, incremental, background analysis that follows the rhythm of development bursts (filesystem watch or commit trigger, non-intrusive notices). The connective tissue that lets CopyClip survive the gap between bursts.
+3. **Intent Drift Surface** — a passive layer that flags code regions drifted from registered architectural decisions and surfaces the drift to the author for inspection. Never proposes refactors or triggers agentic action — *exposición, no autoría*.
 
----
-
-## 🛠️ Long-term capability goals (no launch date)
-- [ ] **VSCode Extension:** Integrated intent-aware handoffs directly in the IDE.
-- [ ] **Intent Drift Surface:** Passive detection layer that flags code regions which have drifted from registered architectural decisions. Surfaces the drift to the author for inspection; does NOT propose refactors or trigger agentic action. Refactor decisions stay with the author.
-- [ ] **Multi-Repo Project Memory:** If the author ever needs to navigate multiple repos as a single cognitive surface, connect them. Currently single-repo only.
-- [ ] **Exportable Constraints:** Generate `.copyclip/constraints.json` for external LLM system prompts.
-
----
+[#146]: https://github.com/sssamuelll/copyclip/issues/146
+[#152]: https://github.com/sssamuelll/copyclip/issues/152
 
 # 🎯 Vision
-A personal cognitive sentinel for the author — the tool that lets him stay attached to his own codebases as AI agents write more of the code. If others with the same pain eventually find it useful, that's downstream of the author's own daily use working.
+A personal cognitive sentinel for the author — the tool that lets him stay
+attached to his own codebases as AI agents write more of the code. If others
+with the same pain eventually find it useful, that's downstream of the author's
+own daily use working.
