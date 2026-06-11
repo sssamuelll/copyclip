@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import sqlite3
@@ -175,6 +176,123 @@ def get_callees(
     }
 
 
+def get_decisions(
+    conn: sqlite3.Connection,
+    project_id: int,
+    *,
+    status: Optional[str] = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Read the decision-ledger (decisions table). Optionally filter by status.
+    Absorbs the Decisions/Planning pages: the data is the ledger, cited by id."""
+    where = ["project_id = ?"]
+    params: list[Any] = [project_id]
+    if status:
+        where.append("status = ?")
+        params.append(status)
+    params.append(min(int(limit or 50), 200))
+    sql = (
+        "SELECT id, title, summary, status, confidence, source_type, created_at, resolved_at "
+        "FROM decisions WHERE " + " AND ".join(where) +
+        " ORDER BY id DESC LIMIT ?"
+    )
+    rows = conn.execute(sql, params).fetchall()
+    return {
+        "decisions": [
+            {
+                "id": r[0],
+                "title": r[1],
+                "summary": r[2],
+                "status": r[3],
+                "confidence": r[4],
+                "source_type": r[5],
+                "created_at": r[6],
+                "resolved_at": r[7],
+            }
+            for r in rows
+        ]
+    }
+
+
+def _parse_json_or_none(raw: Optional[str]) -> Any:
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+
+
+def get_story_snapshots(
+    conn: sqlite3.Connection,
+    project_id: int,
+    *,
+    limit: int = 5,
+) -> dict[str, Any]:
+    """Read narrative snapshots (story_snapshots) newest-first — the connective
+    tissue between bursts. If analysis hasn't run there are none; say so
+    explicitly (never invent a narrative — degrade to git_log)."""
+    rows = conn.execute(
+        "SELECT generated_at, focus_areas_json, major_changes_json, "
+        "open_questions_json, summary_json FROM story_snapshots "
+        "WHERE project_id=? ORDER BY id DESC LIMIT ?",
+        (project_id, min(int(limit or 5), 50)),
+    ).fetchall()
+    if not rows:
+        return {
+            "snapshots": [],
+            "note": "no story snapshots yet — run `copyclip analyze`, or use git_log for raw history.",
+        }
+    return {
+        "snapshots": [
+            {
+                "generated_at": r[0],
+                "focus_areas": _parse_json_or_none(r[1]),
+                "major_changes": _parse_json_or_none(r[2]),
+                "open_questions": _parse_json_or_none(r[3]),
+                "summary": _parse_json_or_none(r[4]),
+            }
+            for r in rows
+        ]
+    }
+
+
+def get_reverse_dependents(
+    conn: sqlite3.Connection,
+    project_id: int,
+    path: str,
+) -> dict[str, Any]:
+    """Modules transitively impacted if `path` changes (reverse-dependents).
+    Resolves path→module (most specific prefix wins), then walks `dependencies`
+    upward. The target is excluded from its own impact set. Cycle-safe."""
+    norm = path.replace("\\", "/")
+    row = conn.execute(
+        "SELECT name FROM modules WHERE project_id=? AND ? LIKE path_prefix || '%' "
+        "ORDER BY LENGTH(path_prefix) DESC LIMIT 1",
+        (project_id, norm),
+    ).fetchone()
+    if not row:
+        return {"target_module": "unknown", "impacted_modules": []}
+    target_module = row[0]
+    dependents: set[str] = set()
+    to_visit = [target_module]
+    visited: set[str] = set()
+    while to_visit:
+        curr = to_visit.pop()
+        if curr in visited:
+            continue
+        visited.add(curr)
+        rows = conn.execute(
+            "SELECT from_module FROM dependencies WHERE project_id=? AND to_module=?",
+            (project_id, curr),
+        ).fetchall()
+        for (frm,) in rows:
+            dependents.add(frm)
+            to_visit.append(frm)
+    dependents.discard(target_module)
+    return {"target_module": target_module, "impacted_modules": sorted(dependents)}
+
+
 def _run_git(project_root: str, *args: str) -> tuple[int, str, str]:
     proc = subprocess.run(
         ["git", *args],
@@ -259,6 +377,57 @@ def git_diff(project_root: str, commit_sha: str, path: Optional[str] = None) -> 
     if code != 0:
         return {"error": "git_failed", "detail": err.strip()}
     return {"diff": out}
+
+
+def git_archaeology(
+    project_root: str,
+    conn: sqlite3.Connection,
+    project_id: int,
+    file: str,
+    limit: int = 12,
+) -> dict[str, Any]:
+    """A file's commit history crossed with the decisions that reference it
+    (decision_refs). The commit↔decision correlation that no git_* tool alone
+    has — connects 'what changed here' to 'which decision you made about it'."""
+    norm = file.replace("\\", "/")
+    code, out, _ = _run_git(
+        project_root, "log",
+        "--pretty=format:%H%x09%an%x09%ad%x09%s", "--date=iso",
+        f"-n{int(limit)}", "--", norm,
+    )
+    commits: list[dict[str, Any]] = []
+    if code == 0:
+        for line in out.splitlines():
+            parts = line.split("\t", 3)
+            if len(parts) == 4:
+                sha, author, date, message = parts
+                commits.append({"sha": sha, "author": author, "date": date, "message": message})
+
+    rows = conn.execute(
+        """
+        SELECT d.id, d.title, d.status, d.source_type, dr.ref_type, dr.ref_value
+        FROM decisions d
+        LEFT JOIN decision_refs dr ON dr.decision_id = d.id
+        WHERE d.project_id=?
+        ORDER BY d.id DESC
+        """,
+        (project_id,),
+    ).fetchall()
+    related: dict[int, dict[str, Any]] = {}
+    for did, title, status, source_type, ref_type, ref_value in rows:
+        ref_value = ref_value or ""
+        match = (
+            (ref_type == "file" and ref_value == norm)
+            or (ref_type == "commit" and ref_value and any(c["sha"].startswith(ref_value) for c in commits))
+            or (ref_type == "doc" and norm.lower() in ref_value.lower())
+        )
+        if match:
+            entry = related.setdefault(did, {
+                "id": did, "title": title, "status": status,
+                "source_type": source_type, "matched_refs": [],
+            })
+            entry["matched_refs"].append({"ref_type": ref_type, "ref_value": ref_value})
+    return {"file": norm, "commits": commits, "related_decisions": list(related.values())}
 
 
 def _rank_and_cap(
@@ -403,3 +572,24 @@ def find_tests(project_root: str, symbol_name: str) -> dict[str, Any]:
             rel = str(fp.relative_to(root)).replace("\\", "/")
             results.append({"file_path": rel, "matches": matches[:5]})
     return {"tests": results}
+
+
+def get_reacquaintance_briefing(
+    project_root: str,
+    mode: str = "last_seen",
+    window: str = "7d",
+    checkpoint: Optional[str] = None,
+) -> dict[str, Any]:
+    """Re-entry briefing — what to re-read to reconnect to your intention after
+    a gap between bursts. Wraps the reacquaintance engine and trims the heavy
+    evidence_index so the briefing fits the tutor's context window (decision A2).
+    Lazy import: the engine pulls in mempalace/analysis machinery we don't want
+    loaded for the lighter tools."""
+    from ..reacquaintance import build_reacquaintance_briefing
+
+    briefing = build_reacquaintance_briefing(
+        project_root, baseline_mode=mode, window=window, checkpoint_name=checkpoint
+    )
+    if isinstance(briefing, dict):
+        briefing.pop("evidence_index", None)
+    return briefing
