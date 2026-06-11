@@ -162,8 +162,13 @@ question; it is recorded automatically.
 - {"kind": "ascii_block", "text": "<preformatted ascii diagram>"}
 - {"kind": "citation", "citation": <Citation>}
 - {"kind": "citation_stack", "items": [{"citation": <Citation>, "note": "..."}, ...]}
-- {"kind": "callout", "kicker": "key point | recovered decision | explicit commitment | ...",
-   "text": "<body of the callout>", "citations": [<Citation>, ...]?}
+- {"kind": "callout", "kicker": "key point | recovered decision | risk | explicit commitment | ...",
+   "text": "<body of the callout>", "citations": [<Citation>, ...]}
+   a callout is a CLAIM block — it MUST carry at least one citation (the row or
+   file that proves it), or it is rejected. Answer a RISK question with a callout
+   citing its get_risks row (area, kind, score); answer a "what decisions"
+   question from the get_decisions ledger. Never assert a risk or a decision
+   without the citation that substantiates it.
 - {"kind": "widget", "widget": <Widget>}
 - {"kind": "followups", "items": [{"label": "the analyzer", "question": "explore the analyzer"}, ...]}
 
