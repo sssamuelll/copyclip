@@ -2,15 +2,36 @@
    Rules referencing classes used by Atlas3DPage / SettingsPage / HandoffPage. */
 
 /* Atlas dark-theme tokens the migrated rules depend on (copied from the
-   styles.css :root so the survivors keep their palette once it is deleted). */
+   styles.css :root so the survivors keep their palette once it is deleted).
+   --accent-cyan is supplied by cuaderno.css :root; --accent-cyan-soft derives
+   from it. */
 :root {
+  --bg: #0a0a0a;
   --bg-elevated: #0f0f0f;
   --bg-active: #1f1f1f;
   --panel: #121212;
   --border: #2a2a2a;
   --text-primary: #fafafa;
   --text-secondary: #9ca3af;
+  --text-tertiary: #6b7280;
   --accent-green: #10b981;
+  --accent-amber: #f59e0b;
+  --accent-red: #ef4444;
+  --accent-cyan-soft: color-mix(in srgb, var(--accent-cyan) 8%, transparent);
+}
+
+/* Global reset + base, migrated from styles.css so its deletion changes
+   nothing for the survivors. atlas-chrome.css is always loaded (App.tsx). */
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Courier New', monospace;
+}
+*:focus-visible {
+  outline: 1px solid var(--accent-cyan);
+  outline-offset: 2px;
 }
 
 .page-header {
@@ -66,6 +87,11 @@
   border: 1px solid;
   padding: 3px 8px;
 }
+
+/* Severity tones HandoffPage builds as `badge badge-${high|med|low}`. */
+.badge-high { color: var(--accent-red); border-color: var(--accent-red); background: rgba(239,68,68,.12); }
+.badge-med { color: var(--accent-amber); border-color: var(--accent-amber); background: rgba(245,158,11,.12); }
+.badge-low { color: var(--accent-green); border-color: var(--accent-green); background: rgba(16,185,129,.12); }
 
 .btn {
   background: transparent;
