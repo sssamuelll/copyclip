@@ -235,6 +235,79 @@ def test_generate_notebook_method_qualname(tmp_path):
     assert "Foo(...).method_name(value)" in content
 
 
+def test_generate_notebook_header_names_the_function(tmp_path):
+    """Run mode hides code, so the notebook must SAY what it is: a visible
+    markdown header with the function name and its file:line anchor — not a
+    dead code comment."""
+    req = PlaygroundLaunchRequest(
+        source="cuaderno",
+        function_ref=FunctionRef(file="src/copyclip/foo.py", name="bar"),
+        suggested_inputs=["src/copyclip/foo.py"],
+        breadcrumb="Ejecuta bar con un ejemplo",
+    )
+    nb = generate_marimo_notebook(req, str(tmp_path), _make_resolved(), temp_dir=str(tmp_path))
+    content = Path(nb).read_text(encoding="utf-8")
+    ast.parse(content)
+    assert "### `bar`" in content
+    assert "src/copyclip/foo.py:10" in content
+    assert "cuaderno" in content
+
+
+def test_generate_notebook_displays_the_full_call(tmp_path):
+    """The result cell renders the complete invocation — `bar('x')` -> 'y' —
+    so flipping the input visibly changes the call, not just a bare repr."""
+    req = PlaygroundLaunchRequest(
+        source="cuaderno",
+        function_ref=FunctionRef(file="src/copyclip/foo.py", name="bar"),
+        suggested_inputs=["src/copyclip/foo.py"],
+        breadcrumb="test",
+    )
+    nb = generate_marimo_notebook(req, str(tmp_path), _make_resolved(), temp_dir=str(tmp_path))
+    content = Path(nb).read_text(encoding="utf-8")
+    ast.parse(content)
+    assert "result = bar(value)" in content          # the call itself is unchanged
+    assert "repr(value)" in content and "repr(result)" in content
+    assert "'bar'" in content                        # the call prefix shown in the md line
+
+
+def test_generate_notebook_source_accordion(tmp_path):
+    """The function's source rides in a collapsed accordion labeled with its
+    file:line — the branch is VISIBLE while the input crosses it."""
+    req = PlaygroundLaunchRequest(
+        source="cuaderno",
+        function_ref=FunctionRef(file="src/copyclip/foo.py", name="bar"),
+        suggested_inputs=["src/copyclip/foo.py"],
+        breadcrumb="test",
+    )
+    nb = generate_marimo_notebook(req, str(tmp_path), _make_resolved(), temp_dir=str(tmp_path))
+    content = Path(nb).read_text(encoding="utf-8")
+    ast.parse(content)
+    assert "mo.accordion" in content
+    assert "getsource(bar)" in content
+    assert "'src/copyclip/foo.py:10'" in content     # the accordion label
+
+
+def test_generate_notebook_method_call_display_uses_qualified_prefix(tmp_path):
+    req = PlaygroundLaunchRequest(
+        source="atlas",
+        function_ref=FunctionRef(
+            file="src/copyclip/foo.py", name="method_name", qualname="Foo.method_name"
+        ),
+        suggested_inputs=[1],
+        breadcrumb="test",
+    )
+    nb = generate_marimo_notebook(
+        req,
+        str(tmp_path),
+        _make_resolved(name="method_name", parent="Foo", kind="method"),
+        temp_dir=str(tmp_path),
+    )
+    content = Path(nb).read_text(encoding="utf-8")
+    ast.parse(content)
+    assert "'Foo(...).method_name'" in content       # call prefix in the md line
+    assert "getsource(Foo)" in content               # accordion shows the class source
+
+
 def test_generate_notebook_offers_all_inputs(tmp_path):
     """Multiple suggested inputs become a dropdown over ALL of them — the
     'try this / now try that' contrast, not just the first."""
