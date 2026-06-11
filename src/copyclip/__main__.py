@@ -147,18 +147,23 @@ def run_export(argv_tail: list) -> None:
 
     args = parser.parse_args(argv_tail)
 
-    from copyclip.llm.provider_config import resolve_provider, ProviderConfigError, PROVIDERS
+    # An LLM is only needed when --prompt asks the model to select files. A plain
+    # clipboard export must never block on provider config or launch onboarding —
+    # in a non-interactive context (CI, piped stdin) the raw-key reader crashes,
+    # and conceptually a file export has nothing to do with an LLM provider.
+    if args.prompt:
+        from copyclip.llm.provider_config import resolve_provider, ProviderConfigError, PROVIDERS
 
-    try:
-        _ = resolve_provider(args.provider, config={})
-    except ProviderConfigError:
-        if sys.stdin.isatty():
-            from copyclip.intelligence.cli import _run_onboarding
-            configured = _run_onboarding(os.path.abspath(args.folder), PROVIDERS)
-            if not configured:
-                print("[INFO] No LLM configured. Some features will be unavailable.", file=sys.stderr)
-        else:
-            print("[WARN] No LLM configured. Set COPYCLIP_LLM_PROVIDER and API key in .env", file=sys.stderr)
+        try:
+            _ = resolve_provider(args.provider, config={})
+        except ProviderConfigError:
+            if sys.stdin.isatty():
+                from copyclip.intelligence.cli import _run_onboarding
+                configured = _run_onboarding(os.path.abspath(args.folder), PROVIDERS)
+                if not configured:
+                    print("[INFO] No LLM configured. Some features will be unavailable.", file=sys.stderr)
+            else:
+                print("[WARN] No LLM configured. Set COPYCLIP_LLM_PROVIDER and API key in .env", file=sys.stderr)
     
     # Always search for .copyclipignore upward from the provided folder
     base_path = os.path.abspath(args.folder)
