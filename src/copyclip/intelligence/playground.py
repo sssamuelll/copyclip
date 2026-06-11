@@ -353,6 +353,13 @@ def __():
 
 @app.cell
 def __(mo):
+    # Run mode hides code, so the notebook must SAY what it is.
+    mo.md({header_md!r})
+    return
+
+
+@app.cell
+def __(mo):
     # The input — change it and the result below re-runs.
     sample = {input_element}
     sample
@@ -360,11 +367,24 @@ def __(mo):
 
 
 @app.cell
-def __({exported_symbols}, sample):
+def __({exported_symbols}, mo, sample):
     value = sample.value
     result = {call_expr}
-    result
+    # The full invocation, live: flipping the input changes the call AND the result.
+    mo.md("`" + {call_prefix!r} + "(" + repr(value) + ")` → `" + repr(result) + "`")
     return (result,)
+
+
+@app.cell
+def __({exported_symbols}, mo):
+    # The source rides along, collapsed: the branch is visible while you cross it.
+    import inspect as _inspect
+    try:
+        _src = _inspect.getsource({exported_symbols})
+    except (OSError, TypeError):
+        _src = "# source unavailable"
+    mo.accordion({{{file_line!r}: mo.md("```python\\n" + _src + "\\n```")}})
+    return
 
 
 if __name__ == "__main__":
@@ -385,13 +405,19 @@ def generate_marimo_notebook(
     """
     td = temp_dir or tempfile.mkdtemp(prefix="copyclip-playground-")
     notebook_path = os.path.join(td, "playground.py")
-    imports_block, exported_symbols, call_expr = _build_symbol_resolution(resolved)
+    imports_block, exported_symbols, call_expr, call_prefix = _build_symbol_resolution(resolved)
     input_element = _build_input_element(req.suggested_inputs)
     # source is already validated against the PLAYGROUND_SOURCES whitelist, but
     # we sanitize both fields anyway as defense in depth — these end up inside
     # single-line ``#`` comments.
     safe_source = _sanitize_for_comment(req.source)
     safe_breadcrumb = _sanitize_for_comment(req.breadcrumb) or "<unspecified>"
+    # The visible header: every piece is injection-guarded upstream (qualname and
+    # file are identifier/path-validated by FunctionRef, source is whitelisted)
+    # and injected as a repr literal anyway. The breadcrumb deliberately stays a
+    # code comment — it is free text and must never reach a runnable line.
+    file_line = resolved.file + (f":{resolved.line_start}" if resolved.line_start else "")
+    header_md = f"### `{resolved.qualname}`\n\n`{file_line}` · {safe_source}"
     content = _NOTEBOOK_TEMPLATE.format(
         source=safe_source,
         breadcrumb=safe_breadcrumb,
@@ -400,13 +426,18 @@ def generate_marimo_notebook(
         exported_symbols=exported_symbols,
         input_element=input_element,
         call_expr=call_expr,
+        call_prefix=call_prefix,
+        header_md=header_md,
+        file_line=file_line,
     )
     Path(notebook_path).write_text(content, encoding="utf-8")
     return notebook_path
 
 
-def _build_symbol_resolution(resolved: ResolvedFunction) -> tuple[str, str, str]:
-    """Return (imports_block, exported_symbols, call_expr) per the spec's Symbol resolution rules.
+def _build_symbol_resolution(resolved: ResolvedFunction) -> tuple[str, str, str, str]:
+    """Return (imports_block, exported_symbols, call_expr, call_prefix) per the
+    spec's Symbol resolution rules. ``call_prefix`` is the display form of the
+    callable (the call_expr minus its ``(value)``), shown in the live result line.
 
     Staticmethod / classmethod detection is deferred; we default methods to the
     instance form ``Foo(...).method(sample)`` per the spec fallback.
@@ -418,13 +449,13 @@ def _build_symbol_resolution(resolved: ResolvedFunction) -> tuple[str, str, str]
     if parent and parent != name:
         imports = f"    from {mod} import {parent}"
         exported = parent
-        call_expr = f"{parent}(...).{name}(value)"
+        call_prefix = f"{parent}(...).{name}"
     else:
         imports = f"    from {mod} import {name}"
         exported = name
-        call_expr = f"{name}(value)"
+        call_prefix = name
 
-    return imports, exported, call_expr
+    return imports, exported, f"{call_prefix}(value)", call_prefix
 
 
 def _build_input_element(suggested_inputs: list[object] | None) -> str:
