@@ -40,6 +40,7 @@ export function SettingsPage({ onNotify }: { onNotify?: (msg: string) => void })
   const [config, setConfig] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [analyzing, setAnalyzing] = useState(false)
 
   useEffect(() => {
     api.getConfig().then(setConfig)
@@ -59,6 +60,25 @@ export function SettingsPage({ onNotify }: { onNotify?: (msg: string) => void })
       setTimeout(() => setSaved(false), 3000)
     } finally {
       setLoading(false)
+    }
+  }
+
+  // The analyze trigger lives here now (DebtNavigatorPage, which used to hold it,
+  // dies in Wave 5). The job runs in the background — non-blocking — and notifies
+  // here (toast) and in the CLI (server console).
+  const handleAnalyze = async () => {
+    setAnalyzing(true)
+    try {
+      const res = await api.startAnalyzeJob()
+      onNotify?.(
+        res.already_running
+          ? 'Analysis already running — it continues in the background'
+          : 'Analysis started — runs in the background; this can take a couple of minutes',
+      )
+    } catch {
+      onNotify?.('Could not start analysis — check the server logs')
+    } finally {
+      setAnalyzing(false)
     }
   }
 
@@ -129,6 +149,19 @@ export function SettingsPage({ onNotify }: { onNotify?: (msg: string) => void })
             </button>
           </div>
 
+        </div>
+      </div>
+
+      <div style={paperWrap}>
+        <h3 style={{ fontFamily: 'var(--font-ui)', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.16em', color: 'var(--ink-3)', margin: '0 0 14px 0', fontWeight: 500 }}>Analysis</h3>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Re-index the project — dependency graph, churn, decisions, heat. Runs in
+          the background, so you can keep working; progress shows here and in the CLI.
+        </p>
+        <div style={{ borderTop: '1px solid var(--hairline)', paddingTop: '1rem' }}>
+          <button className="btn primary" onClick={handleAnalyze} disabled={analyzing}>
+            {analyzing ? 'Starting…' : 'Re-analyze project'}
+          </button>
         </div>
       </div>
     </section>

@@ -215,6 +215,9 @@ def run_server(
                 conn_r.commit()
                 conn_r.close()
                 publish_event("analyze.progress", {"job_id": job_id, "status": "running", "phase": "analyzing", "processed": int(resume_from or 0), "total": total})
+                # CLI notice (decision E): background analysis announces itself on the
+                # server console, so the trigger is observable without the dashboard.
+                print(f"[copyclip] analysis started in background — {total} files", flush=True)
 
                 try:
                     from .analyzer import AnalysisCanceled, analyze
@@ -262,6 +265,7 @@ def run_server(
                     conn_d.commit()
                     conn_d.close()
                     publish_event("analyze.completed", {"job_id": job_id, "summary": summary})
+                    print(f"[copyclip] analysis completed — {total} files", flush=True)
                 except AnalysisCanceled:
                     conn_c = connect(root)
                     init_schema(conn_c)
