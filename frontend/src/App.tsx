@@ -20,6 +20,7 @@ import { CuadernoPage } from './pages/CuadernoPage'
 import type { ArchEdge, ArchNode, ChangeItem, DecisionItem, Overview, RiskItem } from './types/api'
 
 import './styles/cuaderno.css'
+import './styles/atlas-chrome.css'
 
 type Page = 'cuaderno' | 'reacquaintance' | 'handoff' | 'debt-navigator' | 'atlas-3d' | 'timeline' | 'planning' | 'changes' | 'architecture' | 'impact' | 'risks' | 'context-builder' | 'decisions' | 'settings'
 
