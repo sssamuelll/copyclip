@@ -174,6 +174,46 @@ def test_cli_view_prompt(mock_print, mock_copy, mock_read, mock_scan, monkeypatc
     assert "Flow Diagram for file.py" in printed_text
     assert "def foo(): pass" not in printed_text
 
+
+@mock.patch("copyclip.__main__.scan_files")
+@mock.patch("copyclip.__main__.read_files_concurrently")
+@mock.patch("copyclip.clipboard.ClipboardManager.copy", return_value=True)
+@mock.patch("builtins.print")
+def test_export_without_prompt_does_not_onboard(mock_print, mock_copy, mock_read, mock_scan, monkeypatch):
+    """Regression (CI): `export --print` with no provider configured must NOT
+    launch interactive LLM onboarding — export needs no LLM unless --prompt.
+    Onboarding's raw-key reader crashes under CI (captured stdin has no fileno);
+    more fundamentally, a clipboard export shouldn't ask for an LLM at all."""
+    from copyclip.llm.provider_config import ProviderConfigError
+
+    # Reproduce CI: no provider resolves (in CI there's no .env to load a key
+    # from, so resolve_provider raises). Mock it directly because main() calls
+    # load_dotenv(override=True), which would re-inject a dev's local .env key.
+    def _no_provider(*_a, **_k):
+        raise ProviderConfigError("no provider configured")
+
+    monkeypatch.setattr("copyclip.llm.provider_config.resolve_provider", _no_provider)
+
+    onboarded = {"called": False}
+
+    def _spy_onboard(*_a, **_k):
+        onboarded["called"] = True
+        return False
+
+    monkeypatch.setattr("copyclip.intelligence.cli._run_onboarding", _spy_onboard)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _: "2")  # the view prompt -> flow
+    mock_scan.return_value = ["file.py"]
+    mock_read.return_value = {"file.py": "def foo(): pass"}
+
+    sys.argv = ["copyclip", "export", ".", "--print"]
+    main_module.main()
+
+    assert onboarded["called"] is False, "export without --prompt must not launch LLM onboarding"
+    printed_text = mock_print.call_args_list[-1].args[0]
+    assert "Flow Diagram for file.py" in printed_text
+
+
 def test_large_codebase_performance():
     large_source = "\n".join(
         [f"class Class{i}:\n    def method{i}(self):\n        pass\n" for i in range(2000)]
