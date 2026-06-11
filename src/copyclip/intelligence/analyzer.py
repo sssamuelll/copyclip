@@ -377,6 +377,29 @@ def _analyze_git_folder(project_root: str, project_id: int, conn) -> Dict:
 
 # Brief: analyze
 
+def _persist_last_contact(conn, project_id: int) -> None:
+    """Final pass: persist the Pulso 'Last contact' reading (days since a human
+    last touched a file after the most recent AI-attributed burst). NULL where
+    there is nothing honest to report — no burst, or the human already returned.
+    Reads commits.ai_attributed (the live trailer signal), never blame. Must run
+    after commits/file_changes are ingested; one file's failure never aborts."""
+    from .pulso import build_last_contact
+
+    rows = conn.execute(
+        "SELECT path FROM analysis_file_insights WHERE project_id=?",
+        (project_id,),
+    ).fetchall()
+    for (path,) in rows:
+        try:
+            reading = build_last_contact(conn, project_id, path)
+        except Exception:  # noqa: BLE001 — one file's reading must not abort the pass
+            reading = None
+        conn.execute(
+            "UPDATE analysis_file_insights SET pulso_last_contact_days=? WHERE project_id=? AND path=?",
+            (reading["last_contact_days"] if reading else None, project_id, path),
+        )
+
+
 def _persist_composite_scores(conn, project_id: int) -> None:
     """Final pass: overwrite each file's cognitive_debt with the LIVE 8-factor
     composite (build_debt_breakdown), not the dead single-factor scalar. One
@@ -1065,6 +1088,7 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
     # Collapse to one debt engine: the persisted column now holds the live
     # 8-factor composite, read by the fog, the MCP map, and handoff risks.
     _persist_composite_scores(conn, project_id)
+    _persist_last_contact(conn, project_id)
 
     summary = {
         "files": indexed,

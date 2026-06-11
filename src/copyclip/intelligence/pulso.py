@@ -1,0 +1,86 @@
+"""Pulso — the honest burst-recency atom ("Last contact").
+
+The wedge is keeping the human connected to their intention across AI bursts.
+The only LIVE trace of a burst is the Co-Authored-By trailer (git-blame author is
+dead here — the human commits the AI's work under his own name). So Pulso reads
+`commits.ai_attributed` (set at ingest, PR-P1), never the blame column.
+
+What this proves, and nothing more: *an AI burst last shaped this file N days ago
+and a human has not touched it since.* It measures elapsed time and recency. It
+does NOT measure comprehension — a timestamp cannot witness understanding. When
+there is no burst, or the human has already returned, Pulso is silent (None),
+never a reassuring zero.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any
+
+
+def _parse_git_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    s = value.strip()
+    try:
+        return datetime.strptime(s, "%Y-%m-%d %H:%M:%S %z")
+    except ValueError:
+        pass
+    try:
+        dt = datetime.fromisoformat(s)
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def build_last_contact(
+    conn, project_id: int, path: str, *, now: datetime | None = None
+) -> dict[str, Any] | None:
+    """Return the Last-contact reading for a file, or None when there is nothing
+    honest to report (no AI burst, or the human already returned).
+
+    Keys: last_contact_days (days since the human's last touch, or since the
+    burst if never), ai_burst_days (days since the most recent AI burst),
+    never_human_touched (the human has no commit on this file).
+    """
+    now = now or datetime.now(timezone.utc)
+
+    rows = conn.execute(
+        """
+        SELECT c.date, c.ai_attributed
+        FROM file_changes fc
+        JOIN commits c ON c.sha = fc.commit_sha
+        WHERE fc.project_id = ? AND fc.file_path = ?
+        """,
+        (project_id, path),
+    ).fetchall()
+
+    last_ai: datetime | None = None
+    last_human: datetime | None = None
+    for date_str, ai_attributed in rows:
+        dt = _parse_git_iso(date_str)
+        if dt is None:
+            continue
+        if ai_attributed:
+            if last_ai is None or dt > last_ai:
+                last_ai = dt
+        else:
+            if last_human is None or dt > last_human:
+                last_human = dt
+
+    # No burst ever shaped this file -> nothing to track. Absence, not zero.
+    if last_ai is None:
+        return None
+
+    # The human already returned since the most recent burst -> current, silent.
+    if last_human is not None and last_human >= last_ai:
+        return None
+
+    def days_since(dt: datetime) -> int:
+        return max(0, (now - dt).days)
+
+    contact_anchor = last_human if last_human is not None else last_ai
+    return {
+        "last_contact_days": days_since(contact_anchor),
+        "ai_burst_days": days_since(last_ai),
+        "never_human_touched": last_human is None,
+    }

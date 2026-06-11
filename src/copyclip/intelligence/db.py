@@ -278,6 +278,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             cognitive_debt REAL DEFAULT 0,
             agent_line_ratio REAL,
             last_human_ts REAL,
+            pulso_last_contact_days INTEGER,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(project_id, path)
         );
@@ -337,6 +338,14 @@ def init_schema(conn: sqlite3.Connection) -> None:
         commit_cols = {row[1] for row in conn.execute("PRAGMA table_info(commits)").fetchall()}
         if commit_cols and "ai_attributed" not in commit_cols:
             conn.execute("ALTER TABLE commits ADD COLUMN ai_attributed INTEGER NOT NULL DEFAULT 0")
+    except Exception:
+        pass
+
+    # Backfill the Pulso "Last contact" column on older insight tables.
+    try:
+        afi_cols = {row[1] for row in conn.execute("PRAGMA table_info(analysis_file_insights)").fetchall()}
+        if afi_cols and "pulso_last_contact_days" not in afi_cols:
+            conn.execute("ALTER TABLE analysis_file_insights ADD COLUMN pulso_last_contact_days INTEGER")
     except Exception:
         pass
 
