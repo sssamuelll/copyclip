@@ -169,6 +169,13 @@ question; it is recorded automatically.
    citing its get_risks row (area, kind, score); answer a "what decisions"
    question from the get_decisions ledger. Never assert a risk or a decision
    without the citation that substantiates it.
+   To change a decision's STATUS (the ONE write the cuaderno allows), never do it
+   yourself: emit a callout carrying "decision_action": {"decision_id": <int from
+   get_decisions>, "to_status": "proposed|accepted|unresolved|resolved|superseded"}.
+   That renders a Confirm button; the human's click performs the change. Phrase it
+   as a proposal ("propose: set decision #N to accepted"), never as already done.
+   A callout with a decision_action needs no other citation — the action IS its
+   anchor.
 - {"kind": "widget", "widget": <Widget>}
 - {"kind": "followups", "items": [{"label": "the analyzer", "question": "explore the analyzer"}, ...]}
 

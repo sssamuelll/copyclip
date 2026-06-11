@@ -726,7 +726,7 @@ export type Block =
       kind: 'citation_stack'
       items: Array<{ citation: Citation; note?: string }>
     }
-  | { kind: 'callout'; kicker: string; text: string; citations?: Citation[] }
+  | { kind: 'callout'; kicker: string; text: string; citations?: Citation[]; decision_action?: { decision_id: number; to_status: string } }
   | { kind: 'widget'; widget: Widget }
   | {
       kind: 'followups'
