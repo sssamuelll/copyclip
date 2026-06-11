@@ -53,9 +53,8 @@ def test_greenfield_file_lowers_confidence_without_zeroing_score(tmp_path):
     breakdown = build_debt_breakdown(conn, pid, "file", "src/copyclip/new/alpha.py", now_ts=STABLE_NOW_TS)
     conn.close()
 
-    # blame-dependent factors unavailable
+    # blame-dependent factor unavailable (agent_authored_ratio removed in v2)
     unavailable = {f["factor_id"] for f in breakdown["factor_breakdown"] if not f["signal_available"]}
-    assert "agent_authored_ratio" in unavailable
     assert "review_staleness" in unavailable
     # confidence must drop below "high"
     assert breakdown["score"]["confidence"] in {"low", "medium"}
