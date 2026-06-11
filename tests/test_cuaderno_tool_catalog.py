@@ -12,6 +12,7 @@ def test_tool_definitions_include_all_tools():
         "git_log", "git_blame", "git_diff", "find_tests", "get_module_graph",
         "get_decisions", "get_reverse_dependents", "git_archaeology",
         "get_story_snapshots", "get_reacquaintance_briefing", "get_risks",
+        "get_last_contact",
         "emit_block", "finish",
     }
 

@@ -258,6 +258,40 @@ def get_risks(
     }
 
 
+def get_last_contact(
+    conn: sqlite3.Connection,
+    project_id: int,
+    *,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """Read the Pulso 'Last contact' readings — files an AI burst last shaped that
+    the human has NOT returned to, longest gap first. Reads the persisted
+    `pulso_last_contact_days` (never the dead blame column). Silent files (no AI
+    burst, or the human already returned) are absent, not zero. Each row is
+    citable by `file_path`.
+
+    Recency only: this proves elapsed time since the human's last touch, NOT that
+    the human understands the code. A timestamp cannot witness comprehension."""
+    from ..pulso import build_last_contact
+
+    rows = conn.execute(
+        "SELECT path, pulso_last_contact_days FROM analysis_file_insights "
+        "WHERE project_id = ? AND pulso_last_contact_days IS NOT NULL "
+        "ORDER BY pulso_last_contact_days DESC, path ASC LIMIT ?",
+        (project_id, min(int(limit or 20), 200)),
+    ).fetchall()
+    items: list[dict[str, Any]] = []
+    for path, days in rows:
+        detail = build_last_contact(conn, project_id, path)
+        items.append({
+            "file_path": path,
+            "last_contact_days": days,
+            "ai_burst_days": detail["ai_burst_days"] if detail else None,
+            "never_human_touched": detail["never_human_touched"] if detail else None,
+        })
+    return {"last_contact": items}
+
+
 def _parse_json_or_none(raw: Optional[str]) -> Any:
     if not raw:
         return None

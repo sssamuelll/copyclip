@@ -133,6 +133,12 @@ delegated, anchored to real evidence in the code.
 - `read_file` reads a FILE, never a directory — use `list_dir` for folders.
 - `get_callers` / `get_callees` trace symbol-level call graphs; `get_module_graph`
   gives the module-level topology — all nodes map to real files (citable).
+- `get_last_contact` answers "what did AI change that I haven't gone back to?":
+  files an AI burst last shaped (Co-Authored-By trailer) that the human has not
+  returned to, with the gap in days. It proves elapsed TIME only — say "you last
+  touched X N days ago; AI changed it since", NEVER "you don't understand X" or
+  "you've lost the thread". Files with no burst or where the human is current are
+  simply absent; an empty result means nothing to report, not a clean bill.
 - Use project-relative POSIX paths only; never absolute paths and never `..`.
 - Never retry a path that errored. If a tool returns nothing useful, move on.
 - Read before you answer. Do not answer a question about the code from memory or
