@@ -228,6 +228,24 @@ def build_tool_definitions() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "get_last_contact",
+            "description": (
+                "Read Pulso 'Last contact': files an AI burst last shaped that the "
+                "human has NOT returned to, longest gap (days) first, citable by "
+                "`file_path`. Reads the Co-Authored-By trailer signal, never blame; "
+                "files with no burst (or where the human is current) are absent, not "
+                "zero. Use for 'what did AI change that I haven't gone back to?'. "
+                "It proves elapsed TIME, never comprehension — say so, never imply "
+                "the human does or does not understand the code."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "default": 20},
+                },
+            },
+        },
+        {
             "name": "emit_block",
             "description": (
                 "Emit ONE block of your answer. Call once per block, in order. "
@@ -314,4 +332,6 @@ def dispatch_tool(
             kind=args.get("kind"), severity=args.get("severity"),
             limit=args.get("limit", 50),
         )
+    if name == "get_last_contact":
+        return anchor.get_last_contact(conn, project_id, limit=args.get("limit", 20))
     return {"error": "unknown_tool", "name": name}
