@@ -35,6 +35,22 @@ DRIFT_CALIBRATION_VERSION = "v1.1"
 
 AGENT_SIGNATURES = ["cursor", "windsurf", "agent", "github-actions", "bot"]
 
+# Pulso: the Co-Authored-By trailer is the only LIVE AI-burst signal. git-blame
+# author is dead here (Samuel commits AI's work under his own name -> 0/203), so
+# AGENT_SIGNATURES above never fires; the trailer in the commit body does. We
+# count a commit as AI-attributed only when an AI co-author appears inside an
+# actual Co-authored-by trailer line, never anywhere else in the body.
+_AI_COAUTHOR_RE = re.compile(
+    r"(?im)^\s*co-authored-by:.*\b(claude|gpt|chatgpt|openai|anthropic|copilot|cursor|gemini)\b",
+)
+
+
+def _commit_is_ai_attributed(body: str) -> bool:
+    """True iff the commit body carries a Co-authored-by trailer naming an AI."""
+    if not body:
+        return False
+    return bool(_AI_COAUTHOR_RE.search(body))
+
 
 class AnalysisCanceled(Exception):
     pass
@@ -783,20 +799,30 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
     if progress_cb:
         progress_cb(PHASE_GIT_HISTORY, indexed, total_files, "collecting git history")
 
-    log = _safe_git(root, ["log", "--pretty=format:%H|%an|%ad|%s", "--date=iso", "-n", "300"])
+    # Fields are unit-separated (\x1f) and records record-separated (\x1e) so the
+    # multi-line commit body (%b) — where the Co-authored-by trailer lives — never
+    # collides with the delimiter the way a "|" subject split did.
+    log = _safe_git(
+        root,
+        ["log", "--pretty=format:%H%x1f%an%x1f%ad%x1f%s%x1f%b%x1e", "--date=iso", "-n", "300"],
+    )
     commits = 0
     if log:
-        for line in log.splitlines():
+        for record in log.split("\x1e"):
             _check_canceled()
-            try:
-                sha, author, date, msg = line.split("|", 3)
-                conn.execute(
-                    "INSERT OR REPLACE INTO commits(project_id,sha,author,date,message) VALUES(?,?,?,?,?)",
-                    (project_id, sha, author, date, msg),
-                )
-                commits += 1
-            except ValueError:
+            record = record.strip()
+            if not record:
                 continue
+            parts = record.split("\x1f")
+            if len(parts) < 4:
+                continue
+            sha, author, date, msg = parts[0], parts[1], parts[2], parts[3]
+            body = parts[4] if len(parts) > 4 else ""
+            conn.execute(
+                "INSERT OR REPLACE INTO commits(project_id,sha,author,date,message,ai_attributed) VALUES(?,?,?,?,?,?)",
+                (project_id, sha, author, date, msg, 1 if _commit_is_ai_attributed(body) else 0),
+            )
+            commits += 1
 
     churn = Counter()
     raw_changes = _safe_git(root, ["log", "--name-only", "--pretty=format:---%H", "-n", "200"])

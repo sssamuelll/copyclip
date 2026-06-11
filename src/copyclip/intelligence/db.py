@@ -50,7 +50,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
             sha TEXT UNIQUE,
             author TEXT,
             date TEXT,
-            message TEXT
+            message TEXT,
+            ai_attributed INTEGER NOT NULL DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS file_changes (
@@ -328,6 +329,14 @@ def init_schema(conn: sqlite3.Connection) -> None:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(projects)").fetchall()}
         if "story" not in cols:
             conn.execute("ALTER TABLE projects ADD COLUMN story TEXT")
+    except Exception:
+        pass
+
+    # Backfill the Pulso AI-attribution column on older commits tables.
+    try:
+        commit_cols = {row[1] for row in conn.execute("PRAGMA table_info(commits)").fetchall()}
+        if commit_cols and "ai_attributed" not in commit_cols:
+            conn.execute("ALTER TABLE commits ADD COLUMN ai_attributed INTEGER NOT NULL DEFAULT 0")
     except Exception:
         pass
 
