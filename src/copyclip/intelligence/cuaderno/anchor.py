@@ -214,6 +214,50 @@ def get_decisions(
     }
 
 
+def get_risks(
+    conn: sqlite3.Connection,
+    project_id: int,
+    *,
+    kind: Optional[str] = None,
+    severity: Optional[str] = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Read the risk signals (risks table), highest score first. Each row is a
+    deterministic heuristic over real git data, citable by `area` (file path) —
+    absorbs the Risks page as cited callout blocks, never fabricated severity."""
+    where = ["project_id = ?"]
+    params: list[Any] = [project_id]
+    if kind:
+        where.append("kind = ?")
+        params.append(kind)
+    if severity:
+        where.append("severity = ?")
+        params.append(severity)
+    params.append(min(int(limit or 50), 200))
+    sql = (
+        "SELECT area, severity, kind, rationale, score, created_at "
+        "FROM risks WHERE " + " AND ".join(where) +
+        " ORDER BY score DESC, area ASC LIMIT ?"
+    )
+    rows = conn.execute(sql, params).fetchall()
+    return {
+        "risks": [
+            {
+                "area": r[0],
+                # `area` is a file path; expose it as file_path too so the
+                # honesty ledger harvests it as tool-evidenced (citable).
+                "file_path": r[0],
+                "severity": r[1],
+                "kind": r[2],
+                "rationale": r[3],
+                "score": r[4],
+                "created_at": r[5],
+            }
+            for r in rows
+        ]
+    }
+
+
 def _parse_json_or_none(raw: Optional[str]) -> Any:
     if not raw:
         return None

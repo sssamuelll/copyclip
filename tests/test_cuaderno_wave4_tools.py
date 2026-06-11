@@ -303,3 +303,72 @@ def test_get_reacquaintance_briefing_trims_heavy_evidence_index(tmp_path: Path):
 
     out = get_reacquaintance_briefing(str(tmp_path))
     assert "evidence_index" not in out
+
+
+# ── get_risks ──────────────────────────────────────────────────────────────
+
+def _seed_risk(conn, pid, area, severity, kind, rationale, score):
+    conn.execute(
+        "INSERT INTO risks(project_id,area,severity,kind,rationale,score) VALUES(?,?,?,?,?,?)",
+        (pid, area, severity, kind, rationale, score),
+    )
+
+
+def test_get_risks_returns_rows_citable_by_area():
+    from copyclip.intelligence.cuaderno.anchor import get_risks
+    conn = sqlite3.connect(":memory:")
+    init_schema(conn)
+    pid = _project(conn)
+    _seed_risk(conn, pid, "src/foo.py", "high", "churn", "high churn, no tests", 80)
+    conn.commit()
+
+    out = get_risks(conn, pid)
+    r = out["risks"][0]
+    assert r["area"] == "src/foo.py"
+    # exposed as file_path too, so the honesty gate harvests it as evidence
+    assert r["file_path"] == "src/foo.py"
+    assert r["severity"] == "high"
+    assert r["kind"] == "churn"
+    assert r["rationale"] == "high churn, no tests"
+    assert r["score"] == 80
+
+
+def test_get_risks_orders_by_score_desc():
+    from copyclip.intelligence.cuaderno.anchor import get_risks
+    conn = sqlite3.connect(":memory:")
+    init_schema(conn)
+    pid = _project(conn)
+    _seed_risk(conn, pid, "a.py", "low", "churn", "r", 30)
+    _seed_risk(conn, pid, "b.py", "high", "complexity", "r", 90)
+    conn.commit()
+
+    out = get_risks(conn, pid)
+    assert [r["score"] for r in out["risks"]] == [90, 30]
+    assert [r["area"] for r in out["risks"]] == ["b.py", "a.py"]
+
+
+def test_get_risks_filters_by_kind():
+    from copyclip.intelligence.cuaderno.anchor import get_risks
+    conn = sqlite3.connect(":memory:")
+    init_schema(conn)
+    pid = _project(conn)
+    _seed_risk(conn, pid, "a.py", "high", "churn", "r", 50)
+    _seed_risk(conn, pid, "b.py", "high", "test_gap", "r", 60)
+    conn.commit()
+
+    out = get_risks(conn, pid, kind="test_gap")
+    assert [r["area"] for r in out["risks"]] == ["b.py"]
+
+
+def test_get_risks_scopes_to_project():
+    from copyclip.intelligence.cuaderno.anchor import get_risks
+    conn = sqlite3.connect(":memory:")
+    init_schema(conn)
+    pid = _project(conn, "/tmp/a")
+    other = _project(conn, "/tmp/b")
+    _seed_risk(conn, pid, "mine.py", "high", "churn", "r", 50)
+    _seed_risk(conn, other, "theirs.py", "high", "churn", "r", 99)
+    conn.commit()
+
+    out = get_risks(conn, pid)
+    assert [r["area"] for r in out["risks"]] == ["mine.py"]

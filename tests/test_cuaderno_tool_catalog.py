@@ -11,7 +11,7 @@ def test_tool_definitions_include_all_tools():
         "list_dir", "read_file", "grep_symbols", "get_callers", "get_callees",
         "git_log", "git_blame", "git_diff", "find_tests", "get_module_graph",
         "get_decisions", "get_reverse_dependents", "git_archaeology",
-        "get_story_snapshots", "get_reacquaintance_briefing",
+        "get_story_snapshots", "get_reacquaintance_briefing", "get_risks",
         "emit_block", "finish",
     }
 
@@ -114,3 +114,13 @@ def test_dispatch_get_reacquaintance_briefing(tmp_path):
     out = dispatch_tool("get_reacquaintance_briefing", {},
                         project_root=str(tmp_path), project_id=1, conn=None)
     assert {"meta", "top_changes", "read_first"} <= set(out)
+
+
+def test_dispatch_get_risks(tmp_path):
+    conn, pid = _conn_with_project(tmp_path)
+    conn.execute("INSERT INTO risks(project_id,area,severity,kind,rationale,score) VALUES(?,?,?,?,?,?)",
+                 (pid, "x.py", "high", "churn", "r", 70))
+    conn.commit()
+    out = dispatch_tool("get_risks", {"kind": "churn"},
+                        project_root=str(tmp_path), project_id=pid, conn=conn)
+    assert [r["area"] for r in out["risks"]] == ["x.py"]

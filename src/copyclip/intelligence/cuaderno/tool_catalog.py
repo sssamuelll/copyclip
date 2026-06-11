@@ -211,6 +211,23 @@ def build_tool_definitions() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "get_risks",
+            "description": (
+                "Read the project's risk signals (churn, test_gap, complexity, "
+                "intent_drift), highest score first. Each row is a deterministic "
+                "heuristic over real git data, citable by `area` (file path). Use "
+                "for 'what's risky' — emit cited callout blocks, never invent severity."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "kind":     {"type": "string", "description": "churn | test_gap | complexity | intent_drift. Optional."},
+                    "severity": {"type": "string", "description": "Filter by severity. Optional."},
+                    "limit":    {"type": "integer", "default": 50},
+                },
+            },
+        },
+        {
             "name": "emit_block",
             "description": (
                 "Emit ONE block of your answer. Call once per block, in order. "
@@ -290,5 +307,11 @@ def dispatch_tool(
             mode=args.get("mode", "last_seen"),
             window=args.get("window", "7d"),
             checkpoint=args.get("checkpoint"),
+        )
+    if name == "get_risks":
+        return anchor.get_risks(
+            conn, project_id,
+            kind=args.get("kind"), severity=args.get("severity"),
+            limit=args.get("limit", 50),
         )
     return {"error": "unknown_tool", "name": name}
