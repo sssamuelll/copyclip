@@ -40,6 +40,22 @@ def test_prompt_requires_answering_the_question_asked():
     assert "asked" in low or ("how" in low and "what" in low)
 
 
+def test_prompt_teaches_teachback_generative_friction():
+    # ⑥ teach-back: the generative pose ("explain ... in your own words") must be
+    # taught, and the reveal must land BESIDE the human's words (not as a verdict).
+    low = SYSTEM_PROMPT.lower()
+    assert "in your own words" in low
+    assert "beside" in low
+
+
+def test_prompt_forbids_grading_the_teachback_explanation():
+    # The teach-back diff ("you missed X") is INFER reading a mind — forbidden.
+    # The explanation is never scored, graded, or diffed against the code.
+    low = SYSTEM_PROMPT.lower()
+    assert "missed" in low or "got wrong" in low
+    assert "never score" in low or "never grade" in low or "do not score" in low
+
+
 def test_judge_prompt_demands_structured_verdict_and_responsiveness():
     from copyclip.intelligence.cuaderno.prompts import JUDGE_PROMPT
     low = JUDGE_PROMPT.lower()
