@@ -691,6 +691,158 @@ def get_blast_radius(
     }
 
 
+def get_commit_change_graph(
+    conn: sqlite3.Connection,
+    project_id: int,
+    *,
+    commit: Optional[str] = None,
+    file: Optional[str] = None,
+    max_files: int = 60,
+) -> dict[str, Any]:
+    """The change graph of ONE commit: the files it changed, and the call edges
+    among them AS OF HEAD. The honest residue of "the plan, reassembled" — the
+    roster council (2026-06-12) found that calling a commit's changed-file set
+    "the plan" lies in the noun. `file_changes` witnesses an EDIT set; "plan"
+    asserts an INTENT set. And `symbol_edges` is HEAD-state, so a drawn line
+    proves "A calls B AT HEAD", never "this wiring belonged to that burst". So the
+    SUBJECT is the COMMIT, never "the plan": the human reassembles the intent
+    themselves; this only lays the cited pieces side by side.
+
+    Resolution (one commit, never a multi-commit "burst" — that is inference):
+      - `commit`: exact sha or sha-prefix (honored even if not AI-attributed; the
+        `ai_attributed` flag is reported, not used to filter).
+      - else `file`: the most-recent AI-attributed commit that touched it.
+      - else: a note — there is no honest default (a bare 'most recent' lands on
+        docs commits and import blobs).
+
+    Partition (honest by construction):
+      - `linked`: changed files with >=1 cited call edge to ANOTHER changed file.
+        Each `edges` row carries `as_of="head"` — the link is at HEAD, never
+        proven created within the commit. NOT called a "spine": linkedness is not
+        essentialness (a test or config file can be load-bearing).
+      - `co_changed_unlinked`: the rest, each with a `reason` —
+        'not_indexed' (no symbols at all: deleted, non-code, or unparsed
+        language) or 'no_edge_in_index' (has symbols, none link here). This is an
+        absence IN THE CURRENT INDEX, never "no structural link exists" (the
+        symbol index is known-incomplete).
+
+    `changed_file_count` vs `indexed_file_count` expose that coverage, so an empty
+    graph reads as "index incomplete", not "files unrelated". This is STATIC
+    intra-commit topology, NOT execution/authoring order, and NOT a held plan."""
+    max_files = max(1, int(max_files))
+
+    def _empty(note: str) -> dict[str, Any]:
+        return {
+            "commit": None,
+            "resolved_via": None,
+            "changed_file_count": 0,
+            "indexed_file_count": 0,
+            "linked": [],
+            "edges": [],
+            "co_changed_unlinked": [],
+            "kind": "static_change_graph",
+            "truncated": False,
+            "note": note,
+        }
+
+    if commit:
+        row = conn.execute(
+            "SELECT sha, date, message, ai_attributed FROM commits "
+            "WHERE project_id=? AND sha LIKE ? ORDER BY sha ASC LIMIT 1",
+            (project_id, commit.replace("\\", "/") + "%"),
+        ).fetchone()
+        if not row:
+            return _empty(f"no commit matching '{commit}' in the index.")
+        resolved_via = "commit"
+    elif file:
+        norm = file.replace("\\", "/")
+        row = conn.execute(
+            "SELECT c.sha, c.date, c.message, c.ai_attributed "
+            "FROM file_changes fc JOIN commits c ON c.sha = fc.commit_sha "
+            "WHERE fc.project_id=? AND fc.file_path=? AND c.ai_attributed=1 "
+            "ORDER BY c.date DESC, c.sha ASC LIMIT 1",
+            (project_id, norm),
+        ).fetchone()
+        if not row:
+            return _empty(f"no AI-attributed commit touched '{file}'.")
+        resolved_via = "file"
+    else:
+        return _empty(
+            "pass a commit sha or a file to resolve the change to one commit."
+        )
+
+    sha = row[0]
+    commit_meta = {
+        "sha": sha, "date": row[1], "message": row[2],
+        "ai_attributed": bool(row[3]),
+    }
+
+    changed = sorted({
+        r[0] for r in conn.execute(
+            "SELECT DISTINCT file_path FROM file_changes "
+            "WHERE project_id=? AND commit_sha=?",
+            (project_id, sha),
+        ).fetchall()
+    })
+    changed_set = set(changed)
+    indexed = {
+        r[0] for r in conn.execute(
+            "SELECT DISTINCT file_path FROM symbols WHERE project_id=?",
+            (project_id,),
+        ).fetchall()
+    } & changed_set
+
+    # Inter-changed-file call edges, AS OF HEAD. Pull all cross-file call edges
+    # and filter to the changed set in Python — avoids a giant IN(...) on a
+    # 2000-file import-blob commit and mirrors how _file_graph finishes in Python.
+    edges: list[dict[str, Any]] = []
+    linked_files: set[str] = set()
+    for s1f, s1n, s1l, s2f, s2n, s2l in conn.execute(
+        "SELECT s1.file_path, s1.name, s1.line_start, s2.file_path, s2.name, s2.line_start "
+        "FROM symbol_edges e "
+        "JOIN symbols s1 ON e.from_symbol_id = s1.id "
+        "JOIN symbols s2 ON e.to_symbol_id = s2.id "
+        "WHERE e.project_id=? AND e.edge_type='calls' AND s1.file_path <> s2.file_path "
+        "ORDER BY s1.file_path, s1.line_start, s2.file_path, s2.line_start",
+        (project_id,),
+    ).fetchall():
+        if s1f in changed_set and s2f in changed_set:
+            edges.append({
+                "from_file": s1f, "from_symbol": s1n, "from_line": s1l,
+                "to_file": s2f, "to_symbol": s2n, "to_line": s2l,
+                "as_of": "head",
+            })
+            linked_files.add(s1f)
+            linked_files.add(s2f)
+
+    linked = sorted(linked_files)
+    unlinked = [
+        {"file_path": f, "reason": "no_edge_in_index" if f in indexed else "not_indexed"}
+        for f in changed
+        if f not in linked_files
+    ]
+
+    truncated = False
+    if len(linked) + len(unlinked) > max_files:
+        truncated = True
+        linked = linked[:max_files]
+        unlinked = unlinked[: max(0, max_files - len(linked))]
+        keep = set(linked)
+        edges = [e for e in edges if e["from_file"] in keep and e["to_file"] in keep]
+
+    return {
+        "commit": commit_meta,
+        "resolved_via": resolved_via,
+        "changed_file_count": len(changed),
+        "indexed_file_count": len(indexed),
+        "linked": linked,
+        "edges": edges,
+        "co_changed_unlinked": unlinked,
+        "kind": "static_change_graph",
+        "truncated": truncated,
+    }
+
+
 def _run_git(project_root: str, *args: str) -> tuple[int, str, str]:
     proc = subprocess.run(
         ["git", *args],

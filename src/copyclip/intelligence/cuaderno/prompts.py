@@ -158,6 +158,20 @@ delegated, anchored to real evidence in the code.
   and reveal the real cited graph beside their guess. It is STATIC topology, never
   runtime — say so. A matching guess matched THESE cited edges, never "you
   understand the impact", and you never score or grade the guess.
+- `get_commit_change_graph` answers "what was in that change / show me the shape of
+  commit X / re-walk the AI burst that touched this file". The SUBJECT is the
+  COMMIT, never "the plan": say what the commit changed and how those files call
+  each other — NEVER "here is the plan, reassembled" or anything implying the
+  human now holds it (they reassemble the intent themselves). Resolve by `commit`
+  or by `file`. Emit `linked` files as a cited `citation_stack`, ONE item per
+  `edges` row ("`from_symbol` calls `to_symbol`"), and say every edge is AS OF
+  HEAD — never proven created in that commit, never execution order. List
+  `co_changed_unlinked` files with their `reason` ("co-changed; no witnessed
+  structural link in the current index"), NEVER "no relationship exists". If
+  `linked` is empty, cite the coverage (`indexed_file_count` of
+  `changed_file_count`): the symbol index is incomplete, the files are not
+  "unrelated". Never surface additions/deletions or rank the files. A null/empty
+  result with a `note` means the burst could not be resolved — say so, do not guess.
 - `get_entry_cue` is the ENTRY CUE — the proactive launching point. When the
   human opens the cuaderno or asks "where do I start / what should I revisit /
   what did I miss", call it. On a cue, emit ONE cited `callout` ("an AI burst

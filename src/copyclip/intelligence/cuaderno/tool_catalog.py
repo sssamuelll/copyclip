@@ -230,6 +230,38 @@ def build_tool_definitions() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "get_commit_change_graph",
+            "description": (
+                "The change graph of ONE commit: the files it changed plus the "
+                "call edges among them AS OF HEAD. Use for 'what was in that "
+                "change / show me the shape of commit X / the AI burst that "
+                "touched this file'. The SUBJECT is the COMMIT, never 'the plan' — "
+                "say what the commit changed and how those files call each other; "
+                "NEVER say you reassembled the plan or that the human now holds it "
+                "(they reassemble the intent themselves). Resolve by `commit` (sha "
+                "or prefix) or by `file` (its most-recent AI commit). `linked` "
+                "files have >=1 cited edge to another changed file — emit them as a "
+                "citation_stack, ONE item per `edges` row (from_symbol -> to_symbol "
+                "with lines); every edge is AS OF HEAD, never proven created in the "
+                "commit, and never execution order. `co_changed_unlinked` files "
+                "carry a `reason`: 'not_indexed' (no symbols — deleted/non-code/"
+                "unparsed) or 'no_edge_in_index' (has symbols, none link here) — "
+                "say 'co-changed; no witnessed structural link in the current "
+                "index', NEVER 'no relationship exists'. When `linked` is empty, "
+                "cite the coverage (`indexed_file_count`/`changed_file_count`): the "
+                "index is incomplete, the files are not 'unrelated'. Do NOT surface "
+                "additions/deletions or rank the files."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "commit": {"type": "string", "description": "Commit sha or prefix to graph. Optional."},
+                    "file": {"type": "string", "description": "Project-relative file; resolves to its most-recent AI-attributed commit. Optional."},
+                    "max_files": {"type": "integer", "default": 60, "description": "Cap on files returned (linked preferred); sets `truncated`."},
+                },
+            },
+        },
+        {
             "name": "get_reverse_dependents",
             "description": (
                 "Modules transitively impacted if a file changes (reverse-dependents "
@@ -415,6 +447,12 @@ def dispatch_tool(
         )
     if name == "get_blast_radius":
         return anchor.get_blast_radius(conn, project_id, args["symbol"], file=args.get("file"))
+    if name == "get_commit_change_graph":
+        return anchor.get_commit_change_graph(
+            conn, project_id,
+            commit=args.get("commit"), file=args.get("file"),
+            max_files=args.get("max_files", 60),
+        )
     if name == "get_reverse_dependents":
         return anchor.get_reverse_dependents(conn, project_id, args["path"])
     if name == "git_archaeology":
