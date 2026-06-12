@@ -206,6 +206,30 @@ def build_tool_definitions() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "get_blast_radius",
+            "description": (
+                "What else does this touch — the STATIC blast radius of changing a "
+                "symbol: the call sites that break on a signature change "
+                "(`direct_callers`, symbol-level, each a citation) plus the modules "
+                "transitively impacted (`impacted_modules`, directory-level reach). "
+                "This is the REVEAL half of a predict-then-reveal: when the human "
+                "asks 'what breaks if I change X', FIRST pose the prediction as a "
+                "followup ('before I show you — which call sites break?') and STOP; "
+                "reveal with this tool on the NEXT turn, beside their guess. It is "
+                "STATIC topology, NOT runtime — say so; a matching guess matched "
+                "THESE cited edges, never 'you understand the blast radius'. Do NOT "
+                "score the guess. An absent entry means the symbol is not indexed."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string", "description": "Symbol whose blast radius to compute."},
+                    "file": {"type": "string", "description": "Project-relative file to disambiguate a shared name. Optional."},
+                },
+                "required": ["symbol"],
+            },
+        },
+        {
             "name": "get_reverse_dependents",
             "description": (
                 "Modules transitively impacted if a file changes (reverse-dependents "
@@ -389,6 +413,8 @@ def dispatch_tool(
         return anchor.get_decisions(
             conn, project_id, status=args.get("status"), limit=args.get("limit", 50)
         )
+    if name == "get_blast_radius":
+        return anchor.get_blast_radius(conn, project_id, args["symbol"], file=args.get("file"))
     if name == "get_reverse_dependents":
         return anchor.get_reverse_dependents(conn, project_id, args["path"])
     if name == "git_archaeology":

@@ -620,6 +620,77 @@ def get_reverse_dependents(
     return {"target_module": target_module, "impacted_modules": sorted(dependents)}
 
 
+def get_blast_radius(
+    conn: sqlite3.Connection,
+    project_id: int,
+    symbol: str,
+    *,
+    file: Optional[str] = None,
+) -> dict[str, Any]:
+    """What else does this touch — the STATIC blast radius of changing `symbol`:
+    the call sites that reference it (which break on a signature change, symbol
+    level) plus the modules transitively impacted (directory-level reach). The
+    REVEAL half of predict-then-reveal.
+
+    Honest by construction: the server computes the real edges (reusing
+    `get_callers` + `get_reverse_dependents`); the model never assembles or
+    hallucinates them. This is STATIC topology, NOT runtime — a matching
+    prediction proves the guess matched THESE cited edges, never 'you understand
+    the blast radius'. Ambiguous names resolve to the first by (file_path,
+    line_start) with the alternatives in `entry_candidates`; pass `file`."""
+    where = ["project_id = ?", "name = ?"]
+    params: list[Any] = [project_id, symbol]
+    if file:
+        where.append("file_path = ?")
+        params.append(file.replace("\\", "/"))
+    entry_rows = conn.execute(
+        "SELECT id, name, kind, file_path, line_start, line_end FROM symbols "
+        "WHERE " + " AND ".join(where) + " ORDER BY file_path, line_start",
+        params,
+    ).fetchall()
+
+    if not entry_rows:
+        return {
+            "symbol": symbol,
+            "entry": None,
+            "entry_candidates": [],
+            "direct_callers": [],
+            "caller_count": 0,
+            "impacted_modules": [],
+            "target_module": None,
+            "module_count": 0,
+            "kind": "static_blast_radius",
+            "note": (
+                f"no symbol named '{symbol}' in the index — try grep_symbols, or "
+                "ask about a file's blast radius via get_reverse_dependents."
+            ),
+        }
+
+    entry = entry_rows[0]
+    candidates = (
+        [{"name": r[1], "file_path": r[3], "line_start": r[4]} for r in entry_rows]
+        if len(entry_rows) > 1
+        else []
+    )
+    callers = get_callers(conn, project_id, symbol)["callers"]
+    rev = get_reverse_dependents(conn, project_id, entry[3])
+    impacted = rev["impacted_modules"]
+    return {
+        "symbol": symbol,
+        "entry": {
+            "name": entry[1], "kind": entry[2], "file_path": entry[3],
+            "line_start": entry[4], "line_end": entry[5],
+        },
+        "entry_candidates": candidates,
+        "direct_callers": callers,
+        "caller_count": len(callers),
+        "impacted_modules": impacted,
+        "target_module": rev["target_module"],
+        "module_count": len(impacted),
+        "kind": "static_blast_radius",
+    }
+
+
 def _run_git(project_root: str, *args: str) -> tuple[int, str, str]:
     proc = subprocess.run(
         ["git", *args],
