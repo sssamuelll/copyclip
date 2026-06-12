@@ -13,7 +13,7 @@ def test_tool_definitions_include_all_tools():
         "get_decisions", "get_reverse_dependents", "git_archaeology",
         "get_story_snapshots", "get_reacquaintance_briefing", "get_risks",
         "get_last_contact", "get_call_path", "get_rationale", "get_entry_cue",
-        "get_blast_radius",
+        "get_blast_radius", "get_commit_change_graph",
         "emit_block", "finish",
     }
 
@@ -149,6 +149,27 @@ def test_dispatch_get_blast_radius(tmp_path):
                         project_root=str(tmp_path), project_id=pid, conn=conn)
     assert [c["name"] for c in out["direct_callers"]] == ["a"]
     assert out["kind"] == "static_blast_radius"
+
+
+def test_dispatch_get_commit_change_graph(tmp_path):
+    conn, pid = _conn_with_project(tmp_path)
+    conn.execute("INSERT INTO commits(project_id,sha,author,date,message,ai_attributed) "
+                 "VALUES(?,?,?,?,?,1)", (pid, "c1", "S", "2026-01-01 00:00:00 +0000", "m"))
+    for f in ("src/a.py", "src/b.py"):
+        conn.execute("INSERT INTO file_changes(project_id,commit_sha,file_path,additions,deletions) "
+                     "VALUES(?,?,?,0,0)", (pid, "c1", f))
+    a = conn.execute("INSERT INTO symbols(project_id,name,kind,file_path,line_start,line_end) "
+                     "VALUES(?,?,?,?,?,?)", (pid, "fa", "function", "src/a.py", 1, 5)).lastrowid
+    b = conn.execute("INSERT INTO symbols(project_id,name,kind,file_path,line_start,line_end) "
+                     "VALUES(?,?,?,?,?,?)", (pid, "fb", "function", "src/b.py", 1, 5)).lastrowid
+    conn.execute("INSERT INTO symbol_edges(project_id,from_symbol_id,to_symbol_id,edge_type) "
+                 "VALUES(?,?,?,'calls')", (pid, a, b))
+    conn.commit()
+    out = dispatch_tool("get_commit_change_graph", {"commit": "c1"},
+                        project_root=str(tmp_path), project_id=pid, conn=conn)
+    assert out["kind"] == "static_change_graph"
+    assert set(out["linked"]) == {"src/a.py", "src/b.py"}
+    assert out["edges"][0]["as_of"] == "head"
 
 
 def test_dispatch_get_entry_cue(tmp_path):
