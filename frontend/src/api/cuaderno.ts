@@ -44,7 +44,7 @@ export const cuadernoApi = {
   patchQuestion(
     sessionId: string,
     position: number,
-    fields: { bookmarked?: boolean; got_it?: 'got' | 'didnt' | null },
+    fields: { bookmarked?: boolean; answer_check?: 'answers' | 'not_yet' | null },
   ) {
     return patchJson<{ ok: boolean }>(
       `/api/cuaderno/sessions/${encodeURIComponent(sessionId)}/questions/${position}`,

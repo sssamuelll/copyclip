@@ -13,7 +13,7 @@ const baseProps = {
   isLoading: false,
   onAsk: () => {},
   onSelectFromHistory: () => {},
-  onSetGotIt: () => {},
+  onSetAnswerCheck: () => {},
 }
 
 describe('Cuaderno ⊞ survivor menu', () => {

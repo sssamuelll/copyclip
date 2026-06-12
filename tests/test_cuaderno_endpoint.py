@@ -190,11 +190,11 @@ def test_patch_bookmark_and_gotit():
 
     status, _ = _patch_json(
         f"http://127.0.0.1:{port}/api/cuaderno/sessions/{sid}/questions/1",
-        {"bookmarked": True, "got_it": "got"},
+        {"bookmarked": True, "answer_check": "answers"},
     )
     assert status == 200
 
     _, session = _get_json(f"http://127.0.0.1:{port}/api/cuaderno/sessions/{sid}")
     q1 = session["questions"][0]
     assert q1["bookmarked"] is True
-    assert q1["got_it"] == "got"
+    assert q1["answer_check"] == "answers"

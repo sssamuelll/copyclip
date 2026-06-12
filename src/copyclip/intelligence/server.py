@@ -1482,11 +1482,11 @@ def run_server(
                     except json.JSONDecodeError:
                         self._json({"error": "invalid_request"}, 400)
                         return
-                    from .cuaderno.persistence import set_bookmark, set_got_it
+                    from .cuaderno.persistence import set_bookmark, set_answer_check
                     if "bookmarked" in data:
                         set_bookmark(conn, sid, pos, bool(data["bookmarked"]))
-                    if "got_it" in data:
-                        set_got_it(conn, sid, pos, data["got_it"])
+                    if "answer_check" in data:
+                        set_answer_check(conn, sid, pos, data["answer_check"])
                     self._json({"ok": True})
                     return
 
