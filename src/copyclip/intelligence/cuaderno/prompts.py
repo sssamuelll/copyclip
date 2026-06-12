@@ -45,6 +45,13 @@ JSON shape (retry_directive only for "retry"; world REQUIRED for "insufficient")
  "retry_directive":"...","reason":"one short sentence"}
 """
 
+ALTITUDE_RETRY_DIRECTIVE = (
+    "Your answer OPENED with a wall of citations. Lead with ONE plain sentence that "
+    "names what this is — true of the cited lines — THEN descend into the citation "
+    "stack. Re-emit every block in order: the plain lead first, the stack after. Do "
+    "not open with the stack; the stack is the descent, not the greeting."
+)
+
 GROUNDING_RETRY_DIRECTIVE = (
     "Your answer is not yet anchored to the code: you have not read evidence "
     "that supports it. Do NOT finish yet. Use the read tools now to ground the "

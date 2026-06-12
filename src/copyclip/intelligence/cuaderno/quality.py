@@ -226,6 +226,37 @@ def assess(*, question: str, blocks: list[Block], ledger: ReadLedger) -> Quality
     )
 
 
+# A citation_stack of this many items, emitted as the FIRST block, is the wall.
+ALTITUDE_DENSE_STACK_MIN = 3
+
+
+def altitude_violation(blocks: list[Block], question: str) -> Optional[str]:
+    """The open-order nudge — the honest residue of the descent gate (cognitive-load
+    doctrine, council-corrected 2026-06-12). A code-question answer must not OPEN
+    with the wall: a `citation_stack` of >=3 items as the FIRST block, with no plain
+    lead before it.
+
+    Block-KIND + item-count ONLY. It never reads a block's text and never judges
+    whether a lead is "plain" — that would be INFER, which the doctrine forbids
+    (legibility lives on the far side of the INFER wall). It is a NUDGE, not an
+    invariant: the council proved legibility is not structurally sealable ("never
+    measure the climber"), so this bans exactly the ONE witnessed FLOOD-greeting
+    (the 10-hop-wall reveal) and leaves the rest of altitude to the prompt. FLOAT is
+    not catchable here. Carve-outs are automatic: a lead / paragraph / code_block /
+    callout / widget opener, or a short (<3-item) stack, all pass."""
+    if not blocks or not looks_like_code_question(question):
+        return None
+    first = blocks[0]
+    if first.kind == "citation_stack":
+        n = len(first.data.get("items") or [])
+        if n >= ALTITUDE_DENSE_STACK_MIN:
+            return (
+                f"answer OPENS with a {n}-item citation_stack (a wall) — lead with "
+                "one plain sentence first, then descend into the stack"
+            )
+    return None
+
+
 def cheap_verdict_dict(v: QualityVerdict) -> dict[str, Any]:
     """The cheap layer's partial verdict as the persisted pre-image. The cheap
     layer cannot judge responsiveness, so `responsive` is None (unknown)."""
