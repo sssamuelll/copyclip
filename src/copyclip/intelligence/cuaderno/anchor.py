@@ -523,6 +523,24 @@ def get_last_contact(
     return {"last_contact": items}
 
 
+def get_entry_cue(
+    conn: sqlite3.Connection,
+    project_id: int,
+) -> dict[str, Any]:
+    """The cuaderno's entry cue — the single most-overdue AI burst the human has
+    NOT returned to, the proactive launching point into re-deriving it. Returns
+    `{"entry_cue": None}` when there is nothing honest to surface.
+
+    LIVE-verified: the persisted snapshot only selects candidates, the live
+    contact verdict decides, so it never fires on a file the human revisited.
+    Scoped to the snapshot's age (`stale`, `analyzed_age_days`) so it never claims
+    a present-tense gap past what analysis witnessed. The FILE is stale, never the
+    mind — recency plus a launch into re-derivation, never a comprehension claim."""
+    from ..pulso import build_entry_cue
+
+    return {"entry_cue": build_entry_cue(conn, project_id)}
+
+
 def _parse_json_or_none(raw: Optional[str]) -> Any:
     if not raw:
         return None

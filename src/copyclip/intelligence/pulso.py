@@ -120,3 +120,64 @@ def build_last_contact(
         "reviewed_days": days_since(last_review) if last_review is not None else None,
         "never_human_touched": last_human is None,
     }
+
+
+def build_entry_cue(
+    conn,
+    project_id: int,
+    *,
+    now: datetime | None = None,
+    stale_after_days: int = 14,
+) -> dict[str, Any] | None:
+    """The cuaderno's entry cue: the single most-overdue AI burst the human has
+    NOT returned to — the proactive launching point into re-deriving it. Returns
+    None (silent) when there is nothing honest to surface.
+
+    Honest by construction:
+    - The persisted `pulso_last_contact_days` only SELECTS candidates; the LIVE
+      `build_last_contact` verdict DECIDES. A file the human came back to (live
+      None) is dropped even if its snapshot still shows a positive gap — so the
+      cue never fires on a file the human revisited.
+    - It scopes its claim to the snapshot's age: `analyzed_age_days` is the age of
+      `analysis_file_insights.updated_at`, and `stale` flags a snapshot older than
+      `stale_after_days`. Past that line the surface should hedge ("as of the last
+      analysis N days ago") rather than assert a present-tense gap it cannot
+      witness. A missing `updated_at` never over-claims staleness.
+
+    The FILE is stale, never the mind: recency plus a launch, never comprehension.
+    """
+    now = now or datetime.now(timezone.utc)
+
+    rows = conn.execute(
+        "SELECT path, updated_at FROM analysis_file_insights "
+        "WHERE project_id=? AND pulso_last_contact_days IS NOT NULL",
+        (project_id,),
+    ).fetchall()
+
+    candidates: list[tuple[str, str | None, dict[str, Any]]] = []
+    for path, updated_at in rows:
+        detail = build_last_contact(conn, project_id, path, now=now)
+        if detail is None:
+            continue  # human already returned / no burst — not hasn't-been-back
+        candidates.append((path, updated_at, detail))
+
+    if not candidates:
+        return None
+
+    # Most overdue first; ties broken by path for determinism.
+    candidates.sort(key=lambda c: (-c[2]["last_contact_days"], c[0]))
+    path, updated_at, detail = candidates[0]
+
+    parsed = _parse_git_iso(updated_at)
+    analyzed_age_days = max(0, (now - parsed).days) if parsed is not None else None
+    stale = analyzed_age_days is not None and analyzed_age_days > stale_after_days
+
+    return {
+        "file_path": path,
+        "last_contact_days": detail["last_contact_days"],
+        "ai_burst_days": detail["ai_burst_days"],
+        "last_contact_source": detail["last_contact_source"],
+        "never_human_touched": detail["never_human_touched"],
+        "analyzed_age_days": analyzed_age_days,
+        "stale": stale,
+    }
