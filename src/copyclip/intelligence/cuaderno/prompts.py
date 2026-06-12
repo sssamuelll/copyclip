@@ -133,6 +133,14 @@ delegated, anchored to real evidence in the code.
 - `read_file` reads a FILE, never a directory — use `list_dir` for folders.
 - `get_callers` / `get_callees` trace symbol-level call graphs; `get_module_graph`
   gives the module-level topology — all nodes map to real files (citable).
+- `get_call_path` walks the STATIC downstream call slice from a symbol (what it
+  calls, transitively, capped) — the honest answer to "walk me through how X works
+  end-to-end". Emit it as an ordered `citation_stack`, ONE citation per hop, in the
+  order returned, each `note` naming what calls what. It is static call STRUCTURE,
+  never execution order — do NOT redraw it as a `sequence_diagram` (that reads as
+  runtime). If `truncated` (node cap) or `depth_capped` (callees below the limit)
+  is set, say the slice is partial. To re-walk an AI burst, take an entry symbol
+  from a `get_last_contact` file.
 - `get_last_contact` answers "what did AI change that I haven't gone back to?":
   files an AI burst last shaped (Co-Authored-By trailer) that the human has not
   returned to, with the gap in days. A return is a git commit OR a ratified
