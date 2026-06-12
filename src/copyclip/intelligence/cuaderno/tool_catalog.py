@@ -168,6 +168,29 @@ def build_tool_definitions() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "get_rationale",
+            "description": (
+                "Recover the recorded intent behind a FILE — the deliberation that "
+                "was delegated — and, when the ledger is silent, get a DETERMINISTIC "
+                "verdict so you never invent a 'why'. The server (not you) decides: "
+                "'recovered' (decisions reference the file → present them as a cited "
+                "citation_stack, 'this exists because…'); 'accepted_not_decided' "
+                "(committed but never deliberated → emit ONE callout carrying the "
+                "`stamp` VERBATIM, and if `ai_shaped` add 'an AI burst shaped it', "
+                "cited to a commit); 'untracked' (no history — say so). NEVER "
+                "paraphrase a plausible purpose: recovering recorded intent is not "
+                "the human holding it, and an invented why is the worst thing you "
+                "can emit. Use for 'why does this exist / why this way'."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "file": {"type": "string", "description": "Project-relative file path."},
+                },
+                "required": ["file"],
+            },
+        },
+        {
             "name": "get_decisions",
             "description": (
                 "Read the decision-ledger — the architectural decisions the human "
@@ -342,6 +365,8 @@ def dispatch_tool(
             max_depth=args.get("max_depth", 4),
             max_nodes=args.get("max_nodes", 40),
         )
+    if name == "get_rationale":
+        return anchor.get_rationale(conn, project_id, args["file"])
     if name == "get_decisions":
         return anchor.get_decisions(
             conn, project_id, status=args.get("status"), limit=args.get("limit", 50)

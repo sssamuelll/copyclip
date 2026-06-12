@@ -12,7 +12,7 @@ def test_tool_definitions_include_all_tools():
         "git_log", "git_blame", "git_diff", "find_tests", "get_module_graph",
         "get_decisions", "get_reverse_dependents", "git_archaeology",
         "get_story_snapshots", "get_reacquaintance_briefing", "get_risks",
-        "get_last_contact", "get_call_path",
+        "get_last_contact", "get_call_path", "get_rationale",
         "emit_block", "finish",
     }
 
@@ -133,6 +133,19 @@ def test_dispatch_get_call_path(tmp_path):
                         project_root=str(tmp_path), project_id=pid, conn=conn)
     assert [h["symbol"] for h in out["hops"]] == ["a", "b"]
     assert out["kind"] == "static_call_slice"
+
+
+def test_dispatch_get_rationale(tmp_path):
+    conn, pid = _conn_with_project(tmp_path)
+    conn.execute("INSERT INTO commits(project_id,sha,author,date,message,ai_attributed) "
+                 "VALUES(?,?,?,?,?,1)", (pid, "ai1", "S", "2026-01-01 00:00:00 +0000", "m"))
+    conn.execute("INSERT INTO file_changes(project_id,commit_sha,file_path,additions,deletions) "
+                 "VALUES(?,?,?,0,0)", (pid, "ai1", "src/a.py"))
+    conn.commit()
+    out = dispatch_tool("get_rationale", {"file": "src/a.py"},
+                        project_root=str(tmp_path), project_id=pid, conn=conn)
+    assert out["verdict"] == "accepted_not_decided"
+    assert out["ai_shaped"] is True
 
 
 def test_dispatch_get_risks(tmp_path):
