@@ -176,6 +176,133 @@ def get_callees(
     }
 
 
+def get_call_path(
+    conn: sqlite3.Connection,
+    project_id: int,
+    symbol: str,
+    *,
+    file: Optional[str] = None,
+    max_depth: int = 4,
+    max_nodes: int = 40,
+) -> dict[str, Any]:
+    """The STATIC downstream call slice from `symbol`: the functions it calls,
+    transitively, walked over the symbol index (`symbol_edges` edge_type='calls')
+    breadth-first BY symbol id — cycle-safe and immune to name collisions, which
+    walking by name (the way `get_callees` resolves a single hop) is not. Capped
+    by depth and node count so a hot symbol cannot fan into a token-draining tour.
+
+    `hops[0]` is the entry itself (depth 0, `calls_from=None`); every later hop is
+    a real citation (file_path + line range). The slice IS its citations — the
+    tutor narrates nothing the index did not witness.
+
+    This is STATIC call STRUCTURE, not a runtime/execution trace: it shows what
+    the code CAN call, in no guaranteed execution order. A missing edge yields a
+    shorter slice (it fails short, never false). `truncated` flags the node cap;
+    `depth_capped` flags that real callees sit below the depth limit, unshown.
+
+    When the entry name is ambiguous it walks the first by (file_path, line_start)
+    and lists the alternatives in `entry_candidates`; pass `file` to disambiguate.
+    """
+    max_depth = max(0, int(max_depth))
+    max_nodes = max(1, int(max_nodes))
+
+    where = ["project_id = ?", "name = ?"]
+    params: list[Any] = [project_id, symbol]
+    if file:
+        where.append("file_path = ?")
+        params.append(file.replace("\\", "/"))
+    entry_rows = conn.execute(
+        "SELECT id, name, kind, file_path, line_start, line_end FROM symbols "
+        "WHERE " + " AND ".join(where) + " ORDER BY file_path, line_start",
+        params,
+    ).fetchall()
+
+    if not entry_rows:
+        return {
+            "symbol": symbol,
+            "entry": None,
+            "entry_candidates": [],
+            "hops": [],
+            "kind": "static_call_slice",
+            "max_depth": max_depth,
+            "truncated": False,
+            "depth_capped": False,
+            "note": (
+                f"no symbol named '{symbol}' in the index — try grep_symbols, or "
+                "read the file directly."
+            ),
+        }
+
+    def _hop(row: Any, depth: int, calls_from: Optional[str]) -> dict[str, Any]:
+        return {
+            "symbol": row[1],
+            "kind": row[2],
+            "file_path": row[3],
+            "line_start": row[4],
+            "line_end": row[5],
+            "depth": depth,
+            "calls_from": calls_from,
+        }
+
+    entry = entry_rows[0]
+    entry_id = entry[0]
+    candidates = (
+        [{"name": r[1], "file_path": r[3], "line_start": r[4]} for r in entry_rows]
+        if len(entry_rows) > 1
+        else []
+    )
+
+    hops = [_hop(entry, 0, None)]
+    visited = {entry_id}
+    frontier: list[tuple[int, str, int]] = [(entry_id, entry[1], 0)]
+    truncated = False
+    depth_capped = False
+    while frontier:
+        cur_id, cur_name, depth = frontier.pop(0)
+        if depth >= max_depth:
+            below = conn.execute(
+                "SELECT 1 FROM symbol_edges WHERE project_id=? AND from_symbol_id=? "
+                "AND edge_type='calls' LIMIT 1",
+                (project_id, cur_id),
+            ).fetchone()
+            if below:
+                depth_capped = True
+            continue
+        callee_rows = conn.execute(
+            "SELECT s.id, s.name, s.kind, s.file_path, s.line_start, s.line_end "
+            "FROM symbol_edges e JOIN symbols s ON e.to_symbol_id = s.id "
+            "WHERE e.project_id=? AND e.from_symbol_id=? AND e.edge_type='calls' "
+            "ORDER BY s.file_path, s.line_start",
+            (project_id, cur_id),
+        ).fetchall()
+        for cr in callee_rows:
+            cid = cr[0]
+            if cid in visited:
+                continue
+            if len(visited) >= max_nodes:
+                truncated = True
+                break
+            visited.add(cid)
+            hops.append(_hop(cr, depth + 1, cur_name))
+            frontier.append((cid, cr[1], depth + 1))
+        if truncated:
+            break
+
+    return {
+        "symbol": symbol,
+        "entry": {
+            "name": entry[1], "kind": entry[2], "file_path": entry[3],
+            "line_start": entry[4], "line_end": entry[5],
+        },
+        "entry_candidates": candidates,
+        "hops": hops,
+        "kind": "static_call_slice",
+        "max_depth": max_depth,
+        "truncated": truncated,
+        "depth_capped": depth_capped,
+    }
+
+
 def get_decisions(
     conn: sqlite3.Connection,
     project_id: int,

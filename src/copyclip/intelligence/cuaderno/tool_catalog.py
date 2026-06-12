@@ -142,6 +142,32 @@ def build_tool_definitions() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "get_call_path",
+            "description": (
+                "Walk the STATIC downstream call slice from a symbol: every "
+                "function it calls, transitively, breadth-first and capped. Each "
+                "hop is a real citation (file + line range) — the slice IS its "
+                "citations, so emit it as an ordered citation_stack, one citation "
+                "per hop. Use for 'walk me through how X works end-to-end' / "
+                "'trace this'. This is STATIC call STRUCTURE from the symbol "
+                "index, NOT a runtime/execution trace — never present the order as "
+                "execution order, and do not redraw it as a sequence_diagram "
+                "(that reads as runtime). `truncated` means the node cap was hit; "
+                "`depth_capped` means real callees sit below the depth limit, "
+                "unshown — say so. An absent entry means the symbol is not indexed."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string", "description": "Entry symbol name to walk from."},
+                    "file": {"type": "string", "description": "Project-relative file to disambiguate a name shared by several symbols. Optional."},
+                    "max_depth": {"type": "integer", "default": 4, "description": "How many call levels deep to walk."},
+                    "max_nodes": {"type": "integer", "default": 40, "description": "Hard cap on total hops."},
+                },
+                "required": ["symbol"],
+            },
+        },
+        {
             "name": "get_decisions",
             "description": (
                 "Read the decision-ledger — the architectural decisions the human "
@@ -309,6 +335,13 @@ def dispatch_tool(
         return anchor.find_tests(project_root, args["symbol"])
     if name == "get_module_graph":
         return anchor.get_module_graph(conn, project_id, args.get("scope", ""))
+    if name == "get_call_path":
+        return anchor.get_call_path(
+            conn, project_id, args["symbol"],
+            file=args.get("file"),
+            max_depth=args.get("max_depth", 4),
+            max_nodes=args.get("max_nodes", 40),
+        )
     if name == "get_decisions":
         return anchor.get_decisions(
             conn, project_id, status=args.get("status"), limit=args.get("limit", 50)
