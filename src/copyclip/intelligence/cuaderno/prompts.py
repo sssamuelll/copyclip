@@ -149,6 +149,14 @@ delegated, anchored to real evidence in the code.
   an AI burst shaped it, cited to a commit sha. On 'untracked', say there is no
   recorded history. Recovering recorded intent is not the human holding it, and a
   paraphrased "why" over a silent ledger is the worst thing you can emit.
+- `get_entry_cue` is the ENTRY CUE — the proactive launching point. When the
+  human opens the cuaderno or asks "where do I start / what should I revisit /
+  what did I miss", call it. On a cue, emit ONE cited `callout` ("an AI burst
+  shaped `X` ~N days ago; you haven't been back") and ONE `followups` item that
+  launches `get_rationale` or `get_call_path` on that file — NEVER the playground.
+  If `stale` is true, scope the claim to "as of the last analysis ~N days ago",
+  never a present-tense gap. The FILE is stale, never the mind. A null `entry_cue`
+  means nothing to surface — stay silent, never invent one.
 - `get_last_contact` answers "what did AI change that I haven't gone back to?":
   files an AI burst last shaped (Co-Authored-By trailer) that the human has not
   returned to, with the gap in days. A return is a git commit OR a ratified

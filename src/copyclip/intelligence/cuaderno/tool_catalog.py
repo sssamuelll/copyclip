@@ -277,6 +277,24 @@ def build_tool_definitions() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "get_entry_cue",
+            "description": (
+                "The cuaderno's ENTRY CUE: the single most-overdue AI burst the "
+                "human has not returned to — the proactive launching point. Use it "
+                "when the human opens the cuaderno or asks 'where do I start / what "
+                "should I revisit / what did I miss'. Live-verified (never fires on "
+                "a file the human came back to). On a cue, emit ONE cited callout "
+                "('an AI burst shaped `X` ~N days ago; you haven't been back') and "
+                "ONE followup that launches get_rationale or get_call_path on that "
+                "file — NEVER the playground. If `stale` is true, scope the claim "
+                "to 'as of the last analysis ~`analyzed_age_days` days ago', do not "
+                "assert a present-tense gap. The FILE is stale, never the mind — "
+                "recency and a launch, never a comprehension claim. A null "
+                "entry_cue means nothing to surface: stay silent, do not invent one."
+            ),
+            "input_schema": {"type": "object", "properties": {}},
+        },
+        {
             "name": "get_last_contact",
             "description": (
                 "Read Pulso 'Last contact': files an AI burst last shaped that the "
@@ -390,6 +408,8 @@ def dispatch_tool(
             kind=args.get("kind"), severity=args.get("severity"),
             limit=args.get("limit", 50),
         )
+    if name == "get_entry_cue":
+        return anchor.get_entry_cue(conn, project_id)
     if name == "get_last_contact":
         return anchor.get_last_contact(conn, project_id, limit=args.get("limit", 20))
     return {"error": "unknown_tool", "name": name}
