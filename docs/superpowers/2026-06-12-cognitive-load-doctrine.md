@@ -52,10 +52,25 @@ Progressive disclosure where **citation density RISES as abstraction falls**:
 - the descent path is **ALWAYS-PRESENT-THOUGH-COLLAPSED**, never optional/skippable
   — if the real lines are skippable, altitude becomes a lid, not a staircase.
 
-**Enforcement (the honest-by-construction path):** the descent edge should be
-structurally REQUIRED, not prompt-hope — the way `quality.py` seals grounding and
-the ② gate seals the stamp. Without an enforced descent, load-reduction is
-unfalsifiable and ships theater.
+**Enforcement — what is structurally sealable (Level-2 design council, 2026-06-12):**
+legibility itself is NOT structurally sealable. By the doctrine's own logic ("never
+measure the climber" + "never INFER"), only two things can be enforced: (a) that a
+real step EXISTS beneath a claim — grounding, already sealed by `quality.assess`;
+and (b) that the answer does not OPEN with the wall — the open-order nudge. FLOAT (a
+fluent summary with nothing reachable beneath) is byte-indistinguishable from a
+legible answer except by meaning, so it is NOT catchable structurally; FLOOD's
+*greeting* is. Everything past that is the climber's judgment and stays prompt-guided
+— not a failure, the doctrine being consistent with itself.
+
+The shipped enforcement is `quality.altitude_violation` (+ a one-shot
+`altitude_retry`, behind a passing grounding verdict): a code-question answer whose
+FIRST block is a `citation_stack` of >=3 items is rejected and re-emitted lead-first.
+Block-KIND + item-count only — never reads text, never judges "plain". It is a
+NUDGE, not an invariant: it bans the one witnessed FLOOD-greeting (the 10-hop-wall
+reveal) and nothing more; a re-flood at block 2 is not caught, and the retry fires
+once. `check 2` (reachable descent) and `check 3` (density monotonicity) from the
+proposal were CUT — check 2 is grounding (assess owns it) and as written
+false-positives the grep/git tolerance assess deliberately protects; check 3 is INFER.
 
 ## Fate of the prior doctrine (clarified, not demolished)
 
@@ -76,6 +91,7 @@ unfalsifiable and ships theater.
 2. Rebuild the reveal/explanation around altitude: plain anchored lead → structure
    → full cited detail on descent. Neither FLOAT nor FLOOD.
 3. Demote teach-back/predict-first to an optional self-test mode, never the spine.
-4. Eventually: a structural descent-edge requirement (honest-by-construction), so
-   "every claim is a doorway" is enforced, not hoped.
+4. The structural floor is grounding (`assess`) + the open-order nudge
+   (`altitude_violation`); "every claim is a doorway" past that is prompt-guided,
+   because enforcing it would require INFER, which the doctrine forbids.
 5. Forbidden forever: any metric/score of "load reduced for this human."
