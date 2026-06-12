@@ -28,11 +28,17 @@ primitive to compute. ⑥ has none:
 - The **prediction/explanation** is the human's, and is **never persisted, never
   scored, never diffed**. Zero substrate touched → zero breach surface.
 
-So ⑥ is honest-by-construction in the same way ④ is: the reveal is a grounded
-anchor, the turn boundary is the withhold, and nothing about the human is stored.
-The only NEW thing is teaching the tutor *when and how* to deploy the teach-back
-frame. That is **prompt guidance**, not code — and that is correct, not a shortcut:
-there is nothing honest left to build.
+⑥'s REVEAL is grounded the way ④'s is (a server-owned anchor, the turn boundary
+the withhold, nothing about the human stored), and nothing it persists can breach.
+But its POSE is NOT honest the way ④'s is — **CORRECTION (Serrano, 2026-06-12):**
+④'s pose is PREDICT-from-name/site and needs no prior model; ⑥ shipped a RECALL
+pose ("explain in your own words") that presupposes a model the wedge reader —
+accepted-but-never-internalized code — does not have. Sharing a reveal anchor does
+NOT make them share an honest pose. The first live run proved it (the reader had
+nothing to recall). The cognitive-load doctrine
+(`docs/superpowers/2026-06-12-cognitive-load-doctrine.md`) supersedes this kickoff:
+teach-back is DEMOTED to an optional self-test, re-posed as predict-from-SITE, and
+the DEFAULT is to explain by altitude, not to quiz.
 
 ## What ships
 
