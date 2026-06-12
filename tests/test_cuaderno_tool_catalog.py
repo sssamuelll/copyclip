@@ -13,6 +13,7 @@ def test_tool_definitions_include_all_tools():
         "get_decisions", "get_reverse_dependents", "git_archaeology",
         "get_story_snapshots", "get_reacquaintance_briefing", "get_risks",
         "get_last_contact", "get_call_path", "get_rationale", "get_entry_cue",
+        "get_blast_radius",
         "emit_block", "finish",
     }
 
@@ -133,6 +134,21 @@ def test_dispatch_get_call_path(tmp_path):
                         project_root=str(tmp_path), project_id=pid, conn=conn)
     assert [h["symbol"] for h in out["hops"]] == ["a", "b"]
     assert out["kind"] == "static_call_slice"
+
+
+def test_dispatch_get_blast_radius(tmp_path):
+    conn, pid = _conn_with_project(tmp_path)
+    x = conn.execute("INSERT INTO symbols(project_id,name,kind,file_path,line_start,line_end) "
+                     "VALUES(?,?,?,?,?,?)", (pid, "x", "function", "src/x.py", 1, 5)).lastrowid
+    a = conn.execute("INSERT INTO symbols(project_id,name,kind,file_path,line_start,line_end) "
+                     "VALUES(?,?,?,?,?,?)", (pid, "a", "function", "src/a.py", 1, 5)).lastrowid
+    conn.execute("INSERT INTO symbol_edges(project_id,from_symbol_id,to_symbol_id,edge_type) "
+                 "VALUES(?,?,?,'calls')", (pid, a, x))
+    conn.commit()
+    out = dispatch_tool("get_blast_radius", {"symbol": "x"},
+                        project_root=str(tmp_path), project_id=pid, conn=conn)
+    assert [c["name"] for c in out["direct_callers"]] == ["a"]
+    assert out["kind"] == "static_blast_radius"
 
 
 def test_dispatch_get_entry_cue(tmp_path):
