@@ -611,7 +611,7 @@ def init_cuaderno_schema(conn: sqlite3.Connection) -> None:
             question    TEXT NOT NULL,
             frame_json  TEXT NOT NULL,
             bookmarked  INTEGER NOT NULL DEFAULT 0,
-            got_it      TEXT,
+            answer_check TEXT,
             created_at  TEXT NOT NULL,
             UNIQUE(session_id, position)
         );
@@ -620,4 +620,19 @@ def init_cuaderno_schema(conn: sqlite3.Connection) -> None:
             ON cuaderno_questions(session_id, position);
         """
     )
+    # Repair the doctrine breach in existing DBs: the old `got_it` column stored a
+    # verdict on the MIND ('got'/'didnt'). Rename it to `answer_check` and re-scope
+    # the values to the ARTIFACT ('answers'/'not_yet') so no human's marks are lost.
+    try:
+        cq_cols = {row[1] for row in conn.execute(
+            "PRAGMA table_info(cuaderno_questions)").fetchall()}
+        if "got_it" in cq_cols and "answer_check" not in cq_cols:
+            conn.execute(
+                "ALTER TABLE cuaderno_questions RENAME COLUMN got_it TO answer_check")
+            conn.execute(
+                "UPDATE cuaderno_questions SET answer_check='answers' WHERE answer_check='got'")
+            conn.execute(
+                "UPDATE cuaderno_questions SET answer_check='not_yet' WHERE answer_check='didnt'")
+    except Exception:
+        pass
     conn.commit()

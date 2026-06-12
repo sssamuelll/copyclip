@@ -755,7 +755,7 @@ export type CuadernoQuestion = {
   question: string
   frame: Frame
   bookmarked: boolean
-  got_it: 'got' | 'didnt' | null
+  answer_check: 'answers' | 'not_yet' | null
   created_at: string
 }
 

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { Block, Citation, CuadernoQuestion, ToolRow, CuadernoProvidersResponse } from '../../types/api'
 import { SURVIVOR_NAV, type SurvivorPage } from '../../nav'
 import { Composer } from './Composer'
-import { GotItMarkers } from './GotItMarkers'
+import { AnswerCheck } from './AnswerCheck'
 import { SidePanel } from './SidePanel'
 import { HistoryOverlay } from './HistoryOverlay'
 import { FrameEmpty } from './frames/FrameEmpty'
@@ -24,7 +24,7 @@ type Props = {
   onNavigate?: (target: SurvivorPage) => void
   onAsk: (question: string) => void
   onSelectFromHistory: (position: number) => void
-  onSetGotIt: (position: number, value: 'got' | 'didnt') => void
+  onSetAnswerCheck: (position: number, value: 'answers' | 'not_yet') => void
   questionLanguage?: string | null
 }
 
@@ -42,7 +42,7 @@ export function Cuaderno({
   onNavigate,
   onAsk,
   onSelectFromHistory,
-  onSetGotIt,
+  onSetAnswerCheck,
   questionLanguage,
 }: Props) {
   const [sidePanelFor, setSidePanelFor] = useState<Citation | null>(null)
@@ -168,9 +168,9 @@ export function Cuaderno({
                 {(!activeQuestion.frame.status ||
                   activeQuestion.frame.status === 'answer' ||
                   activeQuestion.frame.status === 'legacy') && (
-                  <GotItMarkers
-                    value={activeQuestion.got_it}
-                    onSet={(v) => onSetGotIt(activeQuestion.position, v)}
+                  <AnswerCheck
+                    value={activeQuestion.answer_check}
+                    onSet={(v) => onSetAnswerCheck(activeQuestion.position, v)}
                     language={activeQuestion.frame.question_language ?? questionLanguage}
                   />
                 )}
