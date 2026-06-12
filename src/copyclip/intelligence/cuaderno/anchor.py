@@ -9,6 +9,12 @@ from pathlib import Path
 from typing import Any, Optional
 
 
+# The signature sentence of the wedge. A module constant so the verdict the
+# SYSTEM owns (not the model) has one source of truth — the model surfaces this
+# string verbatim, it never authors the judgment. Do not reword without a council.
+ACCEPTED_NOT_DECIDED = "no recorded rationale; this was accepted, not decided."
+
+
 def _safe_resolve(project_root: str, rel_path: str) -> Optional[Path]:
     """Resolve a project-relative path; return None if it escapes the root."""
     root = Path(project_root).resolve()
@@ -300,6 +306,100 @@ def get_call_path(
         "max_depth": max_depth,
         "truncated": truncated,
         "depth_capped": depth_capped,
+    }
+
+
+def get_rationale(
+    conn: sqlite3.Connection,
+    project_id: int,
+    file: str,
+) -> dict[str, Any]:
+    """Recover the recorded intent behind a file — the deliberation that was
+    delegated — and, when the ledger is SILENT, say so DETERMINISTICALLY so a
+    'why' can never be invented to fill the gap.
+
+    Recorded rationale means a decision REFERENCES the file: directly
+    (`decision_refs` ref_type='file' — the trustworthy file edge) or via a commit
+    that touched it (ref_type='commit'). Commit MESSAGES are history, not
+    deliberation; they do not count as 'decided'.
+
+    Verdict (computed here, never by the model):
+      - 'recovered'             — ≥1 decision references the file.
+      - 'accepted_not_decided'  — the file has commits but NO decision. The
+                                  signature of AI-burst code that was accepted, not
+                                  decided. `stamp` carries the constant sentence;
+                                  `ai_shaped` says whether an AI burst touched it.
+      - 'untracked'             — no commits and no decisions; we cannot prove it
+                                  was even accepted, so NO stamp, only a note.
+
+    Recovering recorded intent is not the human holding it. This proves what the
+    ledger witnessed, never comprehension."""
+    norm = file.replace("\\", "/")
+
+    commit_rows = conn.execute(
+        "SELECT c.sha, c.author, c.date, c.message, c.ai_attributed "
+        "FROM file_changes fc JOIN commits c ON c.sha = fc.commit_sha "
+        "WHERE fc.project_id=? AND fc.file_path=? ORDER BY c.date DESC",
+        (project_id, norm),
+    ).fetchall()
+    commits = [
+        {
+            "sha": r[0],
+            "author": r[1],
+            "date": r[2],
+            "message": r[3],
+            "ai_attributed": bool(r[4]),
+        }
+        for r in commit_rows
+    ]
+    commit_shas = [r[0] for r in commit_rows if r[0]]
+    ai_shaped = any(c["ai_attributed"] for c in commits)
+
+    decisions: dict[int, dict[str, Any]] = {}
+    # Direct file refs first — the trustworthy edge (matched_via wins on a tie).
+    for r in conn.execute(
+        "SELECT d.id, d.title, d.status, d.source_type, d.summary "
+        "FROM decisions d JOIN decision_refs dr ON dr.decision_id = d.id "
+        "WHERE d.project_id=? AND dr.ref_type='file' AND dr.ref_value=?",
+        (project_id, norm),
+    ).fetchall():
+        decisions[r[0]] = {
+            "id": r[0], "title": r[1], "status": r[2],
+            "source_type": r[3], "summary": r[4], "matched_via": "file",
+        }
+    # Commit refs: a decision about a commit that touched this file.
+    if commit_shas:
+        for did, title, status, src, summary, refval in conn.execute(
+            "SELECT d.id, d.title, d.status, d.source_type, d.summary, dr.ref_value "
+            "FROM decisions d JOIN decision_refs dr ON dr.decision_id = d.id "
+            "WHERE d.project_id=? AND dr.ref_type='commit'",
+            (project_id,),
+        ).fetchall():
+            if did in decisions or not refval:
+                continue
+            if any(sha.startswith(refval) for sha in commit_shas):
+                decisions[did] = {
+                    "id": did, "title": title, "status": status,
+                    "source_type": src, "summary": summary, "matched_via": "commit",
+                }
+
+    decision_list = [decisions[k] for k in sorted(decisions)]
+    has_rationale = bool(decision_list)
+    if has_rationale:
+        verdict, stamp = "recovered", None
+    elif commits:
+        verdict, stamp = "accepted_not_decided", ACCEPTED_NOT_DECIDED
+    else:
+        verdict, stamp = "untracked", None
+
+    return {
+        "file": norm,
+        "decisions": decision_list,
+        "commits": commits,
+        "has_recorded_rationale": has_rationale,
+        "ai_shaped": ai_shaped,
+        "verdict": verdict,
+        "stamp": stamp,
     }
 
 

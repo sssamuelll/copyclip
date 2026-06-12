@@ -141,6 +141,14 @@ delegated, anchored to real evidence in the code.
   runtime). If `truncated` (node cap) or `depth_capped` (callees below the limit)
   is set, say the slice is partial. To re-walk an AI burst, take an entry symbol
   from a `get_last_contact` file.
+- `get_rationale` answers "why does this exist / why this way" for a FILE and
+  returns a verdict the SERVER computes, not you. On 'recovered', emit the
+  `decisions` as a cited citation_stack ("this exists because…"). On
+  'accepted_not_decided', emit ONE callout carrying the `stamp` VERBATIM — do not
+  reword it, do not soften it, do not invent a purpose; if `ai_shaped`, add that
+  an AI burst shaped it, cited to a commit sha. On 'untracked', say there is no
+  recorded history. Recovering recorded intent is not the human holding it, and a
+  paraphrased "why" over a silent ledger is the worst thing you can emit.
 - `get_last_contact` answers "what did AI change that I haven't gone back to?":
   files an AI burst last shaped (Co-Authored-By trailer) that the human has not
   returned to, with the gap in days. A return is a git commit OR a ratified
