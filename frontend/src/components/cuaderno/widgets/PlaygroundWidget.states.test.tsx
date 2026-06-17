@@ -307,3 +307,72 @@ describe('PlaygroundWidget — citation and breadcrumb in non-live states', () =
     expect(container.querySelector('.cite')).not.toBeNull()
   })
 })
+
+// ---------------------------------------------------------------------------
+// Issue 3 (slot-ownership guard on the `previewing` check):
+//
+// Widget A enters previewing=true while the slot is empty.  Widget B then
+// fires its own step-through and takes the global slot (widgetKey = OTHER_KEY).
+// Widget A re-renders: isMine=false, but its local `previewing` flag is still
+// true.  Without the ownership guard the bare `if (previewing)` at line 89 of
+// PlaygroundWidget.tsx fires and Widget A keeps showing its PreviewCall
+// interstitial — if the user then confirms, doLaunch evicts Widget B.
+//
+// The fix: `if (previewing && (slot.kind === 'empty' || isMine))`.
+// ---------------------------------------------------------------------------
+
+describe('PlaygroundWidget — previewing guard: stale preview clears when slot taken by another widget', () => {
+  const OTHER_KEY = 'other.py:other_func:'
+
+  it('Widget A in previewing state falls back to idle when the slot is taken by Widget B (kind=spawning)', () => {
+    // Step 1: Widget A starts idle (slot empty)
+    vi.mocked(getState).mockReturnValue({ kind: 'empty' })
+    const { rerender } = render(
+      <PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />
+    )
+    // Step 2: user clicks "Step through" on Widget A — sets previewing=true
+    fireEvent.click(screen.getByRole('button', { name: /step through/i }))
+    // Widget A is now showing PreviewCall
+    expect(screen.getByText(/step through this call/i)).toBeInTheDocument()
+
+    // Step 3: Widget B fires and takes the slot (this is the slot mutation)
+    vi.mocked(getState).mockReturnValue({ kind: 'spawning', widgetKey: OTHER_KEY, token: 1 })
+    // Trigger a re-render with the same props — simulates useSyncExternalStore notification
+    rerender(<PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />)
+
+    // Step 4: Widget A must NOT keep showing its stale PreviewCall
+    // Without the fix, the stale `if (previewing)` branch still fires and
+    // /step through this call/ remains visible — this assertion would fail.
+    expect(screen.queryByText(/step through this call/i)).toBeNull()
+    // Widget A must revert to its idle invitation
+    expect(screen.getByRole('button', { name: /step through/i })).toBeInTheDocument()
+  })
+
+  it('Widget A in previewing state does NOT call launch when the slot is owned by Widget B', () => {
+    // Step 1: Widget A starts idle
+    vi.mocked(getState).mockReturnValue({ kind: 'empty' })
+    const { rerender } = render(
+      <PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />
+    )
+    // Step 2: user clicks "Step through" — previewing=true
+    fireEvent.click(screen.getByRole('button', { name: /step through/i }))
+
+    // Step 3: Widget B takes the slot
+    vi.mocked(getState).mockReturnValue({ kind: 'spawning', widgetKey: OTHER_KEY, token: 1 })
+    rerender(<PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />)
+
+    // Step 4: The confirm button from PreviewCall must be gone — cannot evict Widget B
+    expect(screen.queryByRole('button', { name: /^step through$/i })).toBeNull()
+    expect(launch).not.toHaveBeenCalled()
+  })
+
+  it('Widget A in previewing state remains visible while the slot is still empty (guard does not break normal flow)', () => {
+    // The guard must only clear the preview when the slot is TAKEN BY ANOTHER widget.
+    // When the slot is empty, previewing=true should still show PreviewCall.
+    vi.mocked(getState).mockReturnValue({ kind: 'empty' })
+    render(<PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />)
+    fireEvent.click(screen.getByRole('button', { name: /step through/i }))
+    // Slot is still empty — preview must remain
+    expect(screen.getByText(/step through this call/i)).toBeInTheDocument()
+  })
+})

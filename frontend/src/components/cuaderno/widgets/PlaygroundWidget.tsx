@@ -86,7 +86,11 @@ export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
   // preview-call: shown before any real code runs (or after retry) — user can edit
   // Check this BEFORE ended so that onRetry → setPreviewing(true) wins over the
   // stale 'ended' slot state (the slot won't clear until the next launch resolves).
-  if (previewing) {
+  // Slot-ownership guard: if the slot was taken by a DIFFERENT widget while this
+  // widget's `previewing` flag was still true (e.g. Widget B fired its own
+  // step-through), clear the stale preview so this widget cannot call doLaunch
+  // and evict Widget B's active playground.
+  if (previewing && (slot.kind === 'empty' || isMine)) {
     return (
       <PreviewCall
         funcName={fn.name}
