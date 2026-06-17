@@ -133,7 +133,9 @@ export function pickLang(lang?: string | null): Lang {
   return lang === 'es' ? 'es' : 'en'
 }
 
-export function t(key: string, lang?: string | null): string {
+export function t(key: string, lang?: string | null, params?: Record<string, string>): string {
   const l = pickLang(lang)
-  return STRINGS[l][key] ?? STRINGS.en[key] ?? key
+  const raw = STRINGS[l][key] ?? STRINGS.en[key] ?? key
+  if (!params) return raw
+  return raw.replace(/\{(\w+)\}/g, (match, k) => (k in params ? params[k] : match))
 }
