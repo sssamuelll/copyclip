@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi } from 'vitest'
 import type { StepThroughResponse, Step, Var } from '../../../types/api'
 import { Stepper } from './Stepper'
+import { act } from 'react'
 
 const v = (name: string, kind: Var['kind'], extra: Partial<Var> = {}): Var => ({ name, kind, ...extra })
 const trace: Step[] = [
@@ -78,5 +79,80 @@ describe('Stepper', () => {
     render(<Stepper response={resp} onClose={onClose} />)
     await userEvent.click(screen.getByRole('button', { name: '×' }))
     expect(onClose).toHaveBeenCalled()
+  })
+
+  // Issue 2: banner must only say "final step" when it IS the final step
+  it('does NOT show raised-final banner on a mid-trace raise step', async () => {
+    // Trace: raise at step 1 of 3, two more steps follow → not the final step
+    const midRaiseTrace: Step[] = [
+      { line: 10, event: 'raise', changed: [], scope: [], raised: { type: 'ValueError', message: 'mid' } },
+      { line: 11, event: 'line', changed: ['x'], scope: [v('x', 'scalar', { text: '1' })] },
+      { line: 12, event: 'return', changed: [], scope: [] },
+    ]
+    render(<Stepper response={{ ...resp, trace: midRaiseTrace }} onClose={() => {}} lang="en" />)
+    // On step 1 (a raise event but NOT the last step), the final-step banner must NOT appear
+    expect(screen.queryByText('Raised — this is the final step.')).not.toBeInTheDocument()
+  })
+
+  // Issue 2: banner DOES appear when the raise IS on the last step
+  it('shows raised-final banner only when raise step is also the last step', async () => {
+    const terminalRaiseTrace: Step[] = [
+      { line: 10, event: 'line', changed: [], scope: [] },
+      { line: 11, event: 'raise', changed: [], scope: [], raised: { type: 'ValueError', message: 'end' } },
+    ]
+    render(<Stepper response={{ ...resp, trace: terminalRaiseTrace }} onClose={() => {}} lang="en" />)
+    const next = screen.getByRole('button', { name: '▶' })
+    await userEvent.click(next)
+    expect(screen.getByText('Raised — this is the final step.')).toBeInTheDocument()
+  })
+
+  // Issue 3: step and expanded reset when response prop changes
+  it('resets step and expansion when response identity changes', async () => {
+    // Build a trace where the large var's child text is unique (not repeated in scope)
+    const deepTrace: Step[] = [
+      { line: 255, event: 'call', changed: ['box'], scope: [v('box', 'large', { summary: 'Wrapper', meta: '1 field', children: [{ name: 'inner', text: '__UNIQUE_CHILD__' }] })] },
+      { line: 256, event: 'line', changed: ['x'], scope: [v('x', 'scalar', { text: '99' })] },
+      { line: 257, event: 'line', changed: [], scope: [v('x', 'scalar', { text: '99' })] },
+    ]
+    const deepResp: StepThroughResponse = { ...resp, trace: deepTrace }
+    const { rerender } = render(<Stepper response={deepResp} onClose={() => {}} />)
+    // Advance to step 2
+    const next = screen.getByRole('button', { name: '▶' })
+    await userEvent.click(next)
+    expect(screen.getByText('step 2 / 3')).toBeInTheDocument()
+    // Expand 'box' chip while still on step 1 (go back first so box is in scope)
+    await userEvent.click(screen.getByRole('button', { name: '◀' }))
+    expect(screen.getByText('step 1 / 3')).toBeInTheDocument()
+    await userEvent.click(screen.getByText('Wrapper'))
+    // After expansion, the unique child text appears
+    expect(screen.getByText('__UNIQUE_CHILD__')).toBeInTheDocument()
+    // Advance to step 2 again so step counter isn't 1
+    await userEvent.click(next)
+    expect(screen.getByText('step 2 / 3')).toBeInTheDocument()
+    // Now swap to a different response identity
+    const resp2: StepThroughResponse = { ...deepResp, func_name: 'other_func' }
+    act(() => { rerender(<Stepper response={resp2} onClose={() => {}} />) })
+    // Step must be back to 1
+    expect(screen.getByText('step 1 / 3')).toBeInTheDocument()
+    // Expansion must be cleared — unique child no longer visible (box is back at step 1 but not expanded)
+    expect(screen.queryByText('__UNIQUE_CHILD__')).not.toBeInTheDocument()
+  })
+
+  // Issue 4: slabBg/slabBorder must be neutral (accent) when truncated=true, even if raised flag is set
+  it('uses accent slab colours (not red) on the current step when truncated=true, even when the step is a raise', () => {
+    // Use line 255 which IS in resp.source_lines so the slab renders (curIdx >= 0)
+    const raisedTruncTrace: Step[] = [
+      { line: 255, event: 'raise', changed: [], scope: [], raised: { type: 'RuntimeError', message: 'cut' } },
+    ]
+    const { container } = render(
+      <Stepper response={{ ...resp, trace: raisedTruncTrace, truncated: true }} onClose={() => {}} lang="en" />
+    )
+    const slab = container.querySelector<HTMLElement>('[data-testid="hl-slab"]')
+    expect(slab).not.toBeNull()
+    // slabBg must NOT be the negative (red) token when truncated=true
+    const bg = slab!.style.background
+    expect(bg).not.toBe('var(--neg)')
+    // slabBorder must also not be red
+    expect(slab!.style.borderLeftColor).not.toBe('var(--neg-ink)')
   })
 })

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { StepThroughResponse } from '../../../types/api'
 import { t } from '../strings'
 import {
@@ -18,6 +18,12 @@ export function Stepper({ response, onClose, lang }: Props) {
   const [step, setStep] = useState(1)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
 
+  // Issue fix: reset cursor and expansion when a new trace is mounted in the same instance
+  useEffect(() => {
+    setStep(1)
+    setExpanded({})
+  }, [response])
+
   const cur = clampStep(step, total)
   const tr = trace[cur - 1]
   const curIdx = source_lines.findIndex((l) => l.num === tr.line)
@@ -28,9 +34,11 @@ export function Stepper({ response, onClose, lang }: Props) {
   const handleLeft = total > 1 ? `${((cur - 1) / (total - 1)) * 100}%` : '0%'
   const markers = markerLefts(trace)
 
-  const raised = tr.event === 'raise' || !!tr.raised
-  const slabBg = raised ? 'var(--neg)' : 'var(--accent-soft)'
-  const slabBorder = raised ? 'var(--neg-ink)' : 'var(--accent)'
+  // raised: only treated as terminal if it's also the last step (cur === total)
+  const raised = (tr.event === 'raise' || !!tr.raised) && cur === total
+  // slabBg/slabBorder follow truncated priority: stay neutral if truncated, red only when raised and not truncated
+  const slabBg = raised && !truncated ? 'var(--neg)' : 'var(--accent-soft)'
+  const slabBorder = raised && !truncated ? 'var(--neg-ink)' : 'var(--accent)'
   const banner = truncated
     ? { tick: 'var(--accent)', bg: 'var(--surface-2)', ink: 'var(--ink-2)', text: t('playground_truncated', lang, { n: String(total) }) }
     : raised
