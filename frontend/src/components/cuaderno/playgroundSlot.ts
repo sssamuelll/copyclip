@@ -50,6 +50,10 @@ async function killCurrent(reason: 'closed' | 'evicted'): Promise<void> {
     try { await api.closePlayground(playgroundId) } catch { /* reaped on next reconcile */ }
   } else if (state.kind === 'spawning') {
     set({ kind: 'ended', widgetKey: state.widgetKey, reason })
+  } else if (state.kind === 'trace') {
+    // capture-only: no subprocess to close, but the slot must transition to
+    // ended so subscribers (e.g. PlaygroundWidget) reflect the new state.
+    set({ kind: 'ended', widgetKey: state.widgetKey, reason })
   }
 }
 

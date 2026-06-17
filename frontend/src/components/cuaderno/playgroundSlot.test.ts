@@ -94,4 +94,33 @@ describe('playgroundSlot', () => {
     await p1
     expect(closePlayground).toHaveBeenCalledWith('pg-42')
   })
+
+  it('close() while in trace state transitions to ended (not a no-op)', async () => {
+    launchPlayground.mockResolvedValue(TRACE)
+    await launch('a.py:f:', req)
+    expect(getState().kind).toBe('trace')
+    close()
+    // killCurrent is async but trace has no async work; flush micro-task queue
+    await Promise.resolve()
+    expect(getState().kind).toBe('ended')
+    const s = getState()
+    if (s.kind === 'ended') {
+      expect(s.reason).toBe('closed')
+      expect(s.widgetKey).toBe('a.py:f:')
+    }
+  })
+
+  it('onActiveFrameChange() while in trace state transitions to ended (evicted)', async () => {
+    const { onActiveFrameChange } = await import('./playgroundSlot')
+    launchPlayground.mockResolvedValue(TRACE)
+    await launch('a.py:f:', req)
+    expect(getState().kind).toBe('trace')
+    onActiveFrameChange()
+    await Promise.resolve()
+    expect(getState().kind).toBe('ended')
+    const s = getState()
+    if (s.kind === 'ended') {
+      expect(s.reason).toBe('evicted')
+    }
+  })
 })

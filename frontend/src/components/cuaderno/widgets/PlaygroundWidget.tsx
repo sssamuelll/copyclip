@@ -30,6 +30,64 @@ export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
     })
   }
 
+  // trace: step-through capture — render the StepThroughResponse inline.
+  // No subprocess to manage; close() transitions the slot to ended.
+  if (isMine && slot.kind === 'trace') {
+    const { response } = slot
+    return (
+      <div className="widget">
+        <div className="widget-head">
+          <span>
+            <span className="kind">step-through</span> ·{' '}
+            <span className="widget-head-name">{response.func_name}</span>
+            {response.truncated ? <span className="playground-truncated-badge"> (truncated)</span> : null}
+          </span>
+          <button className="playground-close" onClick={close} title="close">
+            ×
+          </button>
+        </div>
+        {widget.breadcrumb || widget.citation ? (
+          <div className="playground-live-context">
+            {widget.breadcrumb ? (
+              <span className="playground-breadcrumb">{widget.breadcrumb}</span>
+            ) : null}
+            {widget.citation ? (
+              <CitationChip citation={widget.citation} onClick={onOpenCitation} />
+            ) : null}
+          </div>
+        ) : null}
+        <div className="playground-trace">
+          <div className="playground-trace-file">{response.file_line}</div>
+          <ol className="playground-trace-steps">
+            {response.trace.map((step, i) => (
+              <li key={i} className={`playground-trace-step playground-trace-step--${step.event}`}>
+                <span className="playground-trace-lineno">{step.line}</span>
+                {response.source_lines.find((l) => l.num === step.line)?.text ?? ''}
+                {step.changed.length > 0 ? (
+                  <ul className="playground-trace-vars">
+                    {step.scope
+                      .filter((v) => step.changed.includes(v.name))
+                      .map((v) => (
+                        <li key={v.name}>
+                          <span className="playground-trace-varname">{v.name}</span>
+                          {v.text != null ? <span className="playground-trace-varval"> = {v.text}</span> : null}
+                        </li>
+                      ))}
+                  </ul>
+                ) : null}
+                {step.raised ? (
+                  <div className="playground-trace-raised">
+                    {step.raised.type}: {step.raised.message}
+                  </div>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        </div>
+      </div>
+    )
+  }
+
   // live: iframe view — the editorial frame survives the click (header band +
   // breadcrumb + citation stay), so the running thing reads as one composed
   // widget, not a foreign window that replaced the page.
