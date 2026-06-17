@@ -340,3 +340,140 @@ def test_probe_called_after_cheap_parse_succeeds_model_path(tmp_path, monkeypatc
     assert probe_call_count["n"] == 1, "probe_target must be called exactly once on success path"
     from copyclip.intelligence.capture import StepThroughResponse
     assert isinstance(resp, StepThroughResponse)
+
+
+# ---------------------------------------------------------------------------
+# Issue: args/kwargs/ctor in widget data must route into CallDescriptor at launch
+# ---------------------------------------------------------------------------
+
+
+def test_request_from_dict_parses_call_args_kwargs_ctor():
+    """PlaygroundLaunchRequest.from_dict must parse a 'call' dict with args,
+    kwargs, and ctor into req.call — ready to be passed to CallDescriptor.from_dict
+    in launch_playground. Without this the model's proposed invocation is silently
+    discarded."""
+    req = PlaygroundLaunchRequest.from_dict({
+        "source": "cuaderno",
+        "function_ref": {"file": "src/copyclip/util.py", "name": "foo"},
+        "breadcrumb": "Step through foo with real args",
+        "call": {
+            "function_ref": {"file": "src/copyclip/util.py", "name": "foo"},
+            "args": [42, "hello"],
+            "kwargs": {"verbose": True},
+        },
+    })
+    assert req.call is not None, "call must be populated from the request dict"
+    assert req.call["args"] == [42, "hello"]
+    assert req.call["kwargs"] == {"verbose": True}
+    assert req.call.get("ctor") is None
+
+
+def test_request_from_dict_parses_call_with_ctor():
+    """A method call with a ctor block must preserve ctor.args and ctor.kwargs."""
+    req = PlaygroundLaunchRequest.from_dict({
+        "source": "cuaderno",
+        "function_ref": {"file": "src/copyclip/util.py", "name": "process"},
+        "breadcrumb": "Step through MyClass.process",
+        "call": {
+            "function_ref": {
+                "file": "src/copyclip/util.py",
+                "name": "process",
+                "qualname": "MyClass.process",
+            },
+            "args": ["input.txt"],
+            "kwargs": {},
+            "ctor": {"args": [], "kwargs": {"mode": "strict"}},
+        },
+    })
+    assert req.call is not None
+    assert req.call["args"] == ["input.txt"]
+    assert req.call["ctor"] == {"args": [], "kwargs": {"mode": "strict"}}
+
+
+def test_launch_playground_routes_call_args_into_call_descriptor(tmp_path, monkeypatch):
+    """End-to-end integration: a cuaderno launch request with call.args/kwargs
+    must reach CallDescriptor.from_dict with those exact values — not fall back
+    to an empty descriptor. This proves the model's proposed call is not silently
+    discarded at the boundary between the widget and the capture path."""
+    captured_descriptor = {}
+
+    def _recording_run_capture(cd, resolved, **kw):
+        captured_descriptor["args"] = cd.args
+        captured_descriptor["kwargs"] = cd.kwargs
+        captured_descriptor["ctor"] = cd.ctor
+        return (_FAKE_STEPS, False)
+
+    _stub_probe(monkeypatch)
+    monkeypatch.setattr(
+        "copyclip.intelligence.capture.run_capture",
+        _recording_run_capture,
+    )
+
+    req = PlaygroundLaunchRequest.from_dict({
+        "source": "cuaderno",
+        "function_ref": {"file": "src/copyclip/util.py", "name": "foo"},
+        "breadcrumb": "Step through foo",
+        "call": {
+            "function_ref": {"file": "src/copyclip/util.py", "name": "foo"},
+            "args": [99, "world"],
+            "kwargs": {"debug": False},
+        },
+    })
+
+    launch_playground(req, str(tmp_path), _conn_with_symbol(), 1, FakeRunner())
+
+    assert captured_descriptor, "run_capture was never called — call was silently discarded"
+    assert captured_descriptor["args"] == [99, "world"], (
+        f"Expected args=[99, 'world'], got {captured_descriptor['args']!r}"
+    )
+    assert captured_descriptor["kwargs"] == {"debug": False}, (
+        f"Expected kwargs={{'debug': False}}, got {captured_descriptor['kwargs']!r}"
+    )
+    assert captured_descriptor["ctor"] is None
+
+
+def test_launch_playground_routes_ctor_into_call_descriptor(tmp_path, monkeypatch):
+    """A method call with ctor must reach CallDescriptor with ctor intact — the
+    ctor pre-check only blocks when ctor IS None; when it's present the probe
+    and capture path must proceed with those ctor args."""
+    captured_descriptor = {}
+
+    def _recording_run_capture(cd, resolved, **kw):
+        captured_descriptor["args"] = cd.args
+        captured_descriptor["ctor"] = cd.ctor
+        return (_FAKE_STEPS, False)
+
+    _stub_probe(monkeypatch)
+    monkeypatch.setattr(
+        "copyclip.intelligence.capture.run_capture",
+        _recording_run_capture,
+    )
+
+    conn = _conn_with_symbol(kind="method", name="process")
+    req = PlaygroundLaunchRequest.from_dict({
+        "source": "cuaderno",
+        "function_ref": {
+            "file": "src/copyclip/util.py",
+            "name": "process",
+            "qualname": "MyClass.process",
+        },
+        "breadcrumb": "Step through MyClass.process",
+        "call": {
+            "function_ref": {
+                "file": "src/copyclip/util.py",
+                "name": "process",
+                "qualname": "MyClass.process",
+            },
+            "args": ["input.txt"],
+            "kwargs": {},
+            "ctor": {"args": [], "kwargs": {"mode": "strict"}},
+        },
+    })
+
+    launch_playground(req, str(tmp_path), conn, 1, FakeRunner())
+
+    assert captured_descriptor, "run_capture was never called — call with ctor was silently discarded"
+    assert captured_descriptor["args"] == ["input.txt"]
+    assert captured_descriptor["ctor"] == {"args": [], "kwargs": {"mode": "strict"}}, (
+        f"Expected ctor with mode='strict', got {captured_descriptor['ctor']!r}"
+    )

@@ -22,6 +22,11 @@ export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
       function_ref: widget.function_ref,
       suggested_inputs: widget.suggested_inputs,
       breadcrumb: widget.breadcrumb,
+      // Forward the model's proposed call descriptor (args/kwargs/ctor) so the
+      // backend can build a real CallDescriptor and run the step-through trace.
+      // Without this field the launch always arrives with req.call = None and
+      // any method target immediately falls back to the Marimo iframe.
+      ...(widget.call !== undefined ? { call: widget.call } : {}),
     })
   }
 

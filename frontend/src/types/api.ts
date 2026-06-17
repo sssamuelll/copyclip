@@ -632,12 +632,22 @@ export type FunctionRef = {
   qualname?: string
 }
 
+/** The model's proposed call descriptor (args/kwargs sent as JSON-safe literals). */
+export type CallDescriptor = {
+  function_ref: FunctionRef
+  args?: unknown[]
+  kwargs?: Record<string, unknown>
+  ctor?: { args?: unknown[]; kwargs?: Record<string, unknown> }
+}
+
 export type PlaygroundLaunchRequest = {
   source: PlaygroundSource
   function_ref: FunctionRef
   deps_hint?: string[]
   suggested_inputs?: unknown[]
   breadcrumb: string
+  /** Model's proposed call — assembled from PlaygroundWidgetData.call and sent to the backend. */
+  call?: CallDescriptor
 }
 
 export type PlaygroundLaunchResponse = {
@@ -705,6 +715,8 @@ export type PlaygroundWidgetData = {
   breadcrumb: string
   suggested_inputs?: unknown[]
   citation?: Citation
+  /** Model's proposed call descriptor (args/kwargs/ctor) — forwarded verbatim on launch. */
+  call?: CallDescriptor
 }
 
 export type Widget = GraphSubsetWidget | SequenceDiagramWidget | CallersTreeWidget | GraphViewWidget | PlaygroundWidgetData
