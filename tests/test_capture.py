@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import sys
 import pytest
+from textwrap import dedent
 
 from copyclip.intelligence.playground import FunctionRef
 from copyclip.intelligence.capture import (
@@ -349,3 +351,146 @@ def test_wall_clock_cap_fires(monkeypatch):
             total += 1
     raw = driver.trace_call(slow_loop, args=[0], kwargs={})
     assert raw["truncated"] is True
+
+
+# ---------------------------------------------------------------------------
+# Task 4 (code-quality fix): _trace_free_text — USER free-text path coverage
+# ---------------------------------------------------------------------------
+# The MODEL path (trace_call) is tested above; the USER path (_trace_free_text)
+# shares the same bounds logic but differs in two key details:
+#   1. raise-step line = events[-1]["line"] if events else 0  (no last_line dict)
+#   2. no last_line tracking at all
+# Each test here targets a specific behavior or cap of _trace_free_text.
+# ---------------------------------------------------------------------------
+
+import importlib.util as _ilu
+
+
+def _make_free_text_mod(tmp_path, name: str, source: str):
+    """Write source to a temp .py file, import it, register in sys.modules.
+
+    Returns the module name string (suitable for spec["module"]). The caller is
+    responsible for removing it from sys.modules when done (use the fixture).
+    """
+    p = tmp_path / f"{name}.py"
+    p.write_text(source, encoding="utf-8")
+    spec_obj = _ilu.spec_from_file_location(name, str(p))
+    mod = _ilu.module_from_spec(spec_obj)
+    spec_obj.loader.exec_module(mod)
+    sys.modules[name] = mod
+    return name
+
+
+def test_free_text_happy_path_records_steps_and_scope(tmp_path):
+    """_trace_free_text produces call/line/return events and captures scope vars."""
+    mod_name = _make_free_text_mod(tmp_path, "_ft_happy", dedent("""\
+        def addup(a, b):
+            total = a + b
+            return total
+    """))
+    try:
+        spec = {"module": mod_name, "name": "addup", "call_text": "addup(2, 3)"}
+        raw = driver._trace_free_text(spec)
+        assert raw["trace"][-1]["event"] == "return"
+        assert not raw["truncated"]
+        names = {v["name"] for ev in raw["trace"] for v in ev["scope"]}
+        assert {"a", "b", "total"} <= names
+    finally:
+        sys.modules.pop(mod_name, None)
+
+
+def test_free_text_no_changed_key_emitted(tmp_path):
+    """_trace_free_text never emits 'changed' — that is the normalizer's job (spec §9)."""
+    mod_name = _make_free_text_mod(tmp_path, "_ft_nochanged", dedent("""\
+        def addup(a, b):
+            total = a + b
+            return total
+    """))
+    try:
+        spec = {"module": mod_name, "name": "addup", "call_text": "addup(1, 2)"}
+        raw = driver._trace_free_text(spec)
+        assert all("changed" not in ev for ev in raw["trace"])
+    finally:
+        sys.modules.pop(mod_name, None)
+
+
+def test_free_text_raise_step_line_comes_from_last_traced_event(tmp_path):
+    """Raise-step line = events[-1]["line"] before the raise, not a last_line dict.
+
+    This verifies the specific implementation detail that distinguishes
+    _trace_free_text from trace_call: there is no last_line tracking, so the
+    raise event's line is taken from the final captured trace event.
+    """
+    mod_name = _make_free_text_mod(tmp_path, "_ft_raise", dedent("""\
+        def boom(x):
+            return {}[x]
+    """))
+    try:
+        spec = {"module": mod_name, "name": "boom", "call_text": 'boom("k")'}
+        raw = driver._trace_free_text(spec)
+        last = raw["trace"][-1]
+        assert last["event"] == "raise"
+        assert last["raised"]["type"] == "KeyError"
+        # The raise-step line must equal the line of the last traced event
+        # (events[-2] before the raise was appended), not 0 or an arbitrary value.
+        pre_raise_line = raw["trace"][-2]["line"]
+        assert last["line"] == pre_raise_line
+    finally:
+        sys.modules.pop(mod_name, None)
+
+
+def test_free_text_raise_with_no_prior_events_line_is_zero(tmp_path):
+    """When the expression raises before any frame anchored to own_file fires,
+    events is empty → the raise step gets line=0 (the 'else 0' branch)."""
+    mod_name = _make_free_text_mod(tmp_path, "_ft_zero_events", dedent("""\
+        def dummy():
+            pass
+    """))
+    try:
+        # call_text raises directly without ever entering dummy()'s file-anchored frame
+        spec = {"module": mod_name, "name": "dummy", "call_text": "1/0"}
+        raw = driver._trace_free_text(spec)
+        last = raw["trace"][-1]
+        assert last["event"] == "raise"
+        assert last["raised"]["type"] == "ZeroDivisionError"
+        assert last["line"] == 0  # events was empty → else 0 branch
+    finally:
+        sys.modules.pop(mod_name, None)
+
+
+def test_free_text_max_steps_cap_fires(tmp_path, monkeypatch):
+    """spec §5 cap 1 also applies to the USER path: a runaway loop truncates."""
+    mod_name = _make_free_text_mod(tmp_path, "_ft_loopy", dedent("""\
+        def loopy():
+            total = 0
+            while True:
+                total += 1
+    """))
+    try:
+        monkeypatch.setattr(driver, "MAX_STEPS", 20)
+        spec = {"module": mod_name, "name": "loopy", "call_text": "loopy()"}
+        raw = driver._trace_free_text(spec)
+        assert raw["truncated"] is True
+        assert len(raw["trace"]) <= 25  # MAX_STEPS + small terminal slack
+    finally:
+        sys.modules.pop(mod_name, None)
+
+
+def test_free_text_wall_clock_cap_fires(tmp_path, monkeypatch):
+    """spec §5 cap 5 also applies to the USER path: wall-clock guard aborts capture."""
+    mod_name = _make_free_text_mod(tmp_path, "_ft_slowloop", dedent("""\
+        def slow_loop():
+            import time as _t
+            total = 0
+            for _ in range(10_000_000):
+                _t.sleep(0.001)
+                total += 1
+    """))
+    try:
+        monkeypatch.setattr(driver, "WALL_CLOCK_BUDGET_S", 0.05)
+        monkeypatch.setattr(driver, "MAX_STEPS", 10_000_000)
+        spec = {"module": mod_name, "name": "slow_loop", "call_text": "slow_loop()"}
+        raw = driver._trace_free_text(spec)
+        assert raw["truncated"] is True
+    finally:
+        sys.modules.pop(mod_name, None)
