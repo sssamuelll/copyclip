@@ -1,4 +1,4 @@
-import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, RiskTrends, AnalyzeJob, ArchaeologyResponse, StoryTimelineResponse, AdvisorCheckResponse, DecisionLinkItem, CognitiveLoadResponse, ModuleSourceResponse, ModuleSymbolsResponse, TreeNode, ReacquaintanceResponse, HandoffPacket, HandoffPacketListResponse, HandoffPacketState, HandoffReviewSummary, DebtBreakdown, RemediationPlan, DebtScopeKind, PlaygroundLaunchRequest, PlaygroundLaunchResponse, PlaygroundStatus } from '../types/api'
+import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, RiskTrends, AnalyzeJob, ArchaeologyResponse, StoryTimelineResponse, AdvisorCheckResponse, DecisionLinkItem, CognitiveLoadResponse, ModuleSourceResponse, ModuleSymbolsResponse, TreeNode, ReacquaintanceResponse, HandoffPacket, HandoffPacketListResponse, HandoffPacketState, HandoffReviewSummary, DebtBreakdown, RemediationPlan, DebtScopeKind, PlaygroundLaunchRequest, PlaygroundLaunchResponse, PlaygroundLaunchResult, PlaygroundStatus } from '../types/api'
 
 // --- Debugging Suite Helpers ---
 const logAPI = (method: string, url: string, start: number, payload?: any, response?: any, error?: any) => {
@@ -178,7 +178,7 @@ export const api = {
   moduleSource: (module: string) => getJSON<ModuleSourceResponse>(`/api/module/source?module=${encodeURIComponent(module)}`),
   moduleSymbols: (module: string) => getJSON<ModuleSymbolsResponse>(`/api/module/symbols?module=${encodeURIComponent(module)}`),
   launchPlayground: (req: PlaygroundLaunchRequest) =>
-    postJSON<PlaygroundLaunchResponse>('/api/playground/launch', req),
+    postJSON<PlaygroundLaunchResult>('/api/playground/launch', req),
   closePlayground: (id: string) =>
     deleteJSON<{ ok: boolean }>(`/api/playground/${encodeURIComponent(id)}`),
   playgroundStatus: (id: string) =>
