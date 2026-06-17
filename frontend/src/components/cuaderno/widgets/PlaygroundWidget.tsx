@@ -1,9 +1,11 @@
 import { useSyncExternalStore } from 'react'
 import type { PlaygroundWidgetData, Citation } from '../../../types/api'
 import { CitationChip } from '../CitationChip'
-import { t } from '../strings'
 import { subscribe, getState, launch, close } from '../playgroundSlot'
 import { Stepper } from '../stepper/Stepper'
+import { IdleInvitation } from '../stepper/IdleInvitation'
+import { Spawning } from '../stepper/Spawning'
+import { EndedCards } from '../stepper/EndedCards'
 
 type Props = {
   widget: PlaygroundWidgetData
@@ -73,47 +75,45 @@ export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
     )
   }
 
-  // ended: idle layout + status note + re-launchable button
-  let endedNote: string | null = null
+  // ended: delegate to EndedCards for 3-way reason dispatch with correct
+  // tokens, body copy, and retry/close callbacks.
   if (isMine && slot.kind === 'ended') {
-    if (slot.reason === 'evicted') {
-      endedNote = t('playground_evicted', lang)
-    } else if (slot.reason === 'error') {
-      endedNote = slot.message ?? t('playground_ended', lang)
-    } else {
-      endedNote = t('playground_ended', lang)
-    }
+    return (
+      <EndedCards
+        funcName={widget.function_ref.name}
+        reason={slot.reason}
+        message={slot.message}
+        onRetry={handleLaunch}
+        onClose={close}
+        lang={lang}
+      />
+    )
   }
 
-  // spawning: show preparing state
-  const isSpawning = isMine && slot.kind === 'spawning'
+  // spawning: delegate to Spawning for animated progress state.
+  if (isMine && slot.kind === 'spawning') {
+    const callText = widget.call_text ?? widget.breadcrumb ?? widget.function_ref.name
+    return (
+      <Spawning
+        funcName={widget.function_ref.name}
+        callText={callText}
+        lang={lang}
+      />
+    )
+  }
 
+  // idle: not mine (slot is empty or belongs to another widget).
+  // Delegate to IdleInvitation so the user can step through from here.
+  const fileLine = widget.function_ref.line != null
+    ? `${widget.function_ref.file}:${widget.function_ref.line}`
+    : widget.function_ref.file
   return (
-    <div className="widget">
-      <div className="widget-head">
-        <span>
-          <span className="kind">playground</span> ·{' '}
-          <span className="widget-head-name">{widget.function_ref.name}</span>
-        </span>
-      </div>
-      <div className="widget-body">
-        {widget.citation ? (
-          <CitationChip citation={widget.citation} block onClick={onOpenCitation} />
-        ) : null}
-        {widget.breadcrumb ? (
-          <div className="playground-breadcrumb">{widget.breadcrumb}</div>
-        ) : null}
-        {endedNote ? (
-          <div className="graph-view-note playground-status-note">{endedNote}</div>
-        ) : null}
-        {isSpawning ? (
-          <div className="playground-preparing">{t('playground_preparing', lang)}</div>
-        ) : (
-          <button className="btn-accent playground-run" onClick={handleLaunch}>
-            {t('playground_run', lang)}
-          </button>
-        )}
-      </div>
-    </div>
+    <IdleInvitation
+      funcName={widget.function_ref.name}
+      fileLine={fileLine}
+      onStepThrough={handleLaunch}
+      onClose={close}
+      lang={lang}
+    />
   )
 }
