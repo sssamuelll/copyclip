@@ -96,10 +96,12 @@ export function buildRows(step: Step, expanded: Record<string, boolean>): RowMod
 }
 
 // hero change-marker percents: i/(total-1)*100 for steps where changed.length>0 (handoff 862–864)
+// guard: when total===1 the denominator is 0 (NaN); clamp to 50 (center of the track).
 export function markerLefts(trace: Step[]): number[] {
   const total = trace.length
+  const denom = total - 1
   return trace
-    .map((t, i) => ({ on: t.changed.length > 0, left: (i / (total - 1)) * 100 }))
+    .map((t, i) => ({ on: t.changed.length > 0, left: denom === 0 ? 50 : (i / denom) * 100 }))
     .filter((m) => m.on)
     .map((m) => m.left)
 }

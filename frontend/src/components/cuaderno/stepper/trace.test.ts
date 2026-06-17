@@ -96,4 +96,13 @@ describe('markerLefts (hero geometry)', () => {
     expect(lefts).not.toContain(3 / 8 * 100)   // step 3 (idx 3) has no change
     expect(lefts[lefts.length - 1]).toBeCloseTo(8 / 8 * 100) // step 8 changed
   })
+  it('returns 50 (center) for a single-step trace instead of NaN (0/0)', () => {
+    const single: Step[] = [
+      { line: 1, event: 'call', changed: ['x'], scope: [v('x', 'scalar', { text: '1' })] },
+    ]
+    const lefts = markerLefts(single)
+    expect(lefts).toHaveLength(1)
+    expect(lefts[0]).toBe(50)
+    expect(Number.isNaN(lefts[0])).toBe(false)
+  })
 })
