@@ -102,7 +102,9 @@ def test_normalize_derives_changed_vars_between_steps():
     ])
     steps = normalize_trace(raw)
     assert [s.changed for s in steps] == [["x"], ["y"], ["x"]]
-    # scope is CUMULATIVE: every variable ever seen re-rendered each step.
+    # scope completeness is the DRIVER's contract (spec §9): the driver emits the
+    # full in-scope snapshot at every step, so every var appears at every step.
+    # The normalizer passes scope straight through without accumulation.
     assert [v.name for v in steps[2].scope] == ["x", "y"]
 
 

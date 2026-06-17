@@ -244,8 +244,14 @@ def normalize_trace(raw: dict[str, Any]) -> list[Step]:
     The driver pre-flattens each event's in-scope vars into the Var shape but
     NEVER emits ``changed`` (spec §9): the bare callback records line/event/scope
     only. This normalizer DERIVES ``changed`` by diffing each step's value-text
-    against the previous step (the renderer never re-derives it), preserving
-    CUMULATIVE scope and stable insertion order.
+    against the previous step (the renderer never re-derives it).
+
+    **Scope completeness is the DRIVER's contract, not the normalizer's.**
+    The driver MUST emit the full in-scope snapshot at every step (spec §9's
+    "ALL in-scope vars at this step" requirement).  The normalizer passes
+    ``ev["scope"]`` straight through — it does NOT accumulate vars across steps.
+    A driver that emits incremental (delta-only) scope would produce incomplete
+    ``Step.scope`` lists; the normalizer cannot detect or compensate for that.
 
     First-bind detection keys on EVENT, not on step index: on the ``call`` step
     every var is a function ARGUMENT (a pre-existing input) and does NOT flag — it
@@ -254,7 +260,10 @@ def normalize_trace(raw: dict[str, Any]) -> list[Step]:
     """
     events = raw.get("trace", [])
     steps: list[Step] = []
-    prev: dict[str, str | None] = {}
+    # Maps var name → its last observed signature.  For scalar/object vars the
+    # signature is the capped repr text (str | None).  For large vars it is a
+    # (summary, meta) tuple so both fields participate in change detection.
+    prev: dict[str, str | None | tuple[str | None, str | None]] = {}
     for ev in events:
         event = ev.get("event", "line")
         is_call = event == "call"
