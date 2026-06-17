@@ -978,44 +978,24 @@ def test_cuaderno_source_accepted():
     assert req.source == "cuaderno"
 
 
-def test_cuaderno_source_launches_run_mode(tmp_path):
-    """launch_playground with source='cuaderno' must call runner.launch(path, mode='run').
+def test_cuaderno_fallback_launches_run_mode(tmp_path):
+    """The FALLBACK path (async function → Marimo) must launch with mode='run' for
+    cuaderno source. Eligible cuaderno requests no longer call runner.launch (they
+    return a StepThroughResponse directly — see test_cuaderno_eligible_returns_trace_response).
     Any other source must use mode='edit'.
     """
-    conn = sqlite3.connect(":memory:")
-    init_schema(conn)
-    pid = _seed_project(conn)
-    _seed_symbol(conn, pid, name="bar", kind="function", file_path="src/foo.py", module="foo")
-
-    # cuaderno source -> run mode
-    mock_runner = Mock()
-    mock_runner.launch.return_value = ("id-run", "http://127.0.0.1:9999/")
-
-    req_cuaderno = PlaygroundLaunchRequest(
-        source="cuaderno",
-        function_ref=FunctionRef(file="src/foo.py", name="bar"),
-        breadcrumb="Cuaderno -> bar()",
-    )
-    launch_playground(req_cuaderno, str(tmp_path), conn, pid, mock_runner)
-    _, kwargs_run = mock_runner.launch.call_args
-    assert kwargs_run.get("mode") == "run", (
-        f"Expected mode='run' for cuaderno source, got {kwargs_run}"
-    )
-
-    # atlas source -> edit mode
-    mock_runner.reset_mock()
-    mock_runner.launch.return_value = ("id-edit", "http://127.0.0.1:9998/")
-
-    req_atlas = PlaygroundLaunchRequest(
-        source="atlas",
-        function_ref=FunctionRef(file="src/foo.py", name="bar"),
-        breadcrumb="Atlas -> bar()",
-    )
-    launch_playground(req_atlas, str(tmp_path), conn, pid, mock_runner)
-    _, kwargs_edit = mock_runner.launch.call_args
-    assert kwargs_edit.get("mode") == "edit", (
-        f"Expected mode='edit' for atlas source, got {kwargs_edit}"
-    )
+    conn = connect(str(tmp_path)); init_schema(conn)
+    pid = _seed_user_symbol(conn, tmp_path,
+                            "async def fetch(x):\n    return x\n",
+                            "usermod.py", "fetch")
+    req = PlaygroundLaunchRequest.from_dict({
+        "source": "cuaderno",
+        "function_ref": {"file": "usermod.py", "name": "fetch"},
+        "call": {"function_ref": {"file": "usermod.py", "name": "fetch"}, "args": [1]},
+    })
+    runner = Mock(); runner.launch.return_value = ("pg", "http://127.0.0.1:5000/")
+    launch_playground(req, str(tmp_path), conn, pid, runner)
+    assert runner.launch.call_args.kwargs.get("mode") == "run"
 
 
 def test_get_playground_list_route():
@@ -1034,3 +1014,95 @@ def test_get_playground_list_route():
         {"id": "abc123", "status": "running"},
         {"id": "def456", "status": "exited"},
     ]
+
+
+# ---------------------------------------------------------------------------
+# Task 7: launch_playground branches cuaderno → capture, else Marimo
+# ---------------------------------------------------------------------------
+
+import textwrap as _tw
+from copyclip.intelligence.capture import StepThroughResponse, FallbackResponse
+
+
+def _seed_user_symbol(conn, project_root, body, file_rel, name,
+                      kind="function", module="usermod"):
+    """Mirror _seed_symbol (tests/test_playground.py:338) but write a REAL
+    importable module the capture subprocess can import from project_root."""
+    (Path(project_root) / file_rel).write_text(_tw.dedent(body), encoding="utf-8")
+    conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)",
+                 (str(project_root), "test"))
+    pid = int(conn.execute("SELECT id FROM projects WHERE root_path=?",
+                           (str(project_root),)).fetchone()[0])
+    conn.execute(
+        "INSERT INTO symbols(project_id,name,kind,file_path,line_start,line_end,"
+        "parent_symbol_id,module) VALUES(?,?,?,?,?,?,?,?)",
+        (pid, name, kind, file_rel, 1, 5, None, module))
+    conn.commit()
+    return pid
+
+
+def test_cuaderno_eligible_returns_trace_response(tmp_path):
+    conn = connect(str(tmp_path)); init_schema(conn)
+    pid = _seed_user_symbol(conn, tmp_path,
+                            "def addup(a):\n    b = a + 1\n    return b * 2\n",
+                            "usermod.py", "addup")
+    req = PlaygroundLaunchRequest.from_dict({
+        "source": "cuaderno",
+        "function_ref": {"file": "usermod.py", "name": "addup"},
+        "call": {"function_ref": {"file": "usermod.py", "name": "addup"}, "args": [3]},
+    })
+    runner = Mock()
+    resp = launch_playground(req, str(tmp_path), conn, pid, runner)
+    assert isinstance(resp, StepThroughResponse)
+    assert resp.to_dict()["kind"] == "trace"
+    assert resp.func_name == "addup"
+    runner.launch.assert_not_called()  # the trace path does NOT spawn marimo
+
+
+def test_cuaderno_free_text_call_returns_trace(tmp_path):
+    conn = connect(str(tmp_path)); init_schema(conn)
+    pid = _seed_user_symbol(conn, tmp_path,
+                            "def addup(a):\n    b = a + 1\n    return b * 2\n",
+                            "usermod.py", "addup")
+    req = PlaygroundLaunchRequest.from_dict({
+        "source": "cuaderno",
+        "function_ref": {"file": "usermod.py", "name": "addup"},
+        "call_text": "addup(3 + 4)",  # USER free-text path (spec §6/§10)
+    })
+    resp = launch_playground(req, str(tmp_path), conn, pid, Mock())
+    assert isinstance(resp, StepThroughResponse)
+    assert resp.to_dict()["kind"] == "trace"
+
+
+def test_cuaderno_async_falls_back_to_marimo(tmp_path):
+    conn = connect(str(tmp_path)); init_schema(conn)
+    pid = _seed_user_symbol(conn, tmp_path,
+                            "async def fetch(x):\n    return x\n",
+                            "usermod.py", "fetch")
+    req = PlaygroundLaunchRequest.from_dict({
+        "source": "cuaderno",
+        "function_ref": {"file": "usermod.py", "name": "fetch"},
+        "call": {"function_ref": {"file": "usermod.py", "name": "fetch"}, "args": [1]},
+    })
+    runner = Mock(); runner.launch.return_value = ("pg1", "http://127.0.0.1:5000/")
+    resp = launch_playground(req, str(tmp_path), conn, pid, runner)
+    assert isinstance(resp, FallbackResponse)
+    assert resp.iframe_url == "http://127.0.0.1:5000/"
+    runner.launch.assert_called_once()
+    assert runner.launch.call_args.kwargs.get("mode") == "run"
+
+
+def test_non_cuaderno_source_unchanged_marimo_iframe(tmp_path):
+    conn = connect(str(tmp_path)); init_schema(conn)
+    pid = _seed_user_symbol(conn, tmp_path,
+                            "def addup(a):\n    return a\n",
+                            "usermod.py", "addup")
+    req = PlaygroundLaunchRequest.from_dict({
+        "source": "atlas",
+        "function_ref": {"file": "usermod.py", "name": "addup"},
+    })
+    runner = Mock(); runner.launch.return_value = ("pg2", "http://127.0.0.1:5001/")
+    resp = launch_playground(req, str(tmp_path), conn, pid, runner)
+    assert isinstance(resp, PlaygroundLaunchResponse)
+    assert resp.iframe_url == "http://127.0.0.1:5001/"
+    assert runner.launch.call_args.kwargs.get("mode") == "edit"

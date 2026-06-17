@@ -134,6 +134,8 @@ class PlaygroundLaunchRequest:
     deps_hint: list[str] | None = None
     suggested_inputs: list[object] | None = None
     breadcrumb: str = ""
+    call: object | None = None  # cuaderno: model's CallDescriptor dict (raw; parsed in launch_playground)
+    call_text: str | None = None  # cuaderno: user's free-text call expression
 
     @classmethod
     def from_dict(cls, data: object) -> "PlaygroundLaunchRequest":
@@ -156,12 +158,18 @@ class PlaygroundLaunchRequest:
         breadcrumb = data.get("breadcrumb") or ""
         if not isinstance(breadcrumb, str):
             raise InvalidRequestError("breadcrumb must be a string")
+        call = data.get("call")
+        call_text = data.get("call_text")
+        if call_text is not None and not isinstance(call_text, str):
+            raise InvalidRequestError("call_text must be a string when provided")
         return cls(
             source=str(source),
             function_ref=ref,
             deps_hint=[str(x) for x in deps_hint] if deps_hint else None,
             suggested_inputs=list(suggested) if suggested else None,
             breadcrumb=breadcrumb,
+            call=call,
+            call_text=call_text,
         )
 
 
@@ -504,17 +512,34 @@ def launch_playground(
     pid: int,
     runner: MarimoRunner,
     trace: object = None,
-) -> PlaygroundLaunchResponse:
+) -> "PlaygroundLaunchResponse | StepThroughResponse | FallbackResponse":
     """Resolve, generate, launch. May raise PlaygroundError subclasses.
 
-    If the runner fails after the notebook has been written, the temp dir is
-    cleaned up best-effort so we don't leak per-request directories in the
-    common error path. Crash-cleanup of orphans across CopyClip restarts is
-    the runner's responsibility on startup (see spec, "Orphan cleanup").
+    For source == "cuaderno": runs the model's CallDescriptor OR the user's
+    free-text call in a bounded subprocess and returns a StepThroughResponse
+    (trace) or FallbackResponse (async/generator → Marimo fallback).
+
+    For all other sources: generates a Marimo notebook and returns
+    PlaygroundLaunchResponse (iframe_url). If the runner fails after the
+    notebook has been written, the temp dir is cleaned up best-effort so we
+    don't leak per-request directories in the common error path. Crash-cleanup
+    of orphans across CopyClip restarts is the runner's responsibility on
+    startup (see spec, "Orphan cleanup").
 
     `trace` is an optional InteractionTrace (spec 2026-06-10): each stage emits
     a `launch.*` event; failures emit `launch.error` with the failing stage.
     """
+    # Import here to avoid a forward-reference cycle; capture imports playground.
+    from .capture import (
+        CallDescriptor,
+        FreeTextCall,
+        StepThroughResponse,
+        FallbackResponse,
+        eligibility_reason,
+        run_capture,
+        run_free_text_capture,
+        probe_target,
+    )
     trace = trace if trace is not None else NULL_TRACE
     try:
         resolved = resolve_function_ref(conn, pid, req.function_ref)
@@ -525,6 +550,57 @@ def launch_playground(
                 qualname=resolved.qualname, kind=resolved.kind,
                 module=resolved.module, line_start=resolved.line_start,
                 parent_class=resolved.parent_class)
+
+    if req.source == "cuaderno":
+        detect, source_lines = probe_target(resolved, project_root=project_root)
+        file_line = resolved.file + (f":{resolved.line_start}" if resolved.line_start else "")
+        if req.call_text is not None:  # USER free-text path (spec §6/§10)
+            try:
+                ft = FreeTextCall.from_text(req.call_text)
+            except PlaygroundError as exc:
+                trace.event("launch.error", stage="call_text", error=str(exc))
+                raise
+            if detect["is_async"] or detect["is_generator"]:
+                reason = (
+                    "async functions step through as one frame; using the input box instead"
+                    if detect["is_async"]
+                    else "generator functions step through as one frame; using the input box instead"
+                )
+                trace.event("launch.capture", outcome="fallback", reason=reason)
+                return _cuaderno_fallback(req, project_root, resolved, runner, reason, trace)
+            steps, truncated = run_free_text_capture(ft, resolved, project_root=project_root)
+        else:  # MODEL structured-descriptor path
+            try:
+                cd = (CallDescriptor.from_dict(req.call) if req.call is not None
+                      else CallDescriptor(function_ref=req.function_ref))
+            except PlaygroundError as exc:
+                trace.event("launch.error", stage="descriptor", error=str(exc))
+                raise
+            reason = eligibility_reason(cd, resolved, is_async=detect["is_async"],
+                                        is_generator=detect["is_generator"])
+            if reason is not None:
+                trace.event("launch.capture", outcome="fallback", reason=reason)
+                return _cuaderno_fallback(req, project_root, resolved, runner, reason, trace)
+            steps, truncated = run_capture(cd, resolved, project_root=project_root)
+        trace.event("launch.capture", outcome="trace", steps=len(steps), truncated=truncated)
+        return StepThroughResponse(
+            trace=steps, source_lines=source_lines, func_name=resolved.name,
+            file_line=file_line, truncated=truncated)
+
+    # Non-cuaderno sources: the Marimo iframe path is UNCHANGED.
+    return _launch_marimo(req, project_root, resolved, runner, trace)
+
+
+def _launch_marimo(
+    req: PlaygroundLaunchRequest,
+    project_root: str,
+    resolved: ResolvedFunction,
+    runner: MarimoRunner,
+    trace: object,
+) -> PlaygroundLaunchResponse:
+    """Generate a Marimo notebook and spawn via the runner. This is the
+    original launch_playground tail, extracted verbatim so the cuaderno
+    fallback can reuse it without duplicating spawn logic."""
     try:
         notebook_path = generate_marimo_notebook(req, project_root, resolved)
     except Exception as exc:
@@ -545,6 +621,20 @@ def launch_playground(
         playground_id=playground_id,
         iframe_url=iframe_url,
     )
+
+
+def _cuaderno_fallback(
+    req: PlaygroundLaunchRequest,
+    project_root: str,
+    resolved: ResolvedFunction,
+    runner: MarimoRunner,
+    reason: str,
+    trace: object,
+) -> "FallbackResponse":
+    """Decline the step-through, fall back to the Marimo reactive box."""
+    from .capture import FallbackResponse
+    inner = _launch_marimo(req, project_root, resolved, runner, trace)
+    return FallbackResponse(reason=reason, iframe_url=inner.iframe_url)
 
 
 # ---------------------------------------------------------------------------
