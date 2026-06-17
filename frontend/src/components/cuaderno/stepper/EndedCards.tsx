@@ -1,10 +1,22 @@
+import type { Citation } from '../../../types/api'
+import { CitationChip } from '../CitationChip'
 import { t } from '../strings'
 import { s } from './StateRow'
 
 type Reason = 'closed' | 'evicted' | 'exited' | 'error'
-type Props = { funcName: string; reason: Reason; message?: string; onRetry: () => void; onClose: () => void; lang?: string | null }
+type Props = {
+  funcName: string
+  reason: Reason
+  message?: string
+  onRetry: () => void
+  onClose: () => void
+  citation?: Citation
+  breadcrumb?: string
+  onOpenCitation?: (c: Citation) => void
+  lang?: string | null
+}
 
-export function EndedCards({ funcName, reason, message, onRetry, onClose, lang }: Props) {
+export function EndedCards({ funcName, reason, message, onRetry, onClose, citation, breadcrumb, onOpenCitation, lang }: Props) {
   const spec = reason === 'evicted'
     ? { tick: 'var(--ink-4)', tickOpacity: '', title: t('playground_evicted_title', lang), body: t('playground_evicted_body', lang), btn: t('playground_bring_back', lang) }
     : reason === 'error'
@@ -26,6 +38,12 @@ export function EndedCards({ funcName, reason, message, onRetry, onClose, lang }
         </div>
         <div style={s('font-size:13px;line-height:1.5;color:var(--ink-2);')}>{spec.body}</div>
         <button onClick={onRetry} className="stepper-ghost" style={s('align-self:flex-start;border:1px solid var(--hairline);background:var(--paper);color:var(--accent-ink);border-radius:7px;padding:7px 14px;font-size:12.5px;font-family:var(--font-ui);cursor:pointer;')}>{spec.btn}</button>
+        {breadcrumb || citation ? (
+          <div className="playground-breadcrumb-row" style={s('display:flex;align-items:center;gap:8px;margin-top:4px;flex-wrap:wrap;')}>
+            {breadcrumb ? <span className="playground-breadcrumb" style={s('font-size:11.5px;color:var(--ink-3);')}>{breadcrumb}</span> : null}
+            {citation && onOpenCitation ? <CitationChip citation={citation} onClick={onOpenCitation} /> : null}
+          </div>
+        ) : null}
       </div>
     </div>
   )

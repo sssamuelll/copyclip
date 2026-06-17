@@ -85,6 +85,9 @@ export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
         message={slot.message}
         onRetry={handleLaunch}
         onClose={close}
+        citation={widget.citation}
+        breadcrumb={widget.breadcrumb}
+        onOpenCitation={onOpenCitation}
         lang={lang}
       />
     )
@@ -97,6 +100,9 @@ export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
       <Spawning
         funcName={widget.function_ref.name}
         callText={callText}
+        citation={widget.citation}
+        breadcrumb={widget.breadcrumb}
+        onOpenCitation={onOpenCitation}
         lang={lang}
       />
     )
@@ -104,15 +110,22 @@ export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
 
   // idle: not mine (slot is empty or belongs to another widget).
   // Delegate to IdleInvitation so the user can step through from here.
+  // Only pass onClose when the slot is empty — if another widget currently
+  // owns the slot (kind='spawning'/'live'/'trace') the × button would call
+  // close() and kill the active playground belonging to a different function.
   const fileLine = widget.function_ref.line != null
     ? `${widget.function_ref.file}:${widget.function_ref.line}`
     : widget.function_ref.file
+  const handleClose = slot.kind === 'empty' ? close : undefined
   return (
     <IdleInvitation
       funcName={widget.function_ref.name}
       fileLine={fileLine}
       onStepThrough={handleLaunch}
-      onClose={close}
+      onClose={handleClose}
+      citation={widget.citation}
+      breadcrumb={widget.breadcrumb}
+      onOpenCitation={onOpenCitation}
       lang={lang}
     />
   )

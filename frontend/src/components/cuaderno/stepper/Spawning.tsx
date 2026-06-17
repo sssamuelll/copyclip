@@ -1,9 +1,18 @@
+import type { Citation } from '../../../types/api'
+import { CitationChip } from '../CitationChip'
 import { t } from '../strings'
 import { s } from './StateRow'
 
-type Props = { funcName: string; callText: string; lang?: string | null }
+type Props = {
+  funcName: string
+  callText: string
+  citation?: Citation
+  breadcrumb?: string
+  onOpenCitation?: (c: Citation) => void
+  lang?: string | null
+}
 
-export function Spawning({ funcName, callText, lang }: Props) {
+export function Spawning({ funcName, callText, citation, breadcrumb, onOpenCitation, lang }: Props) {
   return (
     <div className="widget stepper-widget">
       <div style={s('display:flex;align-items:center;gap:9px;padding:9px 14px;border-bottom:1px solid var(--hairline-soft);')}>
@@ -19,6 +28,12 @@ export function Spawning({ funcName, callText, lang }: Props) {
         <div style={s('font-size:14px;color:var(--ink-2);font-family:var(--font-ui);display:flex;align-items:center;gap:7px;')}>
           {t('playground_preparing', lang)} <span className="stepper-pulse" style={s('color:var(--ink-3);')}>{t('playground_preparing_capturing', lang)}</span>
         </div>
+        {breadcrumb || citation ? (
+          <div className="playground-breadcrumb-row" style={s('display:flex;align-items:center;gap:8px;margin-top:16px;flex-wrap:wrap;justify-content:center;')}>
+            {breadcrumb ? <span className="playground-breadcrumb" style={s('font-size:11.5px;color:var(--ink-3);')}>{breadcrumb}</span> : null}
+            {citation && onOpenCitation ? <CitationChip citation={citation} onClick={onOpenCitation} /> : null}
+          </div>
+        ) : null}
       </div>
     </div>
   )

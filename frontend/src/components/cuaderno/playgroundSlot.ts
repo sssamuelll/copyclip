@@ -84,7 +84,14 @@ export async function launch(widgetKey: string, req: PlaygroundLaunchRequest): P
   }
 }
 
-export function close(): void { token++; void killCurrent('closed') }
+export function close(): void {
+  // Guard: if nothing is active, don't touch the token. An idle widget's ×
+  // should never increment the global token — doing so would race with any
+  // concurrent in-flight launch() that has already passed the killCurrent
+  // await (myToken would no longer equal token → silent abort).
+  if (state.kind === 'empty') return
+  token++; void killCurrent('closed')
+}
 
 /** Navigation = death (one-frame reality): any active-frame change kills the runtime. */
 export function onActiveFrameChange(): void { token++; void killCurrent('evicted') }

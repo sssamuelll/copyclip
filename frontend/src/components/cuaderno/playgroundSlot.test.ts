@@ -123,4 +123,35 @@ describe('playgroundSlot', () => {
       expect(s.reason).toBe('evicted')
     }
   })
+
+  it('close() on an empty slot does NOT abort an in-flight launch via token race', async () => {
+    // Bug: close() increments the global token even when slot.kind === 'empty'.
+    // Sequence: launch() captures myToken = N, awaits killCurrent (no-op for
+    // empty), yields — close() runs during the yield → token = N+1, launch()
+    // resumes, sees token !== myToken, silently aborts. The launchPlayground API
+    // call never fires and the slot stays empty (or stuck at spawning).
+    //
+    // Fix: close() is a no-op (returns early) when slot.kind === 'empty'.
+    //
+    // We reproduce by calling launch() then close() without any yield between
+    // them so close() runs while launch() is suspended inside killCurrent.
+    vi.resetModules()
+    const s = await import('./playgroundSlot')
+    const a = (await import('../../api/client')).api
+    vi.mocked(a.launchPlayground).mockResolvedValue(TRACE)
+
+    expect(s.getState().kind).toBe('empty')
+
+    // launch() starts → myToken captured → enters killCurrent microtask.
+    // close() fires immediately, BEFORE killCurrent's await resolves:
+    const p = s.launch('a.py:f:', req)
+    s.close()   // races with the killCurrent microtask
+    await p
+    await Promise.resolve()
+
+    // With the bug: launch() aborts (token mismatch), launchPlayground never
+    // called, slot stays empty → test would fail (kind !== 'trace').
+    // With the fix: close() is a no-op on empty slot, launch() completes.
+    expect(s.getState().kind).toBe('trace')
+  })
 })

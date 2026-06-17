@@ -182,11 +182,9 @@ describe('PlaygroundWidget — ended state delegates to EndedCards', () => {
     vi.mocked(launch).mockResolvedValue(undefined)
     vi.mocked(getState).mockReturnValue({ kind: 'ended', widgetKey: MY_KEY, reason: 'closed' })
     render(<PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />)
-    // The retry button is the one that is not ×
-    const btns = screen.getAllByRole('button')
-    const retryBtn = btns.find((b) => b.getAttribute('aria-label') !== '×')
-    expect(retryBtn).toBeDefined()
-    fireEvent.click(retryBtn!)
+    // Find retry button by its accessible name, not by excluding ×
+    const retryBtn = screen.getByRole('button', { name: /reopen/i })
+    fireEvent.click(retryBtn)
     expect(launch).toHaveBeenCalledWith(MY_KEY, expect.objectContaining({ source: 'cuaderno' }))
   })
 
@@ -196,5 +194,110 @@ describe('PlaygroundWidget — ended state delegates to EndedCards', () => {
       <PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />
     )
     expect(container.querySelector('.playground-status-note')).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Issue 1: idle widget when slot is owned by a DIFFERENT widget
+// The × must NOT be present — pressing it would call close() and kill an
+// active playground that belongs to a completely different function.
+// ---------------------------------------------------------------------------
+
+describe('PlaygroundWidget — idle when slot owned by another widget has no × button', () => {
+  const OTHER_KEY = 'other.py:other_func:'
+
+  it('slot kind=spawning owned by other: idle widget shows NO × button', () => {
+    vi.mocked(getState).mockReturnValue({ kind: 'spawning', widgetKey: OTHER_KEY, token: 1 })
+    render(<PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />)
+    expect(screen.queryByRole('button', { name: '×' })).toBeNull()
+  })
+
+  it('slot kind=live owned by other: idle widget shows NO × button', () => {
+    vi.mocked(getState).mockReturnValue({
+      kind: 'live',
+      widgetKey: OTHER_KEY,
+      playgroundId: 'pg-99',
+      iframeUrl: '/playground/pg-99',
+      token: 1,
+    })
+    render(<PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />)
+    expect(screen.queryByRole('button', { name: '×' })).toBeNull()
+  })
+
+  it('slot kind=trace owned by other: idle widget shows NO × button', () => {
+    vi.mocked(getState).mockReturnValue({
+      kind: 'trace',
+      widgetKey: OTHER_KEY,
+      token: 1,
+      response: { kind: 'trace', trace: [], source_lines: [], func_name: 'f', file_line: 'a.py:1', truncated: false },
+    })
+    render(<PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />)
+    expect(screen.queryByRole('button', { name: '×' })).toBeNull()
+  })
+
+  it('slot kind=empty: idle widget DOES show a × button', () => {
+    vi.mocked(getState).mockReturnValue({ kind: 'empty' })
+    render(<PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />)
+    expect(screen.getByRole('button', { name: '×' })).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Issue 2: citation and breadcrumb must render in idle, spawning, ended states
+// ---------------------------------------------------------------------------
+
+const CITATION_WIDGET: PlaygroundWidgetData = {
+  kind: 'playground',
+  function_ref: { file: 'demo.py', name: 'my_func' },
+  breadcrumb: 'Step through my_func',
+  citation: { kind: 'path', path: 'demo.py', line_start: 10, line_end: 20 },
+}
+
+describe('PlaygroundWidget — citation and breadcrumb in non-live states', () => {
+  it('idle state: renders the breadcrumb text', () => {
+    vi.mocked(getState).mockReturnValue({ kind: 'empty' })
+    render(<PlaygroundWidget widget={CITATION_WIDGET} onOpenCitation={noopCitation} lang="en" />)
+    expect(screen.getByText('Step through my_func')).toBeInTheDocument()
+  })
+
+  it('idle state: renders the citation chip', () => {
+    vi.mocked(getState).mockReturnValue({ kind: 'empty' })
+    const { container } = render(
+      <PlaygroundWidget widget={CITATION_WIDGET} onOpenCitation={noopCitation} lang="en" />
+    )
+    expect(container.querySelector('.cite')).not.toBeNull()
+  })
+
+  it('spawning state: renders the breadcrumb text in the .playground-breadcrumb span', () => {
+    vi.mocked(getState).mockReturnValue({ kind: 'spawning', widgetKey: MY_KEY, token: 1 })
+    const { container } = render(
+      <PlaygroundWidget widget={CITATION_WIDGET} onOpenCitation={noopCitation} lang="en" />
+    )
+    // The breadcrumb may also be the callText, so we check via the CSS class
+    // rather than getByText to avoid ambiguity.
+    expect(container.querySelector('.playground-breadcrumb')).not.toBeNull()
+    expect(container.querySelector('.playground-breadcrumb')?.textContent).toBe('Step through my_func')
+  })
+
+  it('spawning state: renders the citation chip', () => {
+    vi.mocked(getState).mockReturnValue({ kind: 'spawning', widgetKey: MY_KEY, token: 1 })
+    const { container } = render(
+      <PlaygroundWidget widget={CITATION_WIDGET} onOpenCitation={noopCitation} lang="en" />
+    )
+    expect(container.querySelector('.cite')).not.toBeNull()
+  })
+
+  it('ended state: renders the breadcrumb text', () => {
+    vi.mocked(getState).mockReturnValue({ kind: 'ended', widgetKey: MY_KEY, reason: 'closed' })
+    render(<PlaygroundWidget widget={CITATION_WIDGET} onOpenCitation={noopCitation} lang="en" />)
+    expect(screen.getByText('Step through my_func')).toBeInTheDocument()
+  })
+
+  it('ended state: renders the citation chip', () => {
+    vi.mocked(getState).mockReturnValue({ kind: 'ended', widgetKey: MY_KEY, reason: 'closed' })
+    const { container } = render(
+      <PlaygroundWidget widget={CITATION_WIDGET} onOpenCitation={noopCitation} lang="en" />
+    )
+    expect(container.querySelector('.cite')).not.toBeNull()
   })
 })

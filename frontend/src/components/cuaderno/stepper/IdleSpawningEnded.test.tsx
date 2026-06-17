@@ -225,12 +225,10 @@ describe('EndedCards', () => {
 
   it('fires onRetry when the retry button is clicked', () => {
     const onRetry = vi.fn()
-    render(<EndedCards {...defaults} onRetry={onRetry} />)
-    const btns = screen.getAllByRole('button')
-    // The retry button is NOT the × button; find it by excluding ×
-    const retryBtn = btns.find((b) => b.getAttribute('aria-label') !== '×')
-    expect(retryBtn).toBeDefined()
-    fireEvent.click(retryBtn!)
+    // defaults has reason='closed', so retry button is "Reopen"
+    render(<EndedCards {...defaults} onRetry={onRetry} lang="en" />)
+    const retryBtn = screen.getByRole('button', { name: /reopen/i })
+    fireEvent.click(retryBtn)
     expect(onRetry).toHaveBeenCalledTimes(1)
   })
 
