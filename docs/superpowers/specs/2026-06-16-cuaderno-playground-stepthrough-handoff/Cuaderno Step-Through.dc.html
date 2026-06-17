@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  ::selection { background: oklch(0.56 0.13 45 / 0.18); }
+  @keyframes cuaPulse { 0%,100% { opacity:.4 } 50% { opacity:.95 } }
+  @keyframes cuaSweep { 0% { transform: translateX(-120%) } 100% { transform: translateX(420%) } }
+  @keyframes cuaDot { 0%,100% { transform: translateY(0); opacity:.4 } 50% { transform: translateY(-3px); opacity:1 } }
+</style>
+</helmet>
+
+<div style="min-height:100vh;background:#DED9CC;background-image:radial-gradient(#00000008 1px, transparent 1px);background-size:22px 22px;font-family:'Inter',system-ui,sans-serif;color:#2A251D;padding:48px 40px 100px;">
+
+  <!-- ============ TITLE ============ -->
+  <div style="max-width:1180px;margin:0 auto 36px;">
+    <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#8A8170;">Cuaderno · Playground</div>
+    <h1 style="font-family:'Newsreader',Georgia,serif;font-weight:400;font-size:42px;line-height:1.05;margin:10px 0 0;letter-spacing:-.01em;color:#1B1814;">Guided step-through</h1>
+    <p style="font-family:'Source Serif 4',Georgia,serif;font-size:17px;line-height:1.6;color:#544D42;max-width:680px;margin:14px 0 0;">A reader over a recording. The developer asked the cuaderno to <em>run</em> a function; instead of just the return value, we let them walk one real execution — watching the current line and the state move together. Calm, legible, guided — not a debugger.</p>
+  </div>
+
+  <!-- ============ DESIGN REASONING ============ -->
+  <div style="max-width:1180px;margin:0 auto 56px;display:grid;grid-template-columns:1.5fr 1fr;gap:18px;">
+    <!-- decisions -->
+    <div style="background:#FBF8F0;border:1px solid #D8CFB7;border-radius:16px;padding:24px 26px;">
+      <div style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#8A8170;font-weight:600;margin-bottom:16px;">Decisions I made for you</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px 28px;">
+        <div>
+          <div style="font-weight:600;font-size:13px;color:#1B1814;margin-bottom:3px;">Layout: source leads</div>
+          <div style="font-size:12.5px;line-height:1.5;color:#6B6354;">Source and state side-by-side inside the 480px band. Source is the subject; state is the read-out. Scrubber spans the bottom; the counter lives in the head.</div>
+        </div>
+        <div>
+          <div style="font-weight:600;font-size:13px;color:#1B1814;margin-bottom:3px;">480px holds — barely</div>
+          <div style="font-size:12.5px;line-height:1.5;color:#6B6354;">It fits with room to breathe. I do <em>not</em> recommend a taller frame; the discipline keeps it reading as a band in the page, not an app.</div>
+        </div>
+        <div>
+          <div style="font-weight:600;font-size:13px;color:#1B1814;margin-bottom:3px;">Changed vs unchanged</div>
+          <div style="font-size:12.5px;line-height:1.5;color:#6B6354;">What moved this step gets sienna ink + a ◆ marker. Everything else dims to <span style="color:#A39C90;">ink-4</span> so the eye lands on the change.</div>
+        </div>
+        <div>
+          <div style="font-weight:600;font-size:13px;color:#1B1814;margin-bottom:3px;">Large values = chips</div>
+          <div style="font-size:12.5px;line-height:1.5;color:#6B6354;">A type + shape chip (<span style="font-family:'JetBrains Mono',monospace;font-size:11px;">DataFrame · 1000×12</span>) you click to expand. Opaque types (connections) never get repr'd.</div>
+        </div>
+        <div>
+          <div style="font-weight:600;font-size:13px;color:#1B1814;margin-bottom:3px;">Long traces fold</div>
+          <div style="font-size:12.5px;line-height:1.5;color:#6B6354;">Jump-to-next-change, change markers on the track, and folded loop iterations keep a 612-step trace navigable.</div>
+        </div>
+        <div>
+          <div style="font-weight:600;font-size:13px;color:#1B1814;margin-bottom:3px;">Motion: calm transitions</div>
+          <div style="font-size:12.5px;line-height:1.5;color:#6B6354;">The line highlight slides; changed values ease in color. No flashing — comprehension, not spectacle.</div>
+        </div>
+      </div>
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid #E6DEC9;font-size:12px;color:#8A8170;line-height:1.5;">Everything below is laid out as the cuaderno would render it — a widget band inside the editorial paper column. The <strong style="color:#6B6354;">Stepping</strong> state (light &amp; dark) is fully clickable: scrub, jump to a change, expand a value.</div>
+    </div>
+    <!-- palette -->
+    <div style="background:#FBF8F0;border:1px solid #D8CFB7;border-radius:16px;padding:24px 26px;">
+      <div style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#8A8170;font-weight:600;margin-bottom:16px;">The owned palette · no new colors</div>
+      <div style="display:flex;flex-direction:column;gap:9px;">
+        <sc-for list="{{ swatches }}" as="sw" hint-placeholder-count="7">
+          <div style="display:flex;align-items:center;gap:11px;">
+            <span style="{{ sw.chip }}"></span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#1B1814;min-width:78px;">{{ sw.token }}</span>
+            <span style="font-size:11.5px;color:#8A8170;">{{ sw.use }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="margin-top:18px;padding-top:14px;border-top:1px solid #E6DEC9;font-size:11.5px;color:#8A8170;line-height:1.55;">Fonts — <span style="font-family:'JetBrains Mono',monospace;">JetBrains Mono</span> for code &amp; values, Inter for chrome, Source Serif for prose. No cyan, no amber, no red.</div>
+    </div>
+  </div>
+
+  <!-- ============ HERO · STEPPING ============ -->
+  <div style="max-width:1180px;margin:0 auto;">
+    <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:6px;">
+      <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#A8714C;font-weight:600;">04</span>
+      <h2 style="font-family:'Newsreader',Georgia,serif;font-weight:400;font-size:27px;margin:0;color:#1B1814;">Stepping — the heart of it</h2>
+    </div>
+    <p style="font-size:13.5px;color:#6B6354;margin:0 0 22px;max-width:640px;line-height:1.55;">Scrub the track or hit <span style="font-family:'JetBrains Mono',monospace;font-size:12px;">◀ ▶</span>. Both themes share one position — move one, the other follows. Click a <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#A8714C;">dict · 5 keys</span> chip to expand it.</p>
+  </div>
+
+  <div style="max-width:1180px;margin:0 auto 60px;display:grid;grid-template-columns:1fr 1fr;gap:22px;align-items:start;">
+
+    <!-- LIGHT -->
+    <figure style="margin:0;">
+      <figcaption style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#8A8170;font-weight:600;margin-bottom:10px;">Light</figcaption>
+      <div style="--paper:#FAF6EC;--surface:#F1EADC;--surface-2:#E7DFCC;--hairline:#D8CFB7;--hairline-soft:#E6DEC9;--ink:#1B1814;--ink-2:#4A443A;--ink-3:#7D7464;--ink-4:#A39C90;--accent:oklch(0.56 0.13 45);--accent-soft:oklch(0.56 0.13 45 / 0.12);--accent-ink:oklch(0.42 0.13 45);--accent-line:oklch(0.56 0.13 45 / 0.34);--neg:oklch(0.56 0.13 30 / 0.12);--neg-ink:oklch(0.46 0.12 30);--font-mono:'JetBrains Mono',ui-monospace,monospace;--font-ui:'Inter',system-ui,sans-serif;--font-body:'Source Serif 4',Georgia,serif;background:var(--paper);border:1px solid var(--hairline);border-radius:18px;padding:22px;">
+        <div style="font-family:var(--font-body);font-size:14.5px;line-height:1.6;color:var(--ink-2);margin:0 0 16px;">You asked to run <span style="font-family:var(--font-mono);font-size:12.5px;color:var(--accent-ink);">resolve_function_ref</span> on a real symbol. Here's the walk:</div>
+        <div style="background:var(--surface);border:1px solid var(--hairline);border-radius:12px;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.05),0 14px 30px -22px rgba(40,30,15,.5);font-family:var(--font-ui);">
+          <!-- head strip -->
+          <div style="display:flex;align-items:center;gap:9px;padding:9px 14px;border-bottom:1px solid var(--hairline-soft);">
+            <span style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);font-weight:600;">Playground</span>
+            <span style="color:var(--ink-4);">·</span>
+            <span style="font-family:var(--font-mono);font-size:12px;color:var(--accent-ink);">resolve_function_ref</span>
+            <span style="flex:1;"></span>
+            <span style="font-family:var(--font-mono);font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums;">step {{ heroCounter }}</span>
+            <button style="border:none;background:none;color:var(--ink-4);cursor:pointer;font-size:16px;line-height:1;padding:0 2px;" style-hover="color:var(--ink-2);">×</button>
+          </div>
+          <!-- breadcrumb -->
+          <div style="padding:11px 16px 12px;border-bottom:1px solid var(--hairline-soft);">
+            <div style="font-family:var(--font-body);font-size:15px;color:var(--ink);">Step through <span style="font-family:var(--font-mono);font-size:13px;color:var(--accent-ink);">resolve_function_ref</span></div>
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--ink-4);margin-top:3px;">intelligence/symbols.py:255</div>
+          </div>
+          <!-- body 480 -->
+          <div style="height:480px;display:flex;flex-direction:column;padding:16px 16px 13px;">
+            <div style="flex:1;display:flex;min-height:0;">
+              <!-- source -->
+              <div style="flex:1.55;position:relative;overflow:hidden;font-family:var(--font-mono);font-size:13px;line-height:26px;">
+                <div style="position:absolute;left:-16px;right:6px;height:26px;background:var(--accent-soft);border-left:2px solid var(--accent);top:{{ heroHlTop }}px;transition:top .22s cubic-bezier(.4,0,.2,1);"></div>
+                <div style="position:relative;">
+                  <sc-for list="{{ heroLines }}" as="ln" hint-placeholder-count="10">
+                    <div style="display:flex;height:26px;">
+                      <span style="{{ ln.numStyle }}">{{ ln.num }}</span>
+                      <span style="{{ ln.codeStyle }}">{{ ln.code }}</span>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+              <!-- divider -->
+              <div style="width:1px;background:var(--hairline-soft);margin:0 16px;flex:none;"></div>
+              <!-- state -->
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
+                <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px;">
+                  <span style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);font-weight:600;">State</span>
+                  <span style="font-family:var(--font-mono);font-size:11px;color:var(--ink-4);font-variant-numeric:tabular-nums;">step {{ heroStateStep }}</span>
+                </div>
+                <div style="flex:1;overflow:auto;font-family:var(--font-mono);font-size:12.5px;">
+                  <sc-for list="{{ heroRows }}" as="r" hint-placeholder-count="6">
+                    <div style="{{ r.rowStyle }}">
+                      <span style="{{ r.dotStyle }}">◆</span>
+                      <span style="{{ r.nameStyle }}">{{ r.name }}</span>
+                      <span style="{{ r.valWrap }}">
+                        <sc-if value="{{ r.isScalar }}" hint-placeholder-val="{{ true }}"><span style="{{ r.scalarStyle }}">{{ r.text }}</span></sc-if>
+                        <sc-if value="{{ r.isObject }}"><span style="{{ r.objStyle }}">{{ r.text }}</span></sc-if>
+                        <sc-if value="{{ r.isOpaque }}"><span style="{{ r.opaqueStyle }}">‹{{ r.label }}›</span></sc-if>
+                        <sc-if value="{{ r.isLarge }}"><span style="{{ r.chipStyle }}" onClick="{{ r.onToggle }}">{{ r.summary }} <span style="{{ r.metaStyle }}">{{ r.meta }}</span> <span style="{{ r.caretStyle }}">{{ r.caret }}</span></span></sc-if>
+                      </span>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+            <!-- scrubber -->
+            <div style="display:flex;align-items:center;gap:11px;padding-top:13px;margin-top:11px;border-top:1px solid var(--hairline-soft);">
+              <button onClick="{{ heroPrev }}" style="width:28px;height:28px;flex:none;border-radius:7px;border:1px solid var(--hairline);background:var(--paper);color:var(--ink-2);cursor:pointer;font-size:9px;display:flex;align-items:center;justify-content:center;" style-hover="border-color:var(--accent-line);color:var(--accent-ink);">◀</button>
+              <div onClick="{{ heroTrack }}" style="position:relative;flex:1;height:26px;display:flex;align-items:center;cursor:pointer;">
+                <div style="position:absolute;left:0;right:0;height:3px;border-radius:2px;background:var(--hairline);"></div>
+                <div style="position:absolute;left:0;width:{{ heroHandleLeft }};height:3px;border-radius:2px;background:var(--accent-line);transition:width .22s cubic-bezier(.4,0,.2,1);"></div>
+                <sc-for list="{{ heroMarkers }}" as="m" hint-placeholder-count="5"><div style="{{ m.mstyle }}"></div></sc-for>
+                <div style="position:absolute;left:{{ heroHandleLeft }};width:13px;height:13px;border-radius:50%;background:var(--accent);border:2px solid var(--surface);transform:translateX(-50%);transition:left .22s cubic-bezier(.4,0,.2,1);box-shadow:0 1px 3px rgba(0,0,0,.3);"></div>
+              </div>
+              <button onClick="{{ heroNext }}" style="width:28px;height:28px;flex:none;border-radius:7px;border:1px solid var(--hairline);background:var(--paper);color:var(--ink-2);cursor:pointer;font-size:9px;display:flex;align-items:center;justify-content:center;" style-hover="border-color:var(--accent-line);color:var(--accent-ink);">▶</button>
+              <button onClick="{{ heroNextChange }}" style="flex:none;height:28px;border-radius:7px;border:1px solid var(--hairline);background:var(--paper);color:var(--ink-3);cursor:pointer;font-size:11px;padding:0 11px;white-space:nowrap;" style-hover="border-color:var(--accent-line);color:var(--accent-ink);">next change ◆</button>
+            </div>
+            <!-- honesty note -->
+            <div style="display:flex;align-items:center;gap:8px;margin-top:11px;">
+              <span style="width:5px;height:5px;border-radius:50%;background:var(--accent);opacity:.55;flex:none;"></span>
+              <span style="font-size:11.5px;color:var(--ink-3);">Steps through your Python; library calls appear as one step.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- DARK -->
+    <figure style="margin:0;">
+      <figcaption style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#8A8170;font-weight:600;margin-bottom:10px;">Dark</figcaption>
+      <div style="--paper:#14110D;--surface:#1E1A14;--surface-2:#28231B;--hairline:#3A342A;--hairline-soft:#2C2720;--ink:#F1EADC;--ink-2:#CBC3B1;--ink-3:#948C7C;--ink-4:#6A6454;--accent:oklch(0.72 0.12 45);--accent-soft:oklch(0.72 0.13 45 / 0.18);--accent-ink:oklch(0.80 0.10 45);--accent-line:oklch(0.72 0.12 45 / 0.42);--neg:oklch(0.60 0.13 30 / 0.20);--neg-ink:oklch(0.74 0.12 30);--font-mono:'JetBrains Mono',ui-monospace,monospace;--font-ui:'Inter',system-ui,sans-serif;--font-body:'Source Serif 4',Georgia,serif;background:var(--paper);border:1px solid var(--hairline);border-radius:18px;padding:22px;">
+        <div style="font-family:var(--font-body);font-size:14.5px;line-height:1.6;color:var(--ink-2);margin:0 0 16px;">You asked to run <span style="font-family:var(--font-mono);font-size:12.5px;color:var(--accent-ink);">resolve_function_ref</span> on a real symbol. Here's the walk:</div>
+        <div style="background:var(--surface);border:1px solid var(--hairline);border-radius:12px;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.3),0 14px 30px -22px rgba(0,0,0,.7);font-family:var(--font-ui);">
+          <div style="display:flex;align-items:center;gap:9px;padding:9px 14px;border-bottom:1px solid var(--hairline-soft);">
+            <span style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);font-weight:600;">Playground</span>
+            <span style="color:var(--ink-4);">·</span>
+            <span style="font-family:var(--font-mono);font-size:12px;color:var(--accent-ink);">resolve_function_ref</span>
+            <span style="flex:1;"></span>
+            <span style="font-family:var(--font-mono);font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums;">step {{ heroCounter }}</span>
+            <button style="border:none;background:none;color:var(--ink-4);cursor:pointer;font-size:16px;line-height:1;padding:0 2px;" style-hover="color:var(--ink-2);">×</button>
+          </div>
+          <div style="padding:11px 16px 12px;border-bottom:1px solid var(--hairline-soft);">
+            <div style="font-family:var(--font-body);font-size:15px;color:var(--ink);">Step through <span style="font-family:var(--font-mono);font-size:13px;color:var(--accent-ink);">resolve_function_ref</span></div>
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--ink-4);margin-top:3px;">intelligence/symbols.py:255</div>
+          </div>
+          <div style="height:480px;display:flex;flex-direction:column;padding:16px 16px 13px;">
+            <div style="flex:1;display:flex;min-height:0;">
+              <div style="flex:1.55;position:relative;overflow:hidden;font-family:var(--font-mono);font-size:13px;line-height:26px;">
+                <div style="position:absolute;left:-16px;right:6px;height:26px;background:var(--accent-soft);border-left:2px solid var(--accent);top:{{ heroHlTop }}px;transition:top .22s cubic-bezier(.4,0,.2,1);"></div>
+                <div style="position:relative;">
+                  <sc-for list="{{ heroLines }}" as="ln" hint-placeholder-count="10">
+                    <div style="display:flex;height:26px;">
+                      <span style="{{ ln.numStyle }}">{{ ln.num }}</span>
+                      <span style="{{ ln.codeStyle }}">{{ ln.code }}</span>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+              <div style="width:1px;background:var(--hairline-soft);margin:0 16px;flex:none;"></div>
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
+                <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px;">
+                  <span style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);font-weight:600;">State</span>
+                  <span style="font-family:var(--font-mono);font-size:11px;color:var(--ink-4);font-variant-numeric:tabular-nums;">step {{ heroStateStep }}</span>
+                </div>
+                <div style="flex:1;overflow:auto;font-family:var(--font-mono);font-size:12.5px;">
+                  <sc-for list="{{ heroRows }}" as="r" hint-placeholder-count="6">
+                    <div style="{{ r.rowStyle }}">
+                      <span style="{{ r.dotStyle }}">◆</span>
+                      <span style="{{ r.nameStyle }}">{{ r.name }}</span>
+                      <span style="{{ r.valWrap }}">
+                        <sc-if value="{{ r.isScalar }}" hint-placeholder-val="{{ true }}"><span style="{{ r.scalarStyle }}">{{ r.text }}</span></sc-if>
+                        <sc-if value="{{ r.isObject }}"><span style="{{ r.objStyle }}">{{ r.text }}</span></sc-if>
+                        <sc-if value="{{ r.isOpaque }}"><span style="{{ r.opaqueStyle }}">‹{{ r.label }}›</span></sc-if>
+                        <sc-if value="{{ r.isLarge }}"><span style="{{ r.chipStyle }}" onClick="{{ r.onToggle }}">{{ r.summary }} <span style="{{ r.metaStyle }}">{{ r.meta }}</span> <span style="{{ r.caretStyle }}">{{ r.caret }}</span></span></sc-if>
+                      </span>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:11px;padding-top:13px;margin-top:11px;border-top:1px solid var(--hairline-soft);">
+              <button onClick="{{ heroPrev }}" style="width:28px;height:28px;flex:none;border-radius:7px;border:1px solid var(--hairline);background:var(--surface-2);color:var(--ink-2);cursor:pointer;font-size:9px;display:flex;align-items:center;justify-content:center;" style-hover="border-color:var(--accent-line);color:var(--accent-ink);">◀</button>
+              <div onClick="{{ heroTrack }}" style="position:relative;flex:1;height:26px;display:flex;align-items:center;cursor:pointer;">
+                <div style="position:absolute;left:0;right:0;height:3px;border-radius:2px;background:var(--hairline);"></div>
+                <div style="position:absolute;left:0;width:{{ heroHandleLeft }};height:3px;border-radius:2px;background:var(--accent-line);transition:width .22s cubic-bezier(.4,0,.2,1);"></div>
+                <sc-for list="{{ heroMarkers }}" as="m" hint-placeholder-count="5"><div style="{{ m.mstyle }}"></div></sc-for>
+                <div style="position:absolute;left:{{ heroHandleLeft }};width:13px;height:13px;border-radius:50%;background:var(--accent);border:2px solid var(--surface);transform:translateX(-50%);transition:left .22s cubic-bezier(.4,0,.2,1);box-shadow:0 1px 3px rgba(0,0,0,.5);"></div>
+              </div>
+              <button onClick="{{ heroNext }}" style="width:28px;height:28px;flex:none;border-radius:7px;border:1px solid var(--hairline);background:var(--surface-2);color:var(--ink-2);cursor:pointer;font-size:9px;display:flex;align-items:center;justify-content:center;" style-hover="border-color:var(--accent-line);color:var(--accent-ink);">▶</button>
+              <button onClick="{{ heroNextChange }}" style="flex:none;height:28px;border-radius:7px;border:1px solid var(--hairline);background:var(--surface-2);color:var(--ink-3);cursor:pointer;font-size:11px;padding:0 11px;white-space:nowrap;" style-hover="border-color:var(--accent-line);color:var(--accent-ink);">next change ◆</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:11px;">
+              <span style="width:5px;height:5px;border-radius:50%;background:var(--accent);opacity:.55;flex:none;"></span>
+              <span style="font-size:11.5px;color:var(--ink-3);">Steps through your Python; library calls appear as one step.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+  </div>
+
+  <!-- ============ FULL FLOW ============ -->
+  <div style="--paper:#FAF6EC;--surface:#F1EADC;--surface-2:#E7DFCC;--hairline:#D8CFB7;--hairline-soft:#E6DEC9;--ink:#1B1814;--ink-2:#4A443A;--ink-3:#7D7464;--ink-4:#A39C90;--accent:oklch(0.56 0.13 45);--accent-soft:oklch(0.56 0.13 45 / 0.12);--accent-ink:oklch(0.42 0.13 45);--accent-line:oklch(0.56 0.13 45 / 0.34);--neg:oklch(0.56 0.13 30 / 0.12);--neg-ink:oklch(0.46 0.12 30);--font-mono:'JetBrains Mono',ui-monospace,monospace;--font-ui:'Inter',system-ui,sans-serif;--font-body:'Source Serif 4',Georgia,serif;max-width:1180px;margin:0 auto 24px;">
+    <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:18px;">
+      <span style="font-family:var(--font-mono);font-size:12px;color:var(--accent-ink);font-weight:600;">01–08</span>
+      <h2 style="font-family:'Newsreader',Georgia,serif;font-weight:400;font-size:27px;margin:0;color:#1B1814;">The full flow — every state</h2>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:22px;align-items:start;">
+
+      <!-- IDLE -->
+      <figure style="margin:0;">
+        <figcaption style="font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:#8A8170;font-weight:600;margin-bottom:9px;">01 · Idle / invitation</figcaption>
+        <div style="background:var(--paper);border:1px solid var(--hairline);border-radius:16px;padding:18px;">
+          <div style="background:var(--surface);border:1px solid var(--hairline);border-radius:12px;overflow:hidden;">
+            <div style="display:flex;align-items:center;gap:9px;padding:9px 14px;border-bottom:1px solid var(--hairline-soft);">
+              <span style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);font-weight:600;">Playground</span>
+              <span style="color:var(--ink-4);">·</span>
+              <span style="font-family:var(--font-mono);font-size:12px;color:var(--accent-ink);">resolve_function_ref</span>
+              <span style="flex:1;"></span>
+              <button style="border:none;background:none;color:var(--ink-4);cursor:pointer;font-size:16px;line-height:1;">×</button>
+            </div>
+            <div style="height:430px;display:flex;flex-direction:column;">
+              <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;">
+                <div style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-4);font-weight:600;margin-bottom:14px;">Anchored function</div>
+                <div style="font-family:var(--font-mono);font-size:19px;color:var(--ink);margin-bottom:6px;">resolve_function_ref</div>
+                <div style="font-family:var(--font-mono);font-size:11px;color:var(--ink-4);margin-bottom:26px;">intelligence/symbols.py:255</div>
+                <button style="border:1px solid var(--accent-line);background:var(--accent-soft);color:var(--accent-ink);border-radius:9px;padding:10px 22px;font-size:14px;font-family:var(--font-ui);font-weight:500;cursor:pointer;display:inline-flex;align-items:center;gap:9px;" style-hover="background:var(--accent);color:var(--paper);">Step through <span style="font-size:12px;">→</span></button>
+                <div style="font-size:12px;color:var(--ink-3);margin-top:16px;">Runs your real code once, side effects included.</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;padding:0 16px 13px;">
+                <span style="width:5px;height:5px;border-radius:50%;background:var(--accent);opacity:.55;flex:none;"></span>
+                <span style="font-size:11.5px;color:var(--ink-3);">Steps through your Python; library calls appear as one step.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </figure>
+
+      <!-- PREVIEW-CALL -->
+      <figure style="margin:0;">
+        <figcaption style="font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:#8A8170;font-weight:600;margin-bottom:9px;">02 · Preview-call <span style="color:#A8714C;">· editable — click ✎</span></figcaption>
+        <div style="background:var(--paper);border:1px solid var(--hairline);border-radius:16px;padding:18px;">
+          <div style="background:var(--surface);border:1px solid var(--hairline);border-radius:12px;overflow:hidden;">
+            <div style="display:flex;align-items:center;gap:9px;padding:9px 14px;border-bottom:1px solid var(--hairline-soft);">
+              <span style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);font-weight:600;">Playground</span>
+              <span style="color:var(--ink-4);">·</span>
+              <span style="font-family:var(--font-mono);font-size:12px;color:var(--accent-ink);">resolve_function_ref</span>
+              <span style="flex:1;"></span>
+              <button style="border:none;background:none;color:var(--ink-4);cursor:pointer;font-size:16px;line-height:1;">×</button>
+            </div>
+            <div style="height:430px;display:flex;flex-direction:column;padding:18px 16px 13px;">
+              <div style="flex:1;display:flex;flex-direction:column;justify-content:center;">
+                <div style="font-family:var(--font-body);font-size:15px;color:var(--ink-2);margin-bottom:13px;">I'll step through this call:</div>
+                <sc-if value="{{ pvEditing }}">
+                  <textarea onChange="{{ onCall }}" spellcheck="false" style="font-family:var(--font-mono);font-size:14px;color:var(--ink);background:var(--surface-2);border:1px solid var(--accent-line);border-radius:9px;padding:13px 14px;width:100%;resize:none;height:62px;line-height:1.5;outline:none;">{{ callText }}</textarea>
+                </sc-if>
+                <sc-if value="{{ pvNotEditing }}" hint-placeholder-val="{{ true }}">
+                  <div style="position:relative;font-family:var(--font-mono);font-size:14px;color:var(--ink);background:var(--surface-2);border:1px solid var(--hairline);border-radius:9px;padding:13px 46px 13px 14px;line-height:1.5;">{{ callText }}<button onClick="{{ toggleEdit }}" style="position:absolute;right:9px;top:9px;border:1px solid var(--hairline);background:var(--paper);color:var(--ink-3);border-radius:6px;width:28px;height:28px;cursor:pointer;font-size:12px;" style-hover="color:var(--accent-ink);border-color:var(--accent-line);">✎</button></div>
+                </sc-if>
+                <div style="display:flex;align-items:center;gap:8px;margin-top:13px;">
+                  <span style="width:5px;height:5px;border-radius:50%;background:var(--accent);opacity:.55;flex:none;"></span>
+                  <span style="font-size:12.5px;color:var(--ink-3);">Runs your real code once, side effects included.</span>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px;padding-top:13px;border-top:1px solid var(--hairline-soft);">
+                <button style="border:1px solid var(--accent-line);background:var(--accent-soft);color:var(--accent-ink);border-radius:8px;padding:9px 18px;font-size:13.5px;font-weight:500;font-family:var(--font-ui);cursor:pointer;" style-hover="background:var(--accent);color:var(--paper);">Step through</button>
+                <button onClick="{{ toggleEdit }}" style="border:1px solid var(--hairline);background:var(--paper);color:var(--ink-3);border-radius:8px;padding:9px 16px;font-size:13.5px;font-family:var(--font-ui);cursor:pointer;" style-hover="color:var(--ink-2);">Edit call</button>
+                <span style="flex:1;"></span>
+                <button style="border:none;background:none;color:var(--ink-4);font-size:13px;cursor:pointer;font-family:var(--font-ui);" style-hover="color:var(--ink-2);">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </figure>
+
+      <!-- SPAWNING -->
+      <figure style="margin:0;">
+        <figcaption style="font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:#8A8170;font-weight:600;margin-bottom:9px;">03 · Spawning / capturing</figcaption>
+        <div style="background:var(--paper);border:1px solid var(--hairline);border-radius:16px;padding:18px;">
+          <div style="background:var(--surface);border:1px solid var(--hairline);border-radius:12px;overflow:hidden;">
+            <div style="display:flex;align-items:center;gap:9px;padding:9px 14px;border-bottom:1px solid var(--hairline-soft);">
+              <span style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);font-weight:600;">Playground</span>
+              <span style="color:var(--ink-4);">·</span>
+              <span style="font-family:var(--font-mono);font-size:12px;color:var(--accent-ink);">resolve_function_ref</span>
+            </div>
+            <div style="height:430px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;">
+              <div style="font-family:var(--font-mono);font-size:13px;color:var(--ink-3);margin-bottom:20px;">resolve_function_ref(conn, 42, ref)</div>
+              <div style="position:relative;width:220px;height:4px;border-radius:2px;background:var(--surface-2);overflow:hidden;margin-bottom:20px;">
+                <div style="position:absolute;top:0;left:0;height:100%;width:34%;border-radius:2px;background:var(--accent-line);animation:cuaSweep 1.25s cubic-bezier(.4,0,.2,1) infinite;"></div>
+              </div>
+              <div style="font-size:14px;color:var(--ink-2);font-family:var(--font-ui);display:flex;align-items:center;gap:7px;">Preparing… <span style="color:var(--ink-3);animation:cuaPulse 1.5s ease-in-out infinite;">running once · capturing trace</span></div>
+            </div>
+          </div>
+        </div>
+      </figure>
+
+      <!-- FALLBACK -->
+      <figure style="margin:0;">
+        <figcaption style="font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:#8A8170;font-weight:600;margin-bottom:9px;">06 · Fallback · input → output</figcaption>
+        <div style="background:var(--paper);border:1px solid var(--hairline);border-radius:16px;padding:18px;">
+          <div style="background:var(--surface);border:1px solid var(--hairline);border-radius:12px;overflow:hidden;">
+            <div style="display:flex;align-items:center;gap:9px;padding:9px 14px;border-bottom:1px solid var(--hairline-soft);">
+              <span style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);font-weight:600;">Playground</span>
+              <span style="color:var(--ink-4);">·</span>
+              <span style="font-family:var(--font-mono);font-size:12px;color:var(--accent-ink);">stream_tokens</span>
+            </div>
+            <div style="height:430px;display:flex;flex-direction:column;padding:16px 16px 14px;">
+              <div style="display:flex;align-items:flex-start;gap:9px;margin-bottom:18px;padding:11px 13px;background:var(--surface-2);border:1px solid var(--hairline-soft);border-radius:9px;">
+                <span style="width:5px;height:5px;border-radius:50%;background:var(--accent);opacity:.55;flex:none;margin-top:6px;"></span>
+                <span style="font-size:12.5px;line-height:1.5;color:var(--ink-2);">This function can't be stepped through yet — it's a generator. Here's its input and output.</span>
+              </div>
+              <div style="flex:1;display:flex;flex-direction:column;justify-content:center;gap:13px;">
+                <div style="display:flex;flex-direction:column;gap:7px;">
+                  <span style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-4);font-weight:600;">Input</span>
+                  <div style="font-family:var(--font-mono);font-size:13.5px;color:var(--ink);background:var(--surface-2);border:1px solid var(--hairline);border-radius:8px;padding:11px 13px;">stream_tokens(doc, chunk=512)</div>
+                </div>
+                <div style="display:flex;justify-content:center;color:var(--ink-4);font-size:15px;">↓</div>
+                <div style="display:flex;flex-direction:column;gap:7px;">
+                  <span style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-4);font-weight:600;">Output</span>
+                  <div style="font-family:var(--font-mono);font-size:13.5px;color:var(--ink-3);background:var(--surface-2);border:1px dashed var(--hairline);border-radius:8px;padding:11px 13px;">‹generator object stream_tokens›</div>
+                </div>
+              </div>
+              <div style="padding-top:13px;border-top:1px solid var(--hairline-soft);font-family:var(--font-mono);font-size:12px;color:var(--ink-3);cursor:pointer;">▸ source</div>
+            </div>
+          </div>
+        </div>
+      </figure>
+
+      <!-- ENDED / EVICTED / ERROR -->
+      <figure style="margin:0;grid-column:1 / -1;">
+        <figcaption style="font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:#8A8170;font-weight:600;margin-bottom:9px;">08 · Ended · evicted · spawn error</figcaption>
+        <div style="background:var(--paper);border:1px solid var(--hairline);border-radius:16px;padding:18px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;">
+          <div style="background:var(--surface);border:1px solid var(--hairline);border-radius:11px;padding:18px;display:flex;flex-direction:column;gap:12px;">
+            <div style="display:flex;align-items:center;gap:9px;"><span style="width:8px;height:8px;border-radius:2px;background:var(--ink-4);"></span><span style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);font-weight:600;">Runtime closed</span></div>
+            <div style="font-size:13px;line-height:1.5;color:var(--ink-2);">The sandbox shut down after idle. The captured trace is gone.</div>
+            <button style="align-self:flex-start;border:1px solid var(--hairline);background:var(--paper);color:var(--accent-ink);border-radius:7px;padding:7px 14px;font-size:12.5px;font-family:var(--font-ui);cursor:pointer;" style-hover="border-color:var(--accent-line);">Reopen</button>
+          </div>
+          <div style="background:var(--surface);border:1px solid var(--hairline);border-radius:11px;padding:18px;display:flex;flex-direction:column;gap:12px;">
+            <div style="display:flex;align-items:center;gap:9px;"><span style="width:8px;height:8px;border-radius:2px;background:var(--ink-4);"></span><span style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);font-weight:600;">Evicted</span></div>
+            <div style="font-size:13px;line-height:1.5;color:var(--ink-2);">Another example took this slot. Only one playground runs at a time.</div>
+            <button style="align-self:flex-start;border:1px solid var(--hairline);background:var(--paper);color:var(--accent-ink);border-radius:7px;padding:7px 14px;font-size:12.5px;font-family:var(--font-ui);cursor:pointer;" style-hover="border-color:var(--accent-line);">Bring it back</button>
+          </div>
+          <div style="background:var(--surface);border:1px solid var(--hairline);border-radius:11px;padding:18px;display:flex;flex-direction:column;gap:12px;">
+            <div style="display:flex;align-items:center;gap:9px;"><span style="width:8px;height:8px;border-radius:2px;background:var(--neg-ink);opacity:.7;"></span><span style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);font-weight:600;">Spawn error</span></div>
+            <div style="font-size:13px;line-height:1.5;color:var(--ink-2);">The playground didn't start. Nothing ran — your code wasn't touched.</div>
+            <button style="align-self:flex-start;border:1px solid var(--hairline);background:var(--paper);color:var(--accent-ink);border-radius:7px;padding:7px 14px;font-size:12.5px;font-family:var(--font-ui);cursor:pointer;" style-hover="border-color:var(--accent-line);">Try again</button>
+          </div>
+        </div>
+      </figure>
+
+    </div>
+  </div>
+
+  <!-- ============ TRUNCATED + RAISED ============ -->
+  <div style="--paper:#FAF6EC;--surface:#F1EADC;--surface-2:#E7DFCC;--hairline:#D8CFB7;--hairline-soft:#E6DEC9;--ink:#1B1814;--ink-2:#4A443A;--ink-3:#7D7464;--ink-4:#A39C90;--accent:oklch(0.56 0.13 45);--accent-soft:oklch(0.56 0.13 45 / 0.12);--accent-ink:oklch(0.42 0.13 45);--accent-line:oklch(0.56 0.13 45 / 0.34);--neg:oklch(0.56 0.13 30 / 0.12);--neg-ink:oklch(0.46 0.12 30);--neg-line:oklch(0.56 0.13 30 / 0.34);--font-mono:'JetBrains Mono',ui-monospace,monospace;--font-ui:'Inter',system-ui,sans-serif;--font-body:'Source Serif 4',Georgia,serif;max-width:1180px;margin:0 auto 56px;">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:22px;align-items:start;">
+
+      <!-- TRUNCATED -->
+      <figure style="margin:0;">
+        <figcaption style="font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:#8A8170;font-weight:600;margin-bottom:9px;">05 · Truncated</figcaption>
+        <div style="background:var(--paper);border:1px solid var(--hairline);border-radius:16px;padding:18px;">
+          <div style="background:var(--surface);border:1px solid var(--hairline);border-radius:12px;overflow:hidden;">
+            <div style="display:flex;align-items:center;gap:9px;padding:9px 14px;border-bottom:1px solid var(--hairline-soft);">
+              <span style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);font-weight:600;">Playground</span>
+              <span style="color:var(--ink-4);">·</span>
+              <span style="font-family:var(--font-mono);font-size:12px;color:var(--accent-ink);">tally</span>
+              <span style="flex:1;"></span>
+              <span style="font-family:var(--font-mono);font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums;">step 1000 / 1000</span>
+              <button style="border:none;background:none;color:var(--ink-4);cursor:pointer;font-size:16px;line-height:1;">×</button>
+            </div>
+            <!-- truncation banner -->
+            <div style="display:flex;align-items:center;gap:9px;padding:9px 16px;background:var(--surface-2);border-bottom:1px solid var(--hairline-soft);">
+              <span style="display:inline-block;width:3px;height:13px;border-radius:1px;background:var(--accent);flex:none;"></span>
+              <span style="font-size:12px;color:var(--ink-2);font-family:var(--font-ui);">Stopped at step 1000 — trace truncated.</span>
+            </div>
+            <div style="height:404px;display:flex;flex-direction:column;padding:16px 16px 13px;">
+              <div style="flex:1;display:flex;min-height:0;">
+                <div style="flex:1.55;position:relative;overflow:hidden;font-family:var(--font-mono);font-size:13px;line-height:26px;">
+                  <div style="position:absolute;left:-16px;right:6px;height:26px;background:var(--accent-soft);border-left:2px solid var(--accent);top:104px;"></div>
+                  <div style="position:relative;">
+                    <div style="display:flex;height:26px;"><span style="flex:none;width:30px;text-align:right;padding-right:14px;color:var(--ink-4);">312</span><span style="white-space:pre;color:var(--ink-2);">def tally(rows):</span></div>
+                    <div style="display:flex;height:26px;"><span style="flex:none;width:30px;text-align:right;padding-right:14px;color:var(--ink-4);">313</span><span style="white-space:pre;color:var(--ink-2);">    totals = {}</span></div>
+                    <div style="display:flex;height:26px;"><span style="flex:none;width:30px;text-align:right;padding-right:14px;color:var(--ink-4);">314</span><span style="white-space:pre;color:var(--ink-2);">    for row in rows:</span></div>
+                    <div style="display:flex;height:26px;"><span style="flex:none;width:30px;text-align:right;padding-right:14px;color:var(--ink-4);">315</span><span style="white-space:pre;color:var(--ink-2);">        key = row.bucket</span></div>
+                    <div style="display:flex;height:26px;"><span style="flex:none;width:30px;text-align:right;padding-right:14px;color:var(--accent-ink);font-weight:700;">316</span><span style="white-space:pre;color:var(--ink);">        totals[key] = totals.get(key, 0) + row.amount</span></div>
+                    <div style="display:flex;height:26px;"><span style="flex:none;width:30px;text-align:right;padding-right:14px;color:var(--ink-4);">317</span><span style="white-space:pre;color:var(--ink-2);">    return totals</span></div>
+                  </div>
+                </div>
+                <div style="width:1px;background:var(--hairline-soft);margin:0 16px;flex:none;"></div>
+                <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
+                  <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px;">
+                    <span style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);font-weight:600;">State</span>
+                    <span style="font-family:var(--font-mono);font-size:11px;color:var(--ink-4);">step 1000</span>
+                  </div>
+                  <div style="flex:1;font-family:var(--font-mono);font-size:12.5px;">
+                    <div style="display:flex;align-items:baseline;gap:8px;padding:3.5px 0;"><span style="flex:none;width:7px;text-align:center;color:var(--accent);font-size:8px;">◆</span><span style="flex:none;color:var(--ink-2);">row</span><span style="flex:1;text-align:right;color:var(--accent-ink);font-weight:600;">Txn(#333)</span></div>
+                    <div style="display:flex;align-items:baseline;gap:8px;padding:3.5px 0;"><span style="flex:none;width:7px;text-align:center;color:var(--accent);font-size:8px;">◆</span><span style="flex:none;color:var(--ink-2);">key</span><span style="flex:1;text-align:right;color:var(--accent-ink);font-weight:600;">'eu'</span></div>
+                    <div style="display:flex;align-items:baseline;gap:8px;padding:3.5px 0;"><span style="flex:none;width:7px;text-align:center;color:var(--accent);font-size:8px;">◆</span><span style="flex:none;color:var(--ink-2);">totals</span><span style="flex:1;text-align:right;"><span style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--accent-line);background:var(--surface-2);border-radius:6px;padding:1px 8px;color:var(--accent-ink);">dict <span style="color:var(--ink-4);font-size:11px;">3 keys</span> <span style="color:var(--ink-4);font-size:10px;">▸</span></span></span></div>
+                    <div style="display:flex;align-items:baseline;gap:8px;padding:3.5px 0;"><span style="flex:none;width:7px;text-align:center;opacity:0;font-size:8px;">◆</span><span style="flex:none;color:var(--ink-4);">rows</span><span style="flex:1;text-align:right;"><span style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--hairline);background:var(--surface-2);border-radius:6px;padding:1px 8px;color:var(--ink-3);">list <span style="color:var(--ink-4);font-size:11px;">2,000 items</span> <span style="color:var(--ink-4);font-size:10px;">▸</span></span></span></div>
+                  </div>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:11px;padding-top:13px;margin-top:11px;border-top:1px solid var(--hairline-soft);">
+                <button style="width:28px;height:28px;flex:none;border-radius:7px;border:1px solid var(--hairline);background:var(--paper);color:var(--ink-2);font-size:9px;display:flex;align-items:center;justify-content:center;">◀</button>
+                <div style="position:relative;flex:1;height:26px;display:flex;align-items:center;">
+                  <div style="position:absolute;left:0;right:0;height:3px;border-radius:2px;background:var(--hairline);"></div>
+                  <div style="position:absolute;left:0;right:14%;height:3px;border-radius:2px;background:var(--accent-line);"></div>
+                  <div style="position:absolute;right:0;width:14%;height:7px;border-radius:2px;background:repeating-linear-gradient(45deg,var(--hairline) 0 3px,transparent 3px 6px);top:50%;transform:translateY(-50%);"></div>
+                  <div style="position:absolute;left:86%;width:13px;height:13px;border-radius:50%;background:var(--accent);border:2px solid var(--surface);transform:translateX(-50%);box-shadow:0 1px 3px rgba(0,0,0,.3);"></div>
+                </div>
+                <button style="width:28px;height:28px;flex:none;border-radius:7px;border:1px solid var(--hairline);background:var(--paper);color:var(--ink-4);font-size:9px;display:flex;align-items:center;justify-content:center;">▶</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </figure>
+
+      <!-- RAISED -->
+      <figure style="margin:0;">
+        <figcaption style="font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:#8A8170;font-weight:600;margin-bottom:9px;">07 · Raised <span style="color:#9A5A44;">· the throw is the final step</span></figcaption>
+        <div style="background:var(--paper);border:1px solid var(--hairline);border-radius:16px;padding:18px;">
+          <div style="background:var(--surface);border:1px solid var(--hairline);border-radius:12px;overflow:hidden;">
+            <div style="display:flex;align-items:center;gap:9px;padding:9px 14px;border-bottom:1px solid var(--hairline-soft);">
+              <span style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);font-weight:600;">Playground</span>
+              <span style="color:var(--ink-4);">·</span>
+              <span style="font-family:var(--font-mono);font-size:12px;color:var(--accent-ink);">resolve_function_ref</span>
+              <span style="flex:1;"></span>
+              <span style="font-family:var(--font-mono);font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums;">step 7 / 7</span>
+              <button style="border:none;background:none;color:var(--ink-4);cursor:pointer;font-size:16px;line-height:1;">×</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:9px;padding:9px 16px;background:var(--neg);border-bottom:1px solid var(--hairline-soft);">
+              <span style="display:inline-block;width:3px;height:13px;border-radius:1px;background:var(--neg-ink);flex:none;"></span>
+              <span style="font-size:12px;color:var(--neg-ink);font-family:var(--font-ui);">Raised — this is the final step.</span>
+            </div>
+            <div style="height:404px;display:flex;flex-direction:column;padding:16px 16px 13px;">
+              <div style="flex:1;display:flex;min-height:0;">
+                <div style="flex:1.55;position:relative;overflow:hidden;font-family:var(--font-mono);font-size:13px;line-height:26px;">
+                  <div style="position:absolute;left:-16px;right:6px;height:26px;background:var(--neg);border-left:2px solid var(--neg-ink);top:208px;"></div>
+                  <div style="position:relative;">
+                    <div style="display:flex;height:26px;"><span style="flex:none;width:30px;text-align:right;padding-right:14px;color:var(--ink-4);">255</span><span style="white-space:pre;color:var(--ink-2);">def resolve_function_ref(conn, module_id, ref):</span></div>
+                    <div style="display:flex;height:26px;"><span style="flex:none;width:30px;text-align:right;padding-right:14px;color:var(--ink-4);">256</span><span style="white-space:pre;color:var(--ink-2);">    qualname = ref.qualname</span></div>
+                    <div style="display:flex;height:26px;"><span style="flex:none;width:30px;text-align:right;padding-right:14px;color:var(--ink-4);">257</span><span style="white-space:pre;color:var(--ink-2);">    parent = None</span></div>
+                    <div style="display:flex;height:26px;"><span style="flex:none;width:30px;text-align:right;padding-right:14px;color:var(--ink-4);">258</span><span style="white-space:pre;color:var(--ink-2);">    if "." in qualname:</span></div>
+                    <div style="display:flex;height:26px;"><span style="flex:none;width:30px;text-align:right;padding-right:14px;color:var(--ink-4);">259</span><span style="white-space:pre;color:var(--ink-4);">        head, tail = qualname.rsplit(".", 1)</span></div>
+                    <div style="display:flex;height:26px;"><span style="flex:none;width:30px;text-align:right;padding-right:14px;color:var(--ink-4);">260</span><span style="white-space:pre;color:var(--ink-4);">        parent = lookup_symbol(conn, module_id, head)</span></div>
+                    <div style="display:flex;height:26px;"><span style="flex:none;width:30px;text-align:right;padding-right:14px;color:var(--ink-4);">261</span><span style="white-space:pre;color:var(--ink-2);">    row = fetch_symbol(conn, module_id, tail, parent)</span></div>
+                    <div style="display:flex;height:26px;"><span style="flex:none;width:30px;text-align:right;padding-right:14px;color:var(--ink-4);">262</span><span style="white-space:pre;color:var(--ink-2);">    if row is None:</span></div>
+                    <div style="display:flex;height:26px;"><span style="flex:none;width:30px;text-align:right;padding-right:14px;color:var(--neg-ink);font-weight:700;">263</span><span style="white-space:pre;color:var(--ink);">        raise KeyError(qualname)</span></div>
+                    <div style="display:flex;height:26px;"><span style="flex:none;width:30px;text-align:right;padding-right:14px;color:var(--ink-4);">264</span><span style="white-space:pre;color:var(--ink-4);">    return Symbol(row, parent)</span></div>
+                  </div>
+                </div>
+                <div style="width:1px;background:var(--hairline-soft);margin:0 16px;flex:none;"></div>
+                <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
+                  <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px;">
+                    <span style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);font-weight:600;">State</span>
+                    <span style="font-family:var(--font-mono);font-size:11px;color:var(--ink-4);">step 7</span>
+                  </div>
+                  <div style="flex:1;font-family:var(--font-mono);font-size:12.5px;">
+                    <div style="display:flex;align-items:baseline;gap:8px;padding:3.5px 0;"><span style="flex:none;width:7px;opacity:0;font-size:8px;">◆</span><span style="flex:none;color:var(--ink-4);">qualname</span><span style="flex:1;text-align:right;color:var(--ink-3);">'ghost'</span></div>
+                    <div style="display:flex;align-items:baseline;gap:8px;padding:3.5px 0;"><span style="flex:none;width:7px;opacity:0;font-size:8px;">◆</span><span style="flex:none;color:var(--ink-4);">parent</span><span style="flex:1;text-align:right;color:var(--ink-3);">None</span></div>
+                    <div style="display:flex;align-items:baseline;gap:8px;padding:3.5px 0;"><span style="flex:none;width:7px;opacity:0;font-size:8px;">◆</span><span style="flex:none;color:var(--ink-4);">row</span><span style="flex:1;text-align:right;color:var(--ink-3);">None</span></div>
+                    <div style="margin-top:10px;padding:9px 11px;background:var(--neg);border:1px solid var(--neg-line);border-radius:8px;">
+                      <div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--neg-ink);font-family:var(--font-ui);font-weight:600;margin-bottom:4px;">raised</div>
+                      <div style="color:var(--neg-ink);font-weight:600;">KeyError: 'ghost'</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:11px;padding-top:13px;margin-top:11px;border-top:1px solid var(--hairline-soft);">
+                <button style="width:28px;height:28px;flex:none;border-radius:7px;border:1px solid var(--hairline);background:var(--paper);color:var(--ink-2);font-size:9px;display:flex;align-items:center;justify-content:center;">◀</button>
+                <div style="position:relative;flex:1;height:26px;display:flex;align-items:center;">
+                  <div style="position:absolute;left:0;right:0;height:3px;border-radius:2px;background:var(--hairline);"></div>
+                  <div style="position:absolute;left:0;right:0;height:3px;border-radius:2px;background:var(--accent-line);"></div>
+                  <div style="position:absolute;left:100%;width:13px;height:13px;border-radius:50%;background:var(--neg-ink);border:2px solid var(--surface);transform:translateX(-50%);box-shadow:0 1px 3px rgba(0,0,0,.3);"></div>
+                </div>
+                <button style="width:28px;height:28px;flex:none;border-radius:7px;border:1px solid var(--hairline);background:var(--paper);color:var(--ink-4);font-size:9px;display:flex;align-items:center;justify-content:center;">▶</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </figure>
+
+    </div>
+  </div>
+
+  <!-- ============ LARGE-VALUE STUDY ============ -->
+  <div style="--paper:#FAF6EC;--surface:#F1EADC;--surface-2:#E7DFCC;--hairline:#D8CFB7;--hairline-soft:#E6DEC9;--ink:#1B1814;--ink-2:#4A443A;--ink-3:#7D7464;--ink-4:#A39C90;--accent:oklch(0.56 0.13 45);--accent-soft:oklch(0.56 0.13 45 / 0.12);--accent-ink:oklch(0.42 0.13 45);--accent-line:oklch(0.56 0.13 45 / 0.34);--font-mono:'JetBrains Mono',ui-monospace,monospace;--font-ui:'Inter',system-ui,sans-serif;--font-body:'Source Serif 4',Georgia,serif;max-width:1180px;margin:0 auto 56px;">
+    <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:6px;">
+      <span style="font-family:var(--font-mono);font-size:12px;color:var(--accent-ink);font-weight:600;">§3</span>
+      <h2 style="font-family:'Newsreader',Georgia,serif;font-weight:400;font-size:27px;margin:0;color:#1B1814;">Large values — the readability risk</h2>
+    </div>
+    <p style="font-size:13.5px;color:#6B6354;margin:0 0 22px;max-width:640px;line-height:1.55;">Capture caps &amp; summarizes (<span style="font-family:var(--font-mono);font-size:12px;">list[5000]</span>, <span style="font-family:var(--font-mono);font-size:12px;">DataFrame[1000×12]</span>). The panel shows a type+shape chip; the full value expands on demand. Opaque types never get repr'd. <strong style="color:#1B1814;">Click any chip.</strong></p>
+    <div style="display:grid;grid-template-columns:minmax(0,1.1fr) minmax(240px,.9fr);gap:22px;align-items:start;">
+      <!-- the panel -->
+      <div style="background:var(--paper);border:1px solid var(--hairline);border-radius:16px;padding:20px;">
+        <div style="background:var(--surface);border:1px solid var(--hairline);border-radius:12px;padding:18px 18px;font-family:var(--font-mono);font-size:13px;">
+          <div style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);font-weight:600;font-family:var(--font-ui);margin-bottom:14px;">State</div>
+          <!-- scalar -->
+          <div style="display:flex;align-items:baseline;gap:10px;padding:5px 0;"><span style="flex:none;min-width:74px;color:var(--ink-4);">module_id</span><span style="flex:1;text-align:right;color:var(--ink-3);">42</span></div>
+          <!-- opaque -->
+          <div style="display:flex;align-items:baseline;gap:10px;padding:5px 0;"><span style="flex:none;min-width:74px;color:var(--ink-4);">conn</span><span style="flex:1;text-align:right;"><span style="display:inline-flex;align-items:center;gap:7px;border:1px dashed var(--hairline);border-radius:6px;padding:1px 9px;color:var(--ink-4);">‹Connection› <span style="font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;">skip-repr</span></span></span></div>
+          <!-- dict -->
+          <div style="display:flex;align-items:baseline;gap:10px;padding:5px 0;"><span style="flex:none;min-width:74px;color:var(--ink-4);">totals</span><span style="flex:1;text-align:right;"><span onClick="{{ toggleDict }}" style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--hairline);background:var(--surface-2);border-radius:6px;padding:1px 8px;cursor:pointer;color:var(--ink-3);" style-hover="border-color:var(--accent-line);color:var(--accent-ink);">dict <span style="color:var(--ink-4);font-size:11px;">3 keys</span> <span style="color:var(--ink-4);font-size:10px;">{{ dictCaret }}</span></span></span></div>
+          <sc-if value="{{ lvDictOpen }}">
+            <div style="padding:2px 0 6px 18px;border-left:1px solid var(--hairline-soft);margin-left:8px;">
+              <div style="display:flex;justify-content:space-between;padding:2.5px 0;"><span style="color:var(--ink-4);">'us'</span><span style="color:var(--ink-3);">210</span></div>
+              <div style="display:flex;justify-content:space-between;padding:2.5px 0;"><span style="color:var(--ink-4);">'eu'</span><span style="color:var(--ink-3);">86</span></div>
+              <div style="display:flex;justify-content:space-between;padding:2.5px 0;"><span style="color:var(--ink-4);">'apac'</span><span style="color:var(--ink-3);">54</span></div>
+            </div>
+          </sc-if>
+          <!-- dataframe -->
+          <div style="display:flex;align-items:baseline;gap:10px;padding:5px 0;"><span style="flex:none;min-width:74px;color:var(--ink-4);">frame</span><span style="flex:1;text-align:right;"><span onClick="{{ toggleDf }}" style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--hairline);background:var(--surface-2);border-radius:6px;padding:1px 8px;cursor:pointer;color:var(--ink-3);" style-hover="border-color:var(--accent-line);color:var(--accent-ink);">DataFrame <span style="color:var(--ink-4);font-size:11px;">1000×12</span> <span style="color:var(--ink-4);font-size:10px;">{{ dfCaret }}</span></span></span></div>
+          <sc-if value="{{ lvDfOpen }}">
+            <div style="padding:6px 0 6px 18px;border-left:1px solid var(--hairline-soft);margin-left:8px;">
+              <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-4);font-family:var(--font-ui);margin-bottom:5px;">schema · 4 of 12 columns</div>
+              <div style="display:flex;justify-content:space-between;padding:2.5px 0;"><span style="color:var(--ink-3);">id</span><span style="color:var(--ink-4);">int64</span></div>
+              <div style="display:flex;justify-content:space-between;padding:2.5px 0;"><span style="color:var(--ink-3);">amount</span><span style="color:var(--ink-4);">float64</span></div>
+              <div style="display:flex;justify-content:space-between;padding:2.5px 0;"><span style="color:var(--ink-3);">bucket</span><span style="color:var(--ink-4);">object</span></div>
+              <div style="display:flex;justify-content:space-between;padding:2.5px 0;"><span style="color:var(--ink-3);">ts</span><span style="color:var(--ink-4);">datetime64</span></div>
+              <div style="font-size:11px;color:var(--ink-4);font-family:var(--font-ui);margin-top:6px;font-style:italic;">1000 rows not serialized — schema only.</div>
+            </div>
+          </sc-if>
+          <!-- list -->
+          <div style="display:flex;align-items:baseline;gap:10px;padding:5px 0;"><span style="flex:none;min-width:74px;color:var(--ink-4);">ids</span><span style="flex:1;text-align:right;"><span onClick="{{ toggleList }}" style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--hairline);background:var(--surface-2);border-radius:6px;padding:1px 8px;cursor:pointer;color:var(--ink-3);" style-hover="border-color:var(--accent-line);color:var(--accent-ink);">list <span style="color:var(--ink-4);font-size:11px;">5,000 items</span> <span style="color:var(--ink-4);font-size:10px;">{{ listCaret }}</span></span></span></div>
+          <sc-if value="{{ lvListOpen }}">
+            <div style="padding:2px 0 4px 18px;border-left:1px solid var(--hairline-soft);margin-left:8px;">
+              <div style="display:flex;justify-content:space-between;padding:2.5px 0;"><span style="color:var(--ink-4);">[0]</span><span style="color:var(--ink-3);">91</span></div>
+              <div style="display:flex;justify-content:space-between;padding:2.5px 0;"><span style="color:var(--ink-4);">[1]</span><span style="color:var(--ink-3);">104</span></div>
+              <div style="display:flex;justify-content:space-between;padding:2.5px 0;"><span style="color:var(--ink-4);">[2]</span><span style="color:var(--ink-3);">118</span></div>
+              <div style="display:flex;justify-content:space-between;padding:2.5px 0;"><span style="color:var(--ink-4);">[3]</span><span style="color:var(--ink-3);">127</span></div>
+              <div style="display:flex;justify-content:space-between;padding:2.5px 0;"><span style="color:var(--ink-4);">[4]</span><span style="color:var(--ink-3);">133</span></div>
+              <div style="font-size:11px;color:var(--ink-4);font-family:var(--font-ui);margin-top:4px;">+4,995 more · capped at capture.</div>
+            </div>
+          </sc-if>
+        </div>
+      </div>
+      <!-- annotations -->
+      <div style="display:flex;flex-direction:column;gap:13px;">
+        <div style="background:#FBF8F0;border:1px solid #D8CFB7;border-radius:13px;padding:15px 17px;">
+          <div style="font-weight:600;font-size:13px;color:#1B1814;margin-bottom:3px;">Type + shape chip</div>
+          <div style="font-size:12.5px;line-height:1.5;color:#6B6354;">Every large value reads as <span style="font-family:var(--font-mono);font-size:11px;color:#A8714C;">type · shape</span> first. The shape is enough to recognize what it is without serializing it.</div>
+        </div>
+        <div style="background:#FBF8F0;border:1px solid #D8CFB7;border-radius:13px;padding:15px 17px;">
+          <div style="font-weight:600;font-size:13px;color:#1B1814;margin-bottom:3px;">Expand on demand</div>
+          <div style="font-size:12.5px;line-height:1.5;color:#6B6354;">A dict shows its keys; a DataFrame shows its schema (never 1000 rows); a list shows first-N + a count. The panel never floods.</div>
+        </div>
+        <div style="background:#FBF8F0;border:1px solid #D8CFB7;border-radius:13px;padding:15px 17px;">
+          <div style="font-weight:600;font-size:13px;color:#1B1814;margin-bottom:3px;">Opaque = dashed, never repr'd</div>
+          <div style="font-size:12.5px;line-height:1.5;color:#6B6354;">Connections, sockets, ORM proxies get a dashed <span style="font-family:var(--font-mono);font-size:11px;">‹Connection›</span> tag — the skip-list protects capture from a <span style="font-family:var(--font-mono);font-size:11px;">__repr__</span> that hits the network.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ LONG-TRACE STUDY ============ -->
+  <div style="--paper:#FAF6EC;--surface:#F1EADC;--surface-2:#E7DFCC;--hairline:#D8CFB7;--hairline-soft:#E6DEC9;--ink:#1B1814;--ink-2:#4A443A;--ink-3:#7D7464;--ink-4:#A39C90;--accent:oklch(0.56 0.13 45);--accent-soft:oklch(0.56 0.13 45 / 0.12);--accent-ink:oklch(0.42 0.13 45);--accent-line:oklch(0.56 0.13 45 / 0.34);--font-mono:'JetBrains Mono',ui-monospace,monospace;--font-ui:'Inter',system-ui,sans-serif;--font-body:'Source Serif 4',Georgia,serif;max-width:1180px;margin:0 auto 40px;">
+    <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:6px;">
+      <span style="font-family:var(--font-mono);font-size:12px;color:var(--accent-ink);font-weight:600;">§4</span>
+      <h2 style="font-family:'Newsreader',Georgia,serif;font-weight:400;font-size:27px;margin:0;color:#1B1814;">Step explosion — 612 steps, still navigable</h2>
+    </div>
+    <p style="font-size:13.5px;color:#6B6354;margin:0 0 22px;max-width:660px;line-height:1.55;">A loop blows the step count up. The scrubber marks every change; <strong style="color:#1B1814;">jump to next change</strong> skips the in-between; repeated iterations fold. <strong style="color:#1B1814;">Hit “next change” →.</strong></p>
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:22px;align-items:start;">
+      <figure style="margin:0;min-width:0;">
+        <div style="background:var(--paper);border:1px solid var(--hairline);border-radius:16px;padding:18px;">
+          <div style="background:var(--surface);border:1px solid var(--hairline);border-radius:12px;overflow:hidden;">
+            <div style="display:flex;align-items:center;gap:9px;padding:9px 14px;border-bottom:1px solid var(--hairline-soft);">
+              <span style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);font-weight:600;">Playground</span>
+              <span style="color:var(--ink-4);">·</span>
+              <span style="font-family:var(--font-mono);font-size:12px;color:var(--accent-ink);">tally</span>
+              <span style="flex:1;"></span>
+              <span style="font-family:var(--font-mono);font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums;">step {{ loopCounter }}</span>
+              <button style="border:none;background:none;color:var(--ink-4);cursor:pointer;font-size:16px;line-height:1;">×</button>
+            </div>
+            <div style="height:420px;display:flex;flex-direction:column;padding:16px 16px 13px;">
+              <div style="flex:1;display:flex;min-height:0;">
+                <div style="flex:1.4;position:relative;overflow:hidden;font-family:var(--font-mono);font-size:13px;line-height:26px;">
+                  <div style="position:absolute;left:-16px;right:6px;height:26px;background:var(--accent-soft);border-left:2px solid var(--accent);top:{{ loopHlTop }}px;transition:top .22s cubic-bezier(.4,0,.2,1);"></div>
+                  <div style="position:relative;">
+                    <sc-for list="{{ loopLines }}" as="ln" hint-placeholder-count="6">
+                      <div style="display:flex;height:26px;"><span style="{{ ln.numStyle }}">{{ ln.num }}</span><span style="{{ ln.codeStyle }}">{{ ln.code }}</span></div>
+                    </sc-for>
+                  </div>
+                </div>
+                <div style="width:1px;background:var(--hairline-soft);margin:0 16px;flex:none;"></div>
+                <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
+                  <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px;">
+                    <span style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);font-weight:600;">State</span>
+                    <span style="font-family:var(--font-mono);font-size:11px;color:var(--accent-ink);">iter {{ loopIter }}</span>
+                  </div>
+                  <div style="flex:1;font-family:var(--font-mono);font-size:12.5px;">
+                    <sc-for list="{{ loopRows }}" as="r" hint-placeholder-count="3">
+                      <div style="{{ r.rowStyle }}">
+                        <span style="{{ r.dotStyle }}">◆</span>
+                        <span style="{{ r.nameStyle }}">{{ r.name }}</span>
+                        <span style="{{ r.valWrap }}">
+                          <sc-if value="{{ r.isScalar }}" hint-placeholder-val="{{ true }}"><span style="{{ r.scalarStyle }}">{{ r.text }}</span></sc-if>
+                          <sc-if value="{{ r.isObject }}"><span style="{{ r.objStyle }}">{{ r.text }}</span></sc-if>
+                          <sc-if value="{{ r.isLarge }}"><span style="{{ r.chipStyle }}">{{ r.summary }} <span style="{{ r.metaStyle }}">{{ r.meta }}</span></span></sc-if>
+                        </span>
+                      </div>
+                    </sc-for>
+                  </div>
+                  <!-- fold chip -->
+                  <div style="margin-top:auto;display:flex;align-items:center;gap:7px;padding:7px 9px;background:var(--surface-2);border:1px solid var(--hairline-soft);border-radius:8px;">
+                    <span style="color:var(--ink-4);font-size:12px;">⊟</span>
+                    <span style="font-size:11px;color:var(--ink-3);font-family:var(--font-ui);">{{ foldLabel }}</span>
+                  </div>
+                </div>
+              </div>
+              <!-- scrubber with bands + change markers -->
+              <div style="display:flex;align-items:center;gap:11px;padding-top:13px;margin-top:11px;border-top:1px solid var(--hairline-soft);">
+                <button onClick="{{ loopPrev }}" style="width:28px;height:28px;flex:none;border-radius:7px;border:1px solid var(--hairline);background:var(--paper);color:var(--ink-2);font-size:9px;display:flex;align-items:center;justify-content:center;cursor:pointer;" style-hover="border-color:var(--accent-line);color:var(--accent-ink);">◀</button>
+                <div style="position:relative;flex:1;height:26px;display:flex;align-items:center;">
+                  <div style="position:absolute;left:0;right:0;height:3px;border-radius:2px;background:var(--hairline);"></div>
+                  <sc-for list="{{ loopBands }}" as="b" hint-placeholder-count="3"><div style="{{ b.bstyle }}"></div></sc-for>
+                  <div style="position:absolute;left:0;width:{{ loopHandleLeft }};height:3px;border-radius:2px;background:var(--accent-line);transition:width .22s cubic-bezier(.4,0,.2,1);"></div>
+                  <sc-for list="{{ loopMarkers }}" as="m" hint-placeholder-count="5"><div style="{{ m.mstyle }}"></div></sc-for>
+                  <div style="position:absolute;left:{{ loopHandleLeft }};width:13px;height:13px;border-radius:50%;background:var(--accent);border:2px solid var(--surface);transform:translateX(-50%);transition:left .22s cubic-bezier(.4,0,.2,1);box-shadow:0 1px 3px rgba(0,0,0,.3);"></div>
+                </div>
+                <button onClick="{{ loopNext }}" style="flex:none;height:28px;border-radius:7px;border:1px solid var(--accent-line);background:var(--accent-soft);color:var(--accent-ink);font-size:11px;padding:0 11px;white-space:nowrap;cursor:pointer;" style-hover="background:var(--accent);color:var(--paper);">next change ◆</button>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;margin-top:11px;">
+                <span style="width:5px;height:5px;border-radius:50%;background:var(--accent);opacity:.55;flex:none;"></span>
+                <span style="font-size:11.5px;color:var(--ink-3);">Change markers sit on the track; folded iterations keep it from blurring to 1px.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </figure>
+      <!-- annotations -->
+      <div style="display:flex;flex-direction:column;gap:13px;">
+        <div style="background:#FBF8F0;border:1px solid #D8CFB7;border-radius:13px;padding:15px 17px;">
+          <div style="font-weight:600;font-size:13px;color:#1B1814;margin-bottom:3px;">Jump to next change</div>
+          <div style="font-size:12.5px;line-height:1.5;color:#6B6354;">The primary verb for long traces. Steps where nothing in scope moved are skipped — you land only where state actually changed.</div>
+        </div>
+        <div style="background:#FBF8F0;border:1px solid #D8CFB7;border-radius:13px;padding:15px 17px;">
+          <div style="font-weight:600;font-size:13px;color:#1B1814;margin-bottom:3px;">Change markers</div>
+          <div style="font-size:12.5px;line-height:1.5;color:#6B6354;">Sienna ticks on the track are a minimap of where things happened — so 612 steps read as a handful of moments, not a smear.</div>
+        </div>
+        <div style="background:#FBF8F0;border:1px solid #D8CFB7;border-radius:13px;padding:15px 17px;">
+          <div style="font-weight:600;font-size:13px;color:#1B1814;margin-bottom:3px;">Folded iterations</div>
+          <div style="font-size:12.5px;line-height:1.5;color:#6B6354;">Repeated loop passes collapse into a hatched band — expand only the iteration you care about. The counter still tells the honest total.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1260,&quot;height&quot;:900},&quot;startStep&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:5,&quot;min&quot;:1,&quot;max&quot;:9},&quot;loopTotalSteps&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:612,&quot;min&quot;:12,&quot;max&quot;:1000}}">
+class Component extends DCLogic {
+  state = { step: null, loopStep: null, expanded: {}, previewEditing: false, callText: "resolve_function_ref(conn, 42, ref)" };
+
+  // ---------- static data ----------
+  get V() {
+    return {
+      conn:      { kind:'opaque', label:'Connection' },
+      module_id: { kind:'scalar', text:'42' },
+      ref:       { kind:'large', summary:'FunctionRef', meta:'5 fields', children:[
+        {name:'qualname', text:"'Foo.method'"}, {name:'file', text:"'symbols.py'"},
+        {name:'line', text:'255'}, {name:'kind', text:"'function'"}, {name:'module_id', text:'42'} ] },
+      qualname:  { kind:'scalar', text:"'Foo.method'" },
+      parentN:   { kind:'scalar', text:'None' },
+      parentS:   { kind:'object', text:"Symbol('Foo')" },
+      head:      { kind:'scalar', text:"'Foo'" },
+      tail:      { kind:'scalar', text:"'method'" },
+      row:       { kind:'large', summary:'dict', meta:'5 keys', children:[
+        {name:'id', text:'91'}, {name:'name', text:"'method'"}, {name:'kind', text:"'function'"},
+        {name:'module_id', text:'42'}, {name:'parent_id', text:'17'} ] },
+      ret:       { kind:'object', text:"Symbol('Foo.method')" },
+    };
+  }
+  get resolveSource() {
+    return [
+      {num:255, text:'def resolve_function_ref(conn, module_id, ref):'},
+      {num:256, text:'    qualname = ref.qualname'},
+      {num:257, text:'    parent = None'},
+      {num:258, text:'    if "." in qualname:'},
+      {num:259, text:'        head, tail = qualname.rsplit(".", 1)'},
+      {num:260, text:'        parent = lookup_symbol(conn, module_id, head)'},
+      {num:261, text:'    row = fetch_symbol(conn, module_id, tail, parent)'},
+      {num:262, text:'    if row is None:'},
+      {num:263, text:'        raise KeyError(qualname)'},
+      {num:264, text:'    return Symbol(row, parent)'},
+    ];
+  }
+  get resolveTrace() {
+    const V = this.V, rows = [], order = [], cur = {};
+    const push = (line, sets, changed, event) => {
+      for (const k in sets) { if (!order.includes(k)) order.push(k); cur[k] = sets[k]; }
+      rows.push({ line, event: event || 'line', changed, scope: order.map(n => Object.assign({ name:n }, cur[n])) });
+    };
+    push(255, {conn:V.conn, module_id:V.module_id, ref:V.ref}, ['conn','module_id','ref'], 'call');
+    push(256, {qualname:V.qualname}, ['qualname']);
+    push(257, {parent:V.parentN}, ['parent']);
+    push(258, {}, []);
+    push(259, {head:V.head, tail:V.tail}, ['head','tail']);
+    push(260, {parent:V.parentS}, ['parent']);
+    push(261, {row:V.row}, ['row']);
+    push(262, {}, []);
+    push(264, {'return':V.ret}, ['return'], 'return');
+    return rows;
+  }
+
+  get loopTotal() { return this.props.loopTotalSteps ?? 612; }
+  get loopSource() {
+    return [
+      {num:312, text:'def tally(rows):'},
+      {num:313, text:'    totals = {}'},
+      {num:314, text:'    for row in rows:'},
+      {num:315, text:'        key = row.bucket'},
+      {num:316, text:'        totals[key] = totals.get(key, 0) + row.amount'},
+      {num:317, text:'    return totals'},
+    ];
+  }
+  get loopStops() {
+    return [
+      {stepNo:1,   line:313, iter:'enter',  rows:[
+        {n:'rows', kind:'large', summary:'list', meta:'2,000 items'},
+        {n:'totals', kind:'scalar', text:'{}', changed:true} ]},
+      {stepNo:6,   line:316, iter:'#1',     rows:[
+        {n:'row', kind:'object', text:'Txn(#1)'},
+        {n:'key', kind:'scalar', text:"'us'", changed:true},
+        {n:'totals', kind:'scalar', text:"{'us': 42}", changed:true} ]},
+      {stepNo:142, line:316, iter:'#46',    rows:[
+        {n:'row', kind:'object', text:'Txn(#46)'},
+        {n:'key', kind:'scalar', text:"'eu'", changed:true},
+        {n:'totals', kind:'large', summary:'dict', meta:'3 keys', changed:true} ]},
+      {stepNo:396, line:316, iter:'#131',   rows:[
+        {n:'row', kind:'object', text:'Txn(#131)'},
+        {n:'key', kind:'scalar', text:"'apac'", changed:true},
+        {n:'totals', kind:'large', summary:'dict', meta:'3 keys', changed:true} ]},
+      {stepNo:612, line:317, iter:'return', rows:[
+        {n:'totals', kind:'large', summary:'dict', meta:'3 keys'},
+        {n:'return', kind:'large', summary:'dict', meta:'3 keys', changed:true} ]},
+    ];
+  }
+
+  // ---------- helpers ----------
+  mkRow(name, def, changed, indent) {
+    indent = indent || 0;
+    const exp = !!this.state.expanded[name];
+    return {
+      name,
+      isScalar: def.kind==='scalar', isOpaque: def.kind==='opaque',
+      isLarge: def.kind==='large', isObject: def.kind==='object',
+      text: def.text || '', label: def.label || '', summary: def.summary || '', meta: def.meta || '',
+      caret: exp ? '\u25be' : '\u25b8',
+      onToggle: def.kind==='large' ? () => this.toggle(name) : null,
+      rowStyle: `display:flex;align-items:baseline;gap:8px;padding:3.5px 0 3.5px ${indent?20:0}px;`,
+      dotStyle: `flex:none;width:7px;text-align:center;color:var(--accent);opacity:${changed?1:0};font-size:8px;line-height:18px;`,
+      nameStyle: `flex:none;color:${changed?'var(--ink-2)':'var(--ink-4)'};${indent?'opacity:.85;':''}`,
+      valWrap: `flex:1;min-width:0;display:flex;justify-content:flex-end;align-items:baseline;`,
+      scalarStyle: `color:${changed?'var(--accent-ink)':'var(--ink-3)'};font-weight:${changed?'600':'400'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .3s ease;`,
+      objStyle: `color:${changed?'var(--accent-ink)':'var(--ink-3)'};font-weight:${changed?'600':'400'};font-style:normal;transition:color .3s ease;`,
+      chipStyle: `display:inline-flex;align-items:center;gap:6px;border:1px solid ${changed?'var(--accent-line)':'var(--hairline)'};background:var(--surface-2);border-radius:6px;padding:1px 8px;cursor:pointer;color:${changed?'var(--accent-ink)':'var(--ink-3)'};transition:color .3s ease,border-color .3s ease;`,
+      metaStyle: `color:var(--ink-4);font-size:11px;`,
+      caretStyle: `color:var(--ink-4);font-size:10px;`,
+      opaqueStyle: `display:inline-flex;align-items:center;border:1px dashed var(--hairline);border-radius:6px;padding:1px 9px;color:var(--ink-4);`,
+    };
+  }
+  buildRows(tr) {
+    const out = [];
+    tr.scope.forEach(v => {
+      const changed = tr.changed.includes(v.name);
+      out.push(this.mkRow(v.name, v, changed, 0));
+      if (v.kind==='large' && this.state.expanded[v.name])
+        v.children.forEach(c => out.push(this.mkRow(c.name, {kind:'scalar', text:c.text}, false, 1)));
+    });
+    return out;
+  }
+  lineModels(src, curIdx) {
+    return src.map((l,i) => ({
+      num: l.num, code: l.text,
+      numStyle: `flex:none;width:30px;text-align:right;padding-right:14px;font-variant-numeric:tabular-nums;color:${i===curIdx?'var(--accent-ink)':'var(--ink-4)'};font-weight:${i===curIdx?'700':'400'};`,
+      codeStyle: `white-space:pre;color:${i===curIdx?'var(--ink)':'var(--ink-2)'};transition:color .3s ease;`,
+    }));
+  }
+  toggle(name) { this.setState(s => ({ expanded: { ...s.expanded, [name]: !s.expanded[name] } })); }
+  heroStepVal() { return Math.min(Math.max(this.state.step ?? (this.props.startStep ?? 5), 1), this.resolveTrace.length); }
+  heroStep(d) { this.setState({ step: Math.min(Math.max(this.heroStepVal()+d, 1), this.resolveTrace.length) }); }
+  heroTrack(e) {
+    const r = e.currentTarget.getBoundingClientRect();
+    const f = (e.clientX - r.left) / r.width;
+    const t = this.resolveTrace.length;
+    this.setState({ step: Math.min(Math.max(Math.round(f*(t-1))+1, 1), t) });
+  }
+  heroNextChange() {
+    const R = this.resolveTrace, cur = this.heroStepVal();
+    for (let k=1; k<=R.length; k++) { const i=(cur-1+k)%R.length; if (R[i].changed.length>0) { this.setState({step:i+1}); return; } }
+  }
+  loopIdx() { return Math.min(Math.max(this.state.loopStep ?? 2, 0), this.loopStops.length-1); }
+  loopMove(d) { this.setState({ loopStep: Math.min(Math.max(this.loopIdx()+d, 0), this.loopStops.length-1) }); }
+
+  renderVals() {
+    const swatches = [
+      { token:'--paper',       use:'page background',        chip:'background:#FAF6EC;' },
+      { token:'--surface',     use:'widget band',            chip:'background:#F1EADC;' },
+      { token:'--surface-2',   use:'panels',                 chip:'background:#E7DFCC;' },
+      { token:'--ink',         use:'primary text',           chip:'background:#1B1814;' },
+      { token:'--ink-3',       use:'unchanged values',       chip:'background:#7D7464;' },
+      { token:'--accent',      use:'sienna · what moved',    chip:'background:oklch(0.56 0.13 45);' },
+      { token:'--accent-soft', use:'current line',           chip:'background:oklch(0.56 0.13 45 / 0.5);' },
+    ].map(s => ({ ...s, chip: `flex:none;width:34px;height:18px;border-radius:5px;border:1px solid #00000014;${s.chip}` }));
+
+    // hero
+    const R = this.resolveTrace, total = R.length, step = this.heroStepVal(), tr = R[step-1];
+    const curIdx = this.resolveSource.findIndex(l => l.num === tr.line);
+    const heroLines = this.lineModels(this.resolveSource, curIdx);
+    const heroRows = this.buildRows(tr);
+    const heroHlTop = curIdx * 26;
+    const heroHandleLeft = `${(step-1)/(total-1)*100}%`;
+    const heroMarkers = R.map((t,i) => ({ on:t.changed.length>0, left:(i/(total-1))*100 }))
+      .filter(m => m.on)
+      .map(m => ({ mstyle:`position:absolute;top:50%;transform:translate(-50%,-50%);width:2px;height:11px;border-radius:1px;background:var(--accent-line);left:${m.left}%;` }));
+
+    // loop study
+    const ls = this.loopStops, li = this.loopIdx(), stop = ls[li];
+    const lcur = this.loopSource.findIndex(l => l.num === stop.line);
+    const loopLines = this.lineModels(this.loopSource, lcur);
+    const loopRows = stop.rows.map(r => this.mkRow(r.n, r, !!r.changed, 0));
+    const loopHlTop = lcur * 26;
+    const loopHandleLeft = `${stop.stepNo/this.loopTotal*100}%`;
+    const loopMarkers = ls.map(s => ({ mstyle:`position:absolute;top:50%;transform:translate(-50%,-50%);width:2px;height:11px;border-radius:1px;background:var(--accent-line);left:${s.stepNo/this.loopTotal*100}%;` }));
+    const loopBands = [];
+    for (let i=1;i<ls.length;i++){ const a=ls[i-1].stepNo, b=ls[i].stepNo; if (b-a>4) loopBands.push({ bstyle:`position:absolute;top:50%;transform:translateY(-50%);height:7px;border-radius:3px;left:${a/this.loopTotal*100}%;width:${(b-a)/this.loopTotal*100}%;background:repeating-linear-gradient(45deg,var(--hairline) 0 3px,transparent 3px 6px);opacity:.7;` }); }
+    const foldLabel = li>0 ? `iterations after #${(ls[li-1].iter||'').replace('#','')||'1'} folded` : 'loop not yet entered';
+
+    return {
+      swatches,
+      // hero
+      heroCounter: `${step} / ${total}`, heroStateStep: step,
+      heroLines, heroRows, heroHlTop, heroHandleLeft, heroMarkers,
+      heroPrev: () => this.heroStep(-1), heroNext: () => this.heroStep(1),
+      heroTrack: (e) => this.heroTrack(e), heroNextChange: () => this.heroNextChange(),
+      // preview
+      pvEditing: this.state.previewEditing, pvNotEditing: !this.state.previewEditing, callText: this.state.callText,
+      toggleEdit: () => this.setState(s => ({ previewEditing: !s.previewEditing })),
+      onCall: (e) => this.setState({ callText: e.target.value }),
+      // loop
+      loopCounter: `${stop.stepNo} / ${this.loopTotal}`, loopIter: stop.iter,
+      loopLines, loopRows, loopHlTop, loopHandleLeft, loopMarkers, loopBands, foldLabel,
+      loopPrev: () => this.loopMove(-1), loopNext: () => this.loopMove(1),
+      // large-value study toggles
+      lvDictOpen: !!this.state.expanded.lv_dict, lvDfOpen: !!this.state.expanded.lv_df, lvListOpen: !!this.state.expanded.lv_list,
+      dictCaret: this.state.expanded.lv_dict ? '\u25be' : '\u25b8', dfCaret: this.state.expanded.lv_df ? '\u25be' : '\u25b8', listCaret: this.state.expanded.lv_list ? '\u25be' : '\u25b8',
+      toggleDict: () => this.toggle('lv_dict'), toggleDf: () => this.toggle('lv_df'), toggleList: () => this.toggle('lv_list'),
+    };
+  }
+}
+</script>
+</body>
+</html>
