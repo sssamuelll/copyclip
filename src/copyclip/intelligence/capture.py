@@ -141,3 +141,144 @@ class FreeTextCall:
                 f"call_text must be a valid Python expression: {exc}"
             ) from exc
         return cls(text=text)
+
+
+# ---------------------------------------------------------------------------
+# Task 2: Trace schema dataclasses + raw→Step[] normalizer (derives `changed`)
+# ---------------------------------------------------------------------------
+
+from typing import Literal  # noqa: E402 — appended after the dataclasses block
+
+StepEvent = Literal["call", "line", "return", "raise"]
+VarKind = Literal["scalar", "object", "opaque", "large"]
+
+
+@dataclass(frozen=True)
+class Var:
+    name: str
+    kind: VarKind
+    text: str | None = None       # scalar/object: capped repr
+    label: str | None = None      # opaque: type name only (never repr'd)
+    summary: str | None = None    # large: "dict" | "DataFrame" | "list" | ...
+    meta: str | None = None       # large: "3 keys" | "1000×12" | "5,000 items"
+    children: list[dict[str, str]] | None = None  # large: first-N entries
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"name": self.name, "kind": self.kind}
+        if self.text is not None:
+            d["text"] = self.text
+        if self.label is not None:
+            d["label"] = self.label
+        if self.summary is not None:
+            d["summary"] = self.summary
+        if self.meta is not None:
+            d["meta"] = self.meta
+        if self.children is not None:
+            d["children"] = self.children
+        return d
+
+
+@dataclass(frozen=True)
+class Step:
+    line: int
+    event: StepEvent
+    changed: list[str]
+    scope: list[Var]
+    raised: dict[str, str] | None = None  # only on the final step if it threw
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {
+            "line": self.line,
+            "event": self.event,
+            "changed": list(self.changed),
+            "scope": [v.to_dict() for v in self.scope],
+        }
+        if self.raised is not None:
+            d["raised"] = self.raised
+        return d
+
+
+@dataclass(frozen=True)
+class StepThroughResponse:
+    trace: list[Step]
+    source_lines: list[dict[str, Any]]
+    func_name: str
+    file_line: str
+    truncated: bool
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": "trace",
+            "trace": [s.to_dict() for s in self.trace],
+            "source_lines": self.source_lines,
+            "func_name": self.func_name,
+            "file_line": self.file_line,
+            "truncated": self.truncated,
+        }
+
+
+@dataclass(frozen=True)
+class FallbackResponse:
+    reason: str
+    iframe_url: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"kind": "fallback", "reason": self.reason, "iframe_url": self.iframe_url}
+
+
+def _var_from_raw(raw: dict[str, Any]) -> Var:
+    return Var(
+        name=str(raw.get("name", "")),
+        kind=raw.get("kind", "scalar"),
+        text=raw.get("text"),
+        label=raw.get("label"),
+        summary=raw.get("summary"),
+        meta=raw.get("meta"),
+        children=raw.get("children"),
+    )
+
+
+def normalize_trace(raw: dict[str, Any]) -> list[Step]:
+    """Map the driver's intermediate trace onto the fixed Step[] schema.
+
+    The driver pre-flattens each event's in-scope vars into the Var shape but
+    NEVER emits ``changed`` (spec §9): the bare callback records line/event/scope
+    only. This normalizer DERIVES ``changed`` by diffing each step's value-text
+    against the previous step (the renderer never re-derives it), preserving
+    CUMULATIVE scope and stable insertion order.
+
+    First-bind detection keys on EVENT, not on step index: on the ``call`` step
+    every var is a function ARGUMENT (a pre-existing input) and does NOT flag — it
+    only seeds ``prev``; on a ``line``/``return``/``raise`` step a name not yet in
+    ``prev`` is a genuine first-bind and flags. Opaque values never flag.
+    """
+    events = raw.get("trace", [])
+    steps: list[Step] = []
+    prev: dict[str, str | None] = {}
+    for ev in events:
+        event = ev.get("event", "line")
+        is_call = event == "call"
+        scope = [_var_from_raw(v) for v in ev.get("scope", [])]
+        changed: list[str] = []
+        for v in scope:
+            sig = v.text if v.text is not None else (v.summary, v.meta)
+            seen = v.name in prev
+            if v.kind == "opaque":
+                prev[v.name] = sig  # opaque never flags (spec §9); still seed prev
+                continue
+            if not seen:
+                # Genuine first-bind flags, EXCEPT on the call step (args are
+                # pre-existing inputs): the call step only seeds prev.
+                if not is_call:
+                    changed.append(v.name)
+            elif prev[v.name] != sig:
+                changed.append(v.name)
+            prev[v.name] = sig
+        steps.append(Step(
+            line=int(ev.get("line", 0)),
+            event=event,
+            changed=changed,
+            scope=scope,
+            raised=ev.get("raised"),
+        ))
+    return steps
