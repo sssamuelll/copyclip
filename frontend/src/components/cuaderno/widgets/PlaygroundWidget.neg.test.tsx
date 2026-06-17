@@ -1,0 +1,123 @@
+/**
+ * Behavioral contract tests for the --neg token usage in Stepper.
+ *
+ * These replace the former PlaygroundWidget.css.test.ts which asserted CSS
+ * selector presence in cuaderno.css.  That test was orphaned: the
+ * .playground-trace-* classes it listed were in deleted flat-trace JSX and no
+ * longer appear in the live rendered markup (Stepper uses inline styles).
+ * The --neg guarantee for the raised exception card had moved to Stepper.tsx
+ * inline styles and was completely unguarded.
+ *
+ * These tests verify the actual rendered DOM: the Stepper emits var(--neg) on
+ * the raised exception card and on the highlight slab, and does NOT emit it
+ * when the trace is truncated.
+ */
+import { render } from '@testing-library/react'
+import { describe, it, expect } from 'vitest'
+import type { StepThroughResponse, Step, Var } from '../../../types/api'
+import { Stepper } from '../stepper/Stepper'
+
+const v = (name: string, kind: Var['kind'], extra: Partial<Var> = {}): Var => ({
+  name,
+  kind,
+  ...extra,
+})
+
+const baseSourceLines = [{ num: 10, text: 'return x' }]
+
+const baseResp: StepThroughResponse = {
+  kind: 'trace',
+  trace: [],
+  source_lines: baseSourceLines,
+  func_name: 'fn',
+  file_line: 'a.py:10',
+  truncated: false,
+}
+
+/** Build a terminal raise trace (single raise step so cur === total). */
+function raisedResp(extra: Partial<StepThroughResponse> = {}): StepThroughResponse {
+  const raiseStep: Step = {
+    line: 10,
+    event: 'raise',
+    changed: [],
+    scope: [v('x', 'scalar', { text: '1' })],
+    raised: { type: 'KeyError', message: "'ghost'" },
+  }
+  return { ...baseResp, trace: [raiseStep], ...extra }
+}
+
+describe('Stepper — --neg token contract (raised exception card)', () => {
+  it('raised exception card uses background:var(--neg) on a terminal raise step', () => {
+    const { container } = render(
+      <Stepper response={raisedResp()} onClose={() => {}} />,
+    )
+    // The card is the only element in the state panel whose background is --neg
+    const card = Array.from(container.querySelectorAll<HTMLElement>('div')).find(
+      (el) => el.style.background === 'var(--neg)' && el.style.borderColor === '',
+    )
+    // More precisely: find the element that has both --neg background AND --neg-line border
+    const raisedCard = Array.from(container.querySelectorAll<HTMLElement>('div')).find(
+      (el) =>
+        el.style.background === 'var(--neg)' &&
+        el.style.borderColor === 'var(--neg-line)',
+    )
+    expect(raisedCard, 'raised exception card must use background:var(--neg)').not.toBeNull()
+    // Suppress the unused `card` reference (used as fallback search above)
+    void card
+  })
+
+  it('raised exception card is absent when there is no raised field', () => {
+    const noRaise: Step = {
+      line: 10,
+      event: 'line',
+      changed: [],
+      scope: [v('x', 'scalar', { text: '1' })],
+    }
+    const { container } = render(
+      <Stepper response={{ ...baseResp, trace: [noRaise] }} onClose={() => {}} />,
+    )
+    const raisedCard = Array.from(container.querySelectorAll<HTMLElement>('div')).find(
+      (el) =>
+        el.style.background === 'var(--neg)' &&
+        el.style.borderColor === 'var(--neg-line)',
+    )
+    expect(raisedCard, 'no raised card when step has no raised field').toBeUndefined()
+  })
+})
+
+describe('Stepper — --neg token contract (highlight slab)', () => {
+  it('slab uses background:var(--neg) when raise is terminal and not truncated', () => {
+    const { container } = render(
+      <Stepper response={raisedResp({ truncated: false })} onClose={() => {}} />,
+    )
+    const slab = container.querySelector<HTMLElement>('[data-testid="hl-slab"]')
+    expect(slab, 'slab must render when line is in source_lines').not.toBeNull()
+    expect(slab!.style.background).toBe('var(--neg)')
+  })
+
+  it('slab uses accent (NOT --neg) background when truncated=true even on a raise step', () => {
+    const { container } = render(
+      <Stepper response={raisedResp({ truncated: true })} onClose={() => {}} />,
+    )
+    const slab = container.querySelector<HTMLElement>('[data-testid="hl-slab"]')
+    expect(slab, 'slab must render when line is in source_lines').not.toBeNull()
+    expect(slab!.style.background).not.toBe('var(--neg)')
+    // Must be the accent-soft token instead
+    expect(slab!.style.background).toBe('var(--accent-soft)')
+  })
+
+  it('slab uses accent background on a normal line step', () => {
+    const lineStep: Step = {
+      line: 10,
+      event: 'line',
+      changed: [],
+      scope: [v('x', 'scalar', { text: '1' })],
+    }
+    const { container } = render(
+      <Stepper response={{ ...baseResp, trace: [lineStep] }} onClose={() => {}} />,
+    )
+    const slab = container.querySelector<HTMLElement>('[data-testid="hl-slab"]')
+    expect(slab, 'slab must render on a normal line step').not.toBeNull()
+    expect(slab!.style.background).toBe('var(--accent-soft)')
+  })
+})

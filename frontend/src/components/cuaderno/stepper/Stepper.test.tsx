@@ -3,7 +3,6 @@ import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi } from 'vitest'
 import type { StepThroughResponse, Step, Var } from '../../../types/api'
 import { Stepper } from './Stepper'
-import { act } from 'react'
 
 const v = (name: string, kind: Var['kind'], extra: Partial<Var> = {}): Var => ({ name, kind, ...extra })
 const trace: Step[] = [
@@ -106,8 +105,8 @@ describe('Stepper', () => {
     expect(screen.getByText('Raised — this is the final step.')).toBeInTheDocument()
   })
 
-  // Issue 3: step and expanded reset when response prop changes
-  it('resets step and expansion when response identity changes', async () => {
+  // Issue 3: step and expanded reset when response prop changes — synchronously, no flash
+  it('resets step and expansion synchronously when response identity changes (no stale-expansion flash)', async () => {
     // Build a trace where the large var's child text is unique (not repeated in scope)
     const deepTrace: Step[] = [
       { line: 255, event: 'call', changed: ['box'], scope: [v('box', 'large', { summary: 'Wrapper', meta: '1 field', children: [{ name: 'inner', text: '__UNIQUE_CHILD__' }] })] },
@@ -126,15 +125,21 @@ describe('Stepper', () => {
     await userEvent.click(screen.getByText('Wrapper'))
     // After expansion, the unique child text appears
     expect(screen.getByText('__UNIQUE_CHILD__')).toBeInTheDocument()
-    // Advance to step 2 again so step counter isn't 1
+    // Advance to step 2 again so step counter is not 1
     await userEvent.click(next)
     expect(screen.getByText('step 2 / 3')).toBeInTheDocument()
-    // Now swap to a different response identity
+    // Now swap to a different response identity.
+    // The reset must happen synchronously during the render, not in a post-render
+    // effect (useEffect would cause a 1-frame flash where stale expanded children
+    // are still visible).  We do NOT wrap in act() so that the assertion checks
+    // the DOM as committed by the rerender itself, before any effects could flush.
     const resp2: StepThroughResponse = { ...deepResp, func_name: 'other_func' }
-    act(() => { rerender(<Stepper response={resp2} onClose={() => {}} />) })
-    // Step must be back to 1
+    rerender(<Stepper response={resp2} onClose={() => {}} />)
+    // Step must be back to 1 immediately — no effect flush needed
     expect(screen.getByText('step 1 / 3')).toBeInTheDocument()
-    // Expansion must be cleared — unique child no longer visible (box is back at step 1 but not expanded)
+    // Expansion must already be cleared — unique child must not appear even
+    // before any effect has run.  This would FAIL with a useEffect-based reset
+    // because the effect fires after paint (stale expanded map still active).
     expect(screen.queryByText('__UNIQUE_CHILD__')).not.toBeInTheDocument()
   })
 

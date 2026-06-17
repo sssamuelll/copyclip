@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useRef } from 'react'
 import type { StepThroughResponse } from '../../../types/api'
 import { t } from '../strings'
 import {
@@ -18,11 +18,20 @@ export function Stepper({ response, onClose, lang }: Props) {
   const [step, setStep] = useState(1)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
 
-  // Issue fix: reset cursor and expansion when a new trace is mounted in the same instance
-  useEffect(() => {
+  // Synchronous derived-state reset: compare the current response identity to the
+  // previous one via a ref.  When they differ we reset step/expanded during this
+  // render (before any JSX is evaluated), so there is never a frame where stale
+  // expansion state is visible.  This replaces the old useEffect approach which
+  // caused a 1-frame flash: old expanded map was live on the first render with the
+  // new response, then cleared by the effect after paint.
+  const prevResponseRef = useRef<StepThroughResponse>(response)
+  if (prevResponseRef.current !== response) {
+    prevResponseRef.current = response
+    // Reset derived state synchronously — no extra render, no flash.
+    // Calling setX during render is valid in React when guarded by a ref comparison.
     setStep(1)
     setExpanded({})
-  }, [response])
+  }
 
   const cur = clampStep(step, total)
   const tr = trace[cur - 1]
