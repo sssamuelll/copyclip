@@ -25,6 +25,11 @@
   /* sparing complementary accent (kept rare) */
   --accent-2:     oklch(0.52 0.10 200); /* slate-teal for "got it / didn't" */
 
+  /* negative band — exception state only (hue 30, the rare "it threw" ink) */
+  --neg:      oklch(0.56 0.13 30 / 0.12);
+  --neg-ink:  oklch(0.46 0.12 30);
+  --neg-line: oklch(0.56 0.13 30 / 0.34);
+
   /* radii + shadow */
   --radius-sm: 4px;
   --radius:    8px;
@@ -58,6 +63,10 @@
   --accent-ink:   oklch(0.84 0.10 45);
 
   --accent-2:     oklch(0.74 0.08 200);
+
+  --neg:      oklch(0.60 0.13 30 / 0.20);
+  --neg-ink:  oklch(0.74 0.12 30);
+  --neg-line: oklch(0.60 0.13 30 / 0.34);
 
   --shadow-1: 0 1px 0 rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.35);
   --shadow-2: 0 6px 20px rgba(0,0,0,0.55), 0 1px 0 rgba(0,0,0,0.5);
