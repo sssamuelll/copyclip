@@ -978,26 +978,6 @@ def test_cuaderno_source_accepted():
     assert req.source == "cuaderno"
 
 
-def test_cuaderno_fallback_launches_run_mode(tmp_path):
-    """The FALLBACK path (async function → Marimo) must launch with mode='run' for
-    cuaderno source. Eligible cuaderno requests no longer call runner.launch (they
-    return a StepThroughResponse directly — see test_cuaderno_eligible_returns_trace_response).
-    Any other source must use mode='edit'.
-    """
-    conn = connect(str(tmp_path)); init_schema(conn)
-    pid = _seed_user_symbol(conn, tmp_path,
-                            "async def fetch(x):\n    return x\n",
-                            "usermod.py", "fetch")
-    req = PlaygroundLaunchRequest.from_dict({
-        "source": "cuaderno",
-        "function_ref": {"file": "usermod.py", "name": "fetch"},
-        "call": {"function_ref": {"file": "usermod.py", "name": "fetch"}, "args": [1]},
-    })
-    runner = Mock(); runner.launch.return_value = ("pg", "http://127.0.0.1:5000/")
-    launch_playground(req, str(tmp_path), conn, pid, runner)
-    assert runner.launch.call_args.kwargs.get("mode") == "run"
-
-
 def test_get_playground_list_route():
     """GET /api/playground must return 200 with {'items': [...]} matching runner.list()."""
     mock_runner = Mock()
@@ -1018,6 +998,11 @@ def test_get_playground_list_route():
 
 # ---------------------------------------------------------------------------
 # Task 7: launch_playground branches cuaderno → capture, else Marimo
+# Task 11: re-point the one behavioral assertion from test_cuaderno_source_-
+#          launches_run_mode to test_cuaderno_fallback_launches_run_mode.
+#          The Marimo notebook template is UNCHANGED; all 12 test_generate_-
+#          notebook_* tests call generate_marimo_notebook directly and pass
+#          without modification (template is untouched by Tasks 1-10).
 # ---------------------------------------------------------------------------
 
 import textwrap as _tw
@@ -1039,6 +1024,31 @@ def _seed_user_symbol(conn, project_root, body, file_rel, name,
         (pid, name, kind, file_rel, 1, 5, None, module))
     conn.commit()
     return pid
+
+
+def test_cuaderno_fallback_launches_run_mode(tmp_path):
+    """The FALLBACK path (async function → Marimo) must launch with mode='run' for
+    cuaderno source. Eligible cuaderno requests no longer call runner.launch (they
+    return a StepThroughResponse directly — see test_cuaderno_eligible_returns_trace_response).
+    Any other source must use mode='edit'.
+
+    This test re-points the old test_cuaderno_source_launches_run_mode (Task 11):
+    an ELIGIBLE cuaderno descriptor goes straight to StepThroughResponse without
+    touching runner.launch; the mode='run' dispatch is still proven via the
+    async-fallback path, keeping source-keyed mode coverage intact.
+    """
+    conn = connect(str(tmp_path)); init_schema(conn)
+    pid = _seed_user_symbol(conn, tmp_path,
+                            "async def fetch(x):\n    return x\n",
+                            "usermod.py", "fetch")
+    req = PlaygroundLaunchRequest.from_dict({
+        "source": "cuaderno",
+        "function_ref": {"file": "usermod.py", "name": "fetch"},
+        "call": {"function_ref": {"file": "usermod.py", "name": "fetch"}, "args": [1]},
+    })
+    runner = Mock(); runner.launch.return_value = ("pg", "http://127.0.0.1:5000/")
+    launch_playground(req, str(tmp_path), conn, pid, runner)
+    assert runner.launch.call_args.kwargs.get("mode") == "run"
 
 
 def test_cuaderno_eligible_returns_trace_response(tmp_path):
