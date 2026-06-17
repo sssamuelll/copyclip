@@ -1230,3 +1230,14 @@
   vertical-align: 1px;
   text-transform: uppercase;
 }
+
+/* ---------- step-through stepper ---------- */
+.stepper-widget { overflow: hidden; }
+.stepper-primary:hover { background: var(--accent); color: var(--paper); }
+.stepper-ghost:hover { border-color: var(--accent-line); }
+.stepper-btn:hover { border-color: var(--accent-line); color: var(--accent-ink); }
+.stepper-pencil:hover { color: var(--accent-ink); border-color: var(--accent-line); }
+@keyframes stepperSweep { 0% { transform: translateX(-120%); } 100% { transform: translateX(420%); } }
+@keyframes stepperPulse { 0%, 100% { opacity: .4; } 50% { opacity: .95; } }
+.stepper-sweep { animation: stepperSweep 1.25s cubic-bezier(.4, 0, .2, 1) infinite; }
+.stepper-pulse { animation: stepperPulse 1.5s ease-in-out infinite; }
