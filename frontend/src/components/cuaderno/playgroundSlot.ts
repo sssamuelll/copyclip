@@ -1,5 +1,5 @@
 import { api } from '../../api/client'
-import type { PlaygroundLaunchRequest } from '../../types/api'
+import type { PlaygroundLaunchRequest, PlaygroundLaunchResponse } from '../../types/api'
 
 export type SlotState =
   | { kind: 'empty' }
@@ -50,20 +50,11 @@ export async function launch(widgetKey: string, req: PlaygroundLaunchRequest): P
   if (token !== myToken) return
   set({ kind: 'spawning', widgetKey, token: myToken })
   try {
-    const res = await api.launchPlayground(req)
-    if (res.kind === 'trace') {
-      // Task 4 will fully handle the trace shape; for now just no-op (type safe)
-      if (token !== myToken) return
-      // fallthrough to error end state until Task 4 wires up the trace slot
-      set({ kind: 'ended', widgetKey, reason: 'error', message: 'trace not yet handled' })
-      return
-    }
-    // fallback path (kind === 'fallback'): has iframe_url, recover id from it
-    const playgroundId = res.iframe_url.split('/').filter(Boolean).pop() ?? ''
-    const iframeUrl = res.iframe_url
-    if (token !== myToken) { api.closePlayground(playgroundId).catch(() => {}); return }
-    set({ kind: 'live', widgetKey, playgroundId, iframeUrl, token: myToken })
-    startPoll(playgroundId, widgetKey, myToken)
+    // cast: Task 4 will widen this to PlaygroundLaunchResult once SlotState gains 'trace'
+    const res = await api.launchPlayground(req) as unknown as PlaygroundLaunchResponse
+    if (token !== myToken) { api.closePlayground(res.playground_id).catch(() => {}); return }
+    set({ kind: 'live', widgetKey, playgroundId: res.playground_id, iframeUrl: res.iframe_url, token: myToken })
+    startPoll(res.playground_id, widgetKey, myToken)
   } catch (e) {
     if (token !== myToken) return
     set({ kind: 'ended', widgetKey, reason: 'error', message: e instanceof Error ? e.message : String(e) })
