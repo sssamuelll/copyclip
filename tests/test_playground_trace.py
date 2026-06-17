@@ -134,6 +134,59 @@ def test_resolve_failure_traces_launch_error_stage_resolve(tmp_path):
     assert err["stage"] == "resolve" and "missing" in err["error"]
 
 
+def test_marimo_happy_path_traces_spawn_notebook_ready(tmp_path):
+    """Non-cuaderno source with a passing runner must emit launch.notebook
+    (path, input_element), launch.spawn (port, pid, mode), and launch.ready
+    (playground_id) in that order.
+
+    This test was the implicit guarantee of the original
+    `test_launch_traces_resolve_notebook_spawn_ready` before the cuaderno
+    step-through refactor redirected it to the capture path and dropped these
+    assertions.  It must live here, not be inlined into the cuaderno path.
+    """
+    trace = InteractionTrace.start("launch", tmp_path / "logs", {"source": "atlas"})
+    req = PlaygroundLaunchRequest.from_dict({
+        "source": "atlas",
+        "function_ref": {"file": "src/copyclip/util.py", "name": "foo"},
+        "breadcrumb": "bc",
+        "suggested_inputs": ["src/copyclip/foo.py"],
+    })
+    resp = launch_playground(req, str(tmp_path), _conn_with_symbol(), 1,
+                             FakeRunner(), trace=trace)
+    trace.close(outcome="ready")
+
+    assert resp.playground_id == "pgid123"
+    assert resp.iframe_url == "http://127.0.0.1:1234/"
+
+    lines = _lines(trace)
+    names = [l["event"] for l in lines]
+    # The full marimo happy-path sequence must be present in order.
+    assert "launch.resolve" in names
+    assert "launch.notebook" in names
+    assert "launch.spawn" in names
+    assert "launch.ready" in names
+    assert names.index("launch.notebook") < names.index("launch.spawn") < names.index("launch.ready")
+
+    notebook = next(l for l in lines if l["event"] == "launch.notebook")
+    assert notebook["path"].endswith("playground.py"), (
+        f"launch.notebook.path must end with playground.py, got {notebook['path']!r}"
+    )
+    assert "mo.ui.text" in notebook["input_element"], (
+        f"launch.notebook.input_element must contain mo.ui.text, got {notebook['input_element']!r}"
+    )
+
+    spawn = next(l for l in lines if l["event"] == "launch.spawn")
+    assert spawn["port"] == 1234
+    assert spawn["pid"] == 42
+    assert spawn["mode"] == "edit"   # non-cuaderno source uses "edit" mode
+
+    ready = next(l for l in lines if l["event"] == "launch.ready")
+    assert ready["playground_id"] == "pgid123"
+
+    # Clean up the notebook temp dir to avoid orphan files.
+    shutil.rmtree(os.path.dirname(notebook["path"]), ignore_errors=True)
+
+
 def test_spawn_failure_traces_launch_error_stage_spawn(tmp_path, monkeypatch):
     """Marimo-path test: source != cuaderno is needed for spawn. Use a non-cuaderno source."""
     trace = InteractionTrace.start("launch", tmp_path / "logs", {})
