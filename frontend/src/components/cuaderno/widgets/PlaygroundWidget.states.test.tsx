@@ -63,11 +63,14 @@ describe('PlaygroundWidget — idle state delegates to IdleInvitation', () => {
     expect(screen.getByText('Anchored function')).toBeInTheDocument()
   })
 
-  it('calls launch() when the Step through button is clicked', () => {
-    vi.mocked(launch).mockResolvedValue(undefined)
+  it('shows the PreviewCall interstitial (not launch) when the Step through button is clicked', () => {
     render(<PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />)
     fireEvent.click(screen.getByRole('button', { name: /step through/i }))
-    expect(launch).toHaveBeenCalledWith(MY_KEY, expect.objectContaining({ source: 'cuaderno' }))
+    // After clicking, the PreviewCall interstitial should appear before launch() is called.
+    // The lead text from PreviewCall confirms we are in the preview state.
+    expect(screen.getByText(/step through this call/i)).toBeInTheDocument()
+    // launch() must NOT have been called yet — only the preview is shown.
+    expect(launch).not.toHaveBeenCalled()
   })
 
   it('does NOT show the old plain-text run-button widget (no .widget-body)', () => {
@@ -178,14 +181,17 @@ describe('PlaygroundWidget — ended state delegates to EndedCards', () => {
     expect(close).toHaveBeenCalled()
   })
 
-  it('calls launch() (retry) from the retry button on EndedCards', () => {
+  it('shows the PreviewCall interstitial (not launch) when the retry button on EndedCards is clicked', () => {
     vi.mocked(launch).mockResolvedValue(undefined)
     vi.mocked(getState).mockReturnValue({ kind: 'ended', widgetKey: MY_KEY, reason: 'closed' })
     render(<PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />)
-    // Find retry button by its accessible name, not by excluding ×
+    // Find retry button by its accessible name
     const retryBtn = screen.getByRole('button', { name: /reopen/i })
     fireEvent.click(retryBtn)
-    expect(launch).toHaveBeenCalledWith(MY_KEY, expect.objectContaining({ source: 'cuaderno' }))
+    // Retry now shows the PreviewCall interstitial before re-launching, so the
+    // user can review (and edit) the call again. launch() must NOT fire yet.
+    expect(screen.getByText(/step through this call/i)).toBeInTheDocument()
+    expect(launch).not.toHaveBeenCalled()
   })
 
   it('does NOT use the old inline .playground-status-note div', () => {

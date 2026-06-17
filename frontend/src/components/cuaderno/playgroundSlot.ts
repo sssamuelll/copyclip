@@ -103,3 +103,15 @@ export async function reconcileOnMount(): Promise<void> {
     await Promise.all(res.items.map((i) => api.closePlayground(i.id).catch(() => {})))
   } catch { /* list route unavailable: nothing to do */ }
 }
+
+/**
+ * Hard-reset the slot to empty — for use in test beforeEach only.
+ * Stops any active poll and resets state + token without calling the API.
+ * NOT intended for production code paths.
+ */
+export function _resetForTests(): void {
+  stopPoll()
+  token = 0
+  state = { kind: 'empty' }
+  listeners.forEach((l) => l())
+}

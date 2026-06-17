@@ -1,10 +1,11 @@
-import { useSyncExternalStore } from 'react'
-import type { PlaygroundWidgetData, Citation } from '../../../types/api'
+import { useState, useSyncExternalStore } from 'react'
+import type { PlaygroundWidgetData, Citation, CallDescriptor } from '../../../types/api'
 import { CitationChip } from '../CitationChip'
 import { subscribe, getState, launch, close } from '../playgroundSlot'
-import { Stepper } from '../stepper/Stepper'
 import { IdleInvitation } from '../stepper/IdleInvitation'
+import { PreviewCall } from '../stepper/PreviewCall'
 import { Spawning } from '../stepper/Spawning'
+import { Stepper } from '../stepper/Stepper'
 import { EndedCards } from '../stepper/EndedCards'
 
 type Props = {
@@ -13,77 +14,112 @@ type Props = {
   lang?: string | null
 }
 
+// Build a faithful invocation string from the model's structured descriptor.
+// Prefer the pre-rendered call_text; this is the fallback when only `call` is present.
+function callTextOf(name: string, call?: CallDescriptor): string {
+  if (!call) return `${name}()`
+  const lit = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v))
+  const pos = (call.args ?? []).map(lit)
+  const kw = Object.entries(call.kwargs ?? {}).map(([k, v]) => `${k}=${lit(v)}`)
+  return `${name}(${[...pos, ...kw].join(', ')})`
+}
+
 export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
   const slot = useSyncExternalStore(subscribe, getState)
+  const [previewing, setPreviewing] = useState(false)
 
-  const myKey = `${widget.function_ref.file}:${widget.function_ref.name}:${widget.function_ref.line ?? ''}`
+  const fn = widget.function_ref
+  const myKey = `${fn.file}:${fn.name}:${fn.line ?? ''}`
   const isMine = slot.kind !== 'empty' && slot.widgetKey === myKey
+  const fileLine = fn.line != null ? `${fn.file}:${fn.line}` : fn.file
+  // The REAL model-proposed invocation (D2): the pre-rendered text if the floor
+  // emitted it, else built from the structured descriptor. Never a fake "name(…)".
+  const proposedCall = widget.call_text ?? callTextOf(fn.name, widget.call)
 
-  const handleLaunch = () => {
+  // On confirm the (possibly edited) free text flows through as call_text (D2);
+  // the structured descriptor rides along for the backend's repr-literal guard.
+  const doLaunch = (callText: string) => {
+    setPreviewing(false)
     void launch(myKey, {
       source: 'cuaderno',
-      function_ref: widget.function_ref,
+      function_ref: fn,
       suggested_inputs: widget.suggested_inputs,
       breadcrumb: widget.breadcrumb,
-      // Forward the model's proposed call descriptor (args/kwargs/ctor) so the
-      // backend can build a real CallDescriptor and run the step-through trace.
-      // Without this field the launch always arrives with req.call = None and
-      // any method target immediately falls back to the Marimo iframe.
-      ...(widget.call !== undefined ? { call: widget.call } : {}),
+      call: widget.call,
+      call_text: callText,
     })
   }
 
-  // trace: step-through capture — delegate entirely to <Stepper>.
-  // No subprocess to manage; close() transitions the slot to ended.
+  // trace: the React stepper
   if (isMine && slot.kind === 'trace') {
     return <Stepper response={slot.response} onClose={close} lang={lang} />
   }
 
-  // live: iframe view — the editorial frame survives the click (header band +
-  // breadcrumb + citation stay), so the running thing reads as one composed
-  // widget, not a foreign window that replaced the page.
+  // live: fallback Marimo iframe box (unchanged path) + surviving context band
   if (isMine && slot.kind === 'live') {
     return (
       <div className="widget">
         <div className="widget-head">
           <span>
             <span className="kind">playground</span> ·{' '}
-            <span className="widget-head-name">{widget.function_ref.name}</span>
+            <span className="widget-head-name">{fn.name}</span>
           </span>
-          <button className="playground-close" onClick={close} title="close">
-            ×
-          </button>
+          <button className="playground-close" onClick={close} title="close">×</button>
         </div>
         {widget.breadcrumb || widget.citation ? (
           <div className="playground-live-context">
-            {widget.breadcrumb ? (
-              <span className="playground-breadcrumb">{widget.breadcrumb}</span>
-            ) : null}
-            {widget.citation ? (
-              <CitationChip citation={widget.citation} onClick={onOpenCitation} />
-            ) : null}
+            {widget.breadcrumb ? (<span className="playground-breadcrumb">{widget.breadcrumb}</span>) : null}
+            {widget.citation ? (<CitationChip citation={widget.citation} onClick={onOpenCitation} />) : null}
           </div>
         ) : null}
         <div className="playground-live">
           <iframe
             src={slot.iframeUrl}
             sandbox="allow-scripts allow-same-origin allow-forms"
-            title={widget.function_ref.name}
+            title={fn.name}
           />
         </div>
       </div>
     )
   }
 
-  // ended: delegate to EndedCards for 3-way reason dispatch with correct
-  // tokens, body copy, and retry/close callbacks.
+  // preview-call: shown before any real code runs (or after retry) — user can edit
+  // Check this BEFORE ended so that onRetry → setPreviewing(true) wins over the
+  // stale 'ended' slot state (the slot won't clear until the next launch resolves).
+  if (previewing) {
+    return (
+      <PreviewCall
+        funcName={fn.name}
+        initialCall={proposedCall}
+        onConfirm={doLaunch}
+        onCancel={() => setPreviewing(false)}
+        lang={lang}
+      />
+    )
+  }
+
+  // spawning: capture in progress
+  if (isMine && slot.kind === 'spawning') {
+    return (
+      <Spawning
+        funcName={fn.name}
+        callText={proposedCall}
+        citation={widget.citation}
+        breadcrumb={widget.breadcrumb}
+        onOpenCitation={onOpenCitation}
+        lang={lang}
+      />
+    )
+  }
+
+  // ended/evicted/error: single relaunchable card — retry goes back to preview
   if (isMine && slot.kind === 'ended') {
     return (
       <EndedCards
-        funcName={widget.function_ref.name}
+        funcName={fn.name}
         reason={slot.reason}
         message={slot.message}
-        onRetry={handleLaunch}
+        onRetry={() => setPreviewing(true)}
         onClose={close}
         citation={widget.citation}
         breadcrumb={widget.breadcrumb}
@@ -93,35 +129,14 @@ export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
     )
   }
 
-  // spawning: delegate to Spawning for animated progress state.
-  if (isMine && slot.kind === 'spawning') {
-    const callText = widget.call_text ?? widget.breadcrumb ?? widget.function_ref.name
-    return (
-      <Spawning
-        funcName={widget.function_ref.name}
-        callText={callText}
-        citation={widget.citation}
-        breadcrumb={widget.breadcrumb}
-        onOpenCitation={onOpenCitation}
-        lang={lang}
-      />
-    )
-  }
-
-  // idle: not mine (slot is empty or belongs to another widget).
-  // Delegate to IdleInvitation so the user can step through from here.
-  // Only pass onClose when the slot is empty — if another widget currently
-  // owns the slot (kind='spawning'/'live'/'trace') the × button would call
-  // close() and kill the active playground belonging to a different function.
-  const fileLine = widget.function_ref.line != null
-    ? `${widget.function_ref.file}:${widget.function_ref.line}`
-    : widget.function_ref.file
+  // idle invitation (default) — only pass onClose when slot is empty so × cannot
+  // kill a foreign playground belonging to a different function.
   const handleClose = slot.kind === 'empty' ? close : undefined
   return (
     <IdleInvitation
-      funcName={widget.function_ref.name}
+      funcName={fn.name}
       fileLine={fileLine}
-      onStepThrough={handleLaunch}
+      onStepThrough={() => setPreviewing(true)}
       onClose={handleClose}
       citation={widget.citation}
       breadcrumb={widget.breadcrumb}
