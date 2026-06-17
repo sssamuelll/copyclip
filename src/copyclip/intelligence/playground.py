@@ -532,6 +532,7 @@ def launch_playground(
     # Import here to avoid a forward-reference cycle; capture imports playground.
     from .capture import (
         CallDescriptor,
+        CaptureError,
         FreeTextCall,
         StepThroughResponse,
         FallbackResponse,
@@ -552,14 +553,16 @@ def launch_playground(
                 parent_class=resolved.parent_class)
 
     if req.source == "cuaderno":
-        detect, source_lines = probe_target(resolved, project_root=project_root)
         file_line = resolved.file + (f":{resolved.line_start}" if resolved.line_start else "")
         if req.call_text is not None:  # USER free-text path (spec §6/§10)
+            # Parse first (cheap — no subprocess). Probe only after parse succeeds
+            # so source_lines is not fetched for a path that cannot proceed.
             try:
                 ft = FreeTextCall.from_text(req.call_text)
             except PlaygroundError as exc:
                 trace.event("launch.error", stage="call_text", error=str(exc))
                 raise
+            detect, source_lines = probe_target(resolved, project_root=project_root)
             if detect["is_async"] or detect["is_generator"]:
                 reason = (
                     "async functions step through as one frame; using the input box instead"
@@ -568,20 +571,36 @@ def launch_playground(
                 )
                 trace.event("launch.capture", outcome="fallback", reason=reason)
                 return _cuaderno_fallback(req, project_root, resolved, runner, reason, trace)
-            steps, truncated = run_free_text_capture(ft, resolved, project_root=project_root)
+            try:
+                steps, truncated = run_free_text_capture(ft, resolved, project_root=project_root)
+            except CaptureError as exc:
+                trace.event("launch.error", stage="capture", error=str(exc))
+                raise
         else:  # MODEL structured-descriptor path
+            # Parse first (cheap — no subprocess).
             try:
                 cd = (CallDescriptor.from_dict(req.call) if req.call is not None
                       else CallDescriptor(function_ref=req.function_ref))
             except PlaygroundError as exc:
                 trace.event("launch.error", stage="descriptor", error=str(exc))
                 raise
+            # Cheap ctor eligibility short-circuit: method with no proposed ctor
+            # declines without any subprocess spawn. Defer probe until this passes.
+            if (resolved.kind == "method" or resolved.parent_class) and cd.ctor is None:
+                reason = "this method needs constructor arguments the example did not supply"
+                trace.event("launch.capture", outcome="fallback", reason=reason)
+                return _cuaderno_fallback(req, project_root, resolved, runner, reason, trace)
+            detect, source_lines = probe_target(resolved, project_root=project_root)
             reason = eligibility_reason(cd, resolved, is_async=detect["is_async"],
                                         is_generator=detect["is_generator"])
             if reason is not None:
                 trace.event("launch.capture", outcome="fallback", reason=reason)
                 return _cuaderno_fallback(req, project_root, resolved, runner, reason, trace)
-            steps, truncated = run_capture(cd, resolved, project_root=project_root)
+            try:
+                steps, truncated = run_capture(cd, resolved, project_root=project_root)
+            except CaptureError as exc:
+                trace.event("launch.error", stage="capture", error=str(exc))
+                raise
         trace.event("launch.capture", outcome="trace", steps=len(steps), truncated=truncated)
         return StepThroughResponse(
             trace=steps, source_lines=source_lines, func_name=resolved.name,
