@@ -273,3 +273,48 @@ def test_run_request_blank_fallback_constructs_playground_floor(tmp_path: Path):
     # The 'couldn't finish' fallback message must NOT survive alongside the artifact.
     leads = [b for b in frame["blocks"] if b.get("kind") == "paragraph"]
     assert leads == [], "fallback message must be dropped when the floor delivers the artifact"
+
+
+# ---------------------------------------------------------------------------
+# Task 9: floor emits real call descriptor + breadcrumb rename
+# ---------------------------------------------------------------------------
+
+from copyclip.intelligence.cuaderno.compositor import _construct_playground_floor
+
+
+def test_floor_breadcrumb_is_step_through_spanish(tmp_path: Path):
+    (tmp_path / "README.md").write_text("# analyzer\n", encoding="utf-8")
+    conn = sqlite3.connect(":memory:"); init_schema(conn)
+    pid = _seed_symbol_project(conn)
+    block, reason = _construct_playground_floor(
+        "ejecuta _module_from_relpath", conn, pid, ledger=None, emitted=[])
+    assert reason is None
+    w = block.to_dict()["widget"]
+    assert w["breadcrumb"] == "Recorre _module_from_relpath paso a paso"
+
+
+def test_floor_breadcrumb_is_step_through_english(tmp_path: Path):
+    (tmp_path / "README.md").write_text("# analyzer\n", encoding="utf-8")
+    conn = sqlite3.connect(":memory:"); init_schema(conn)
+    pid = _seed_symbol_project(conn)
+    block, reason = _construct_playground_floor(
+        "run _module_from_relpath", conn, pid, ledger=None, emitted=[])
+    assert reason is None
+    w = block.to_dict()["widget"]
+    assert w["breadcrumb"] == "Step through _module_from_relpath"
+
+
+def test_floor_emits_real_call_descriptor(tmp_path: Path):
+    # spec §6: the widget must carry a REAL call so the frontend renders the
+    # actual invocation, not a fake placeholder. The floor seeds a bare call
+    # (function_ref only) when it has no model-proposed args — the frontend's
+    # editable free-text field then shows `name(...)` from the real ref.
+    (tmp_path / "README.md").write_text("# analyzer\n", encoding="utf-8")
+    conn = sqlite3.connect(":memory:"); init_schema(conn)
+    pid = _seed_symbol_project(conn)
+    block, reason = _construct_playground_floor(
+        "run _module_from_relpath", conn, pid, ledger=None, emitted=[])
+    assert reason is None
+    w = block.to_dict()["widget"]
+    assert w["call"]["function_ref"]["name"] == "_module_from_relpath"
+    assert w["call"]["function_ref"]["file"] == "src/copyclip/intelligence/analyzer.py"

@@ -159,9 +159,12 @@ def _construct_playground_floor(question: str, conn: Optional[sqlite3.Connection
     if resolved.qualname and resolved.qualname != resolved.name:
         fr["qualname"] = resolved.qualname
     lang = detect_language(question)
-    breadcrumb = (f"Ejecuta {resolved.name} con un ejemplo"
-                  if lang == "es" else f"Run {resolved.name} with an example")
-    block = Block.widget(Widget.playground(function_ref=fr, breadcrumb=breadcrumb).to_dict())
+    _ES_RUN_TERMS = ("ejecut", "córre", "corre ", "prueba", "pruéba")
+    _is_es = lang == "es" or any(t in question.lower() for t in _ES_RUN_TERMS)
+    breadcrumb = (f"Recorre {resolved.name} paso a paso"
+                  if _is_es else f"Step through {resolved.name}")
+    call = {"function_ref": fr}
+    block = Block.widget(Widget.playground(function_ref=fr, breadcrumb=breadcrumb, call=call).to_dict())
     # Defensive: the floor must meet the same emit-time bar as a model widget.
     reason = validate_widget_payload(block.to_dict(), GraphEvidence())
     if reason is not None:
