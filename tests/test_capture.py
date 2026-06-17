@@ -494,3 +494,90 @@ def test_free_text_wall_clock_cap_fires(tmp_path, monkeypatch):
         assert raw["truncated"] is True
     finally:
         sys.modules.pop(mod_name, None)
+
+
+# ---------------------------------------------------------------------------
+# Task 5: Subprocess orchestration — run_capture, run_free_text_capture, probe_target
+# ---------------------------------------------------------------------------
+
+import textwrap
+from copyclip.intelligence.capture import run_capture, run_free_text_capture, probe_target
+
+
+def _write_user_module(tmp_path, body):
+    (tmp_path / "usermod.py").write_text(textwrap.dedent(body), encoding="utf-8")
+    return tmp_path
+
+
+def test_run_capture_traces_a_real_function(tmp_path):
+    root = _write_user_module(tmp_path, """
+        def addup(a):
+            b = a + 1
+            return b * 2
+    """)
+    resolved = ResolvedFunction(file="usermod.py", name="addup", qualname="addup",
+                                kind="function", module="usermod", line_start=1,
+                                parent_class=None)
+    cd = CallDescriptor.from_dict({"function_ref": {"file": "usermod.py", "name": "addup"},
+                                   "args": [3]})
+    steps, truncated = run_capture(cd, resolved, project_root=str(root))
+    assert truncated is False
+    assert steps[-1].event == "return"
+    names = {v.name for s in steps for v in s.scope}
+    assert {"a", "b"} <= names
+
+
+def test_run_free_text_capture_executes_user_expression(tmp_path):
+    root = _write_user_module(tmp_path, """
+        def addup(a):
+            b = a + 1
+            return b * 2
+    """)
+    resolved = ResolvedFunction(file="usermod.py", name="addup", qualname="addup",
+                                kind="function", module="usermod", line_start=1,
+                                parent_class=None)
+    ft = FreeTextCall.from_text("addup(3 + 4)")
+    steps, truncated = run_free_text_capture(ft, resolved, project_root=str(root))
+    assert steps[-1].event == "return"
+    names = {v.name for s in steps for v in s.scope}
+    assert {"a", "b"} <= names
+
+
+def test_probe_detects_async(tmp_path):
+    root = _write_user_module(tmp_path, """
+        async def fetch(x):
+            return x
+    """)
+    resolved = ResolvedFunction(file="usermod.py", name="fetch", qualname="fetch",
+                                kind="function", module="usermod", line_start=1,
+                                parent_class=None)
+    detect, source_lines = probe_target(resolved, project_root=str(root))
+    assert detect["is_async"] is True
+    assert any("async def fetch" in sl["text"] for sl in source_lines)
+
+
+def test_probe_detects_async_generator_as_async(tmp_path):
+    root = _write_user_module(tmp_path, """
+        async def stream(x):
+            yield x
+    """)
+    resolved = ResolvedFunction(file="usermod.py", name="stream", qualname="stream",
+                                kind="function", module="usermod", line_start=1,
+                                parent_class=None)
+    detect, _ = probe_target(resolved, project_root=str(root))
+    assert detect["is_async"] is True  # async-gen → async reason, not generator
+
+
+def test_run_capture_raise_is_terminal_step(tmp_path):
+    root = _write_user_module(tmp_path, """
+        def boom(k):
+            return {}[k]
+    """)
+    resolved = ResolvedFunction(file="usermod.py", name="boom", qualname="boom",
+                                kind="function", module="usermod", line_start=1,
+                                parent_class=None)
+    cd = CallDescriptor.from_dict({"function_ref": {"file": "usermod.py", "name": "boom"},
+                                   "args": ["x"]})
+    steps, truncated = run_capture(cd, resolved, project_root=str(root))
+    assert steps[-1].event == "raise"
+    assert steps[-1].raised["type"] == "KeyError"

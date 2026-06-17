@@ -323,3 +323,126 @@ def eligibility_reason(
         if cd.ctor is None:
             return "this method needs constructor arguments the example did not supply"
     return None
+
+
+# ---------------------------------------------------------------------------
+# Task 5: Subprocess orchestration — process-group kill + wall-clock backstop
+# ---------------------------------------------------------------------------
+
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+
+
+def _spec_for(cd: CallDescriptor, resolved: ResolvedFunction, *, probe: bool) -> dict:
+    spec: dict[str, Any] = {
+        "module": resolved.module,
+        "name": resolved.name,
+        "parent_class": resolved.parent_class,
+        "args": cd.args,
+        "kwargs": cd.kwargs,
+        "probe": probe,
+    }
+    if cd.ctor is not None:
+        spec["ctor"] = cd.ctor
+    return spec
+
+
+def _free_text_spec(ft: FreeTextCall, resolved: ResolvedFunction) -> dict:
+    return {
+        "module": resolved.module,
+        "name": resolved.name,
+        "parent_class": resolved.parent_class,
+        "call_text": ft.text,
+        "probe": False,
+    }
+
+
+def _run_driver(spec: dict, project_root: str) -> dict:
+    """Spawn the driver in the user's env. NEW PROCESS GROUP so a hung capture
+    (and any tree it spawned) dies cleanly: CREATE_NEW_PROCESS_GROUP on Windows /
+    start_new_session on POSIX (spec §10). The wall-clock guard lives in the
+    driver; this is the OUTER backstop in case import itself hangs."""
+    td = tempfile.mkdtemp(prefix="copyclip-capture-")
+    try:
+        spec_path = os.path.join(td, "spec.json")
+        with open(spec_path, "w", encoding="utf-8") as fh:
+            json.dump(spec, fh)
+        cmd = [sys.executable, "-m", "copyclip.intelligence._capture_driver", spec_path]
+        env = dict(os.environ)
+        env["PYTHONPATH"] = os.pathsep.join(
+            [os.path.abspath(project_root), env.get("PYTHONPATH", "")]
+        ).rstrip(os.pathsep)
+        popen_kwargs: dict[str, Any] = {}
+        if sys.platform == "win32":
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            popen_kwargs["start_new_session"] = True
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            cwd=os.path.abspath(project_root), env=env, text=True, **popen_kwargs,
+        )
+        try:
+            out, err = proc.communicate(timeout=WALL_CLOCK_BUDGET_S + 4.0)
+        except subprocess.TimeoutExpired:
+            _kill_group(proc)
+            out, err = proc.communicate()
+            raise CaptureError("capture exceeded the wall-clock budget and was killed")
+        if proc.returncode != 0 and not out.strip():
+            raise CaptureError(f"capture subprocess failed (rc={proc.returncode}): {err[-500:]}")
+        try:
+            payload = json.loads(out.strip().splitlines()[-1]) if out.strip() else {}
+        except json.JSONDecodeError as exc:
+            raise CaptureError(f"capture produced no parseable trace: {exc}; stderr={err[-300:]}")
+        if "error" in payload:
+            raise CaptureError(f"capture driver error: {payload['error'][-500:]}")
+        return payload
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
+
+
+def _kill_group(proc: subprocess.Popen) -> None:
+    """Reclaim the whole process group (spec §10). Uses signal.CTRL_BREAK_EVENT
+    on Windows (NOT the non-existent subprocess.signal.CTRL_BREAK_EVENT) and
+    os.killpg on POSIX, falling back to proc.kill()."""
+    try:
+        if sys.platform == "win32":
+            proc.send_signal(signal.CTRL_BREAK_EVENT)
+            proc.kill()
+        else:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except Exception:  # noqa: BLE001
+        try:
+            proc.kill()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def resolved_to_ref(resolved: ResolvedFunction) -> FunctionRef:
+    return FunctionRef(file=resolved.file, name=resolved.name, line=resolved.line_start,
+                       qualname=resolved.qualname if resolved.qualname != resolved.name else None)
+
+
+def probe_target(resolved: ResolvedFunction, *, project_root: str) -> tuple[dict, list[dict]]:
+    """Import-time probe — async/generator detection + source lines — without
+    running the user's logic. Returns (detect, source_lines)."""
+    payload = _run_driver(
+        _spec_for(CallDescriptor(function_ref=resolved_to_ref(resolved)), resolved, probe=True),
+        project_root)
+    return payload.get("detect", {"is_async": False, "is_generator": False}), \
+        payload.get("source_lines", [])
+
+
+def run_capture(cd: CallDescriptor, resolved: ResolvedFunction, *, project_root: str):
+    """MODEL path: run the descriptor call ONCE; return (Step[], truncated)."""
+    payload = _run_driver(_spec_for(cd, resolved, probe=False), project_root)
+    return normalize_trace(payload), bool(payload.get("truncated"))
+
+
+def run_free_text_capture(ft: FreeTextCall, resolved: ResolvedFunction, *, project_root: str):
+    """USER path: exec the edited free-text call ONCE; return (Step[], truncated)."""
+    payload = _run_driver(_free_text_spec(ft, resolved), project_root)
+    return normalize_trace(payload), bool(payload.get("truncated"))
