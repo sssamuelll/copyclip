@@ -1106,3 +1106,66 @@ def test_non_cuaderno_source_unchanged_marimo_iframe(tmp_path):
     assert isinstance(resp, PlaygroundLaunchResponse)
     assert resp.iframe_url == "http://127.0.0.1:5001/"
     assert runner.launch.call_args.kwargs.get("mode") == "edit"
+
+
+# ---------------------------------------------------------------------------
+# Task 8: Server endpoint returns trace/fallback for cuaderno, stable error
+# codes (invalid_call_descriptor → 400, capture_failed → 500)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def running_server_with_user_symbol():
+    """Like _start_server_with_runner (tests/test_playground.py:566) but seeds a
+    REAL importable usermod.addup so the capture subprocess can import it."""
+    td = tempfile.mkdtemp(prefix="copyclip-pg-test-")
+    root = str(Path(td).absolute())
+    (Path(root) / "usermod.py").write_text(
+        "def addup(a):\n    b = a + 1\n    return b * 2\n", encoding="utf-8")
+    conn = connect(root)
+    init_schema(conn)
+    conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root, "test"))
+    pid = int(conn.execute("SELECT id FROM projects WHERE root_path=?",
+                           (root,)).fetchone()[0])
+    conn.execute(
+        "INSERT INTO symbols(project_id,name,kind,file_path,line_start,line_end,"
+        "parent_symbol_id,module) VALUES(?,?,?,?,?,?,?,?)",
+        (pid, "addup", "function", "usermod.py", 1, 3, None, "usermod"))
+    conn.commit()
+    conn.close()
+
+    port = _free_port()
+    th = threading.Thread(
+        target=run_server,
+        kwargs={"project_root": root, "port": port, "playground_runner": Mock()},
+        daemon=True,
+    )
+    th.start()
+    _wait_port(port)
+    yield f"http://127.0.0.1:{port}", root
+
+
+def test_endpoint_cuaderno_returns_trace_kind(running_server_with_user_symbol):
+    base, _ = running_server_with_user_symbol
+    status, body = _post_json(base + "/api/playground/launch", {
+        "source": "cuaderno",
+        "function_ref": {"file": "usermod.py", "name": "addup"},
+        "call": {"function_ref": {"file": "usermod.py", "name": "addup"}, "args": [3]},
+    })
+    assert status == 200
+    assert body["kind"] == "trace"
+    assert body["func_name"] == "addup"
+    assert isinstance(body["trace"], list)
+    assert "iframe_url" not in body  # trace path mounts the React stepper, no iframe
+
+
+def test_endpoint_invalid_call_descriptor_is_400(running_server_with_user_symbol):
+    base, _ = running_server_with_user_symbol
+    status, body = _post_json(base + "/api/playground/launch", {
+        "source": "cuaderno",
+        "function_ref": {"file": "usermod.py", "name": "addup"},
+        "call": {"function_ref": {"file": "usermod.py", "name": "addup"},
+                 "kwargs": {"bad key": 1}},  # non-identifier kwarg key
+    })
+    assert status == 400
+    assert body["error"] == "invalid_call_descriptor"
