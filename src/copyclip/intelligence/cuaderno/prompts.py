@@ -94,9 +94,11 @@ WIDGET_RECOVERY_DIRECTIVE_VISUAL = (
 WIDGET_RECOVERY_DIRECTIVE_RUN = (
     "You asked for a RUNNABLE example, so do not answer in prose — emit a "
     "playground widget whose function_ref names the real symbol you located this "
-    "turn (its file and name), with a one-line breadcrumb and suggested_inputs "
-    "that exercise it. Only if no real, importable symbol resolves should you say "
-    "so briefly. Then call finish."
+    "turn (its file and name). Propose a COMPLETE call to step through: "
+    "\"args\" (positional) and \"kwargs\" (keyword) that exercise it, and "
+    "for a method, \"ctor\" {args?, kwargs?} to build the instance. Use simple "
+    "JSON-serializable literals only. Add a one-line breadcrumb. Only if no real, "
+    "importable symbol resolves should you say so briefly. Then call finish."
 )
 
 SYSTEM_PROMPT = """\
@@ -195,9 +197,11 @@ not part of the format.
    mix the two in one widget. Every node carries a citation ({kind:'path', path}); set
    truncated when the tool said so.
 - {"kind": "playground", "function_ref": {"file": "...", "name": "...", "line": <int>?, "qualname": "..."?},
-   "breadcrumb": "one-line description", "suggested_inputs": [...]?}
+   "breadcrumb": "one-line description",
+   "args": [...]?, "kwargs": {...}?, "ctor": {"args": [...]?, "kwargs": {...}?}?}
    a runnable example descriptor; function_ref must name a real symbol you located this turn;
-   never invent paths.
+   args/kwargs/ctor are the proposed call (JSON-serializable literals only — injected as repr,
+   never raw code); for a method, ctor builds the instance. never invent paths.
 
 ## Tone
 
