@@ -30,6 +30,7 @@ from typing import Any
 from .playground import (
     FunctionRef,
     PlaygroundError,
+    ResolvedFunction,
     _is_identifier,  # reuse the existing identifier check
 )
 
@@ -291,3 +292,34 @@ def normalize_trace(raw: dict[str, Any]) -> list[Step]:
             raised=ev.get("raised"),
         ))
     return steps
+
+
+# ---------------------------------------------------------------------------
+# Task 3: Eligibility gate
+# ---------------------------------------------------------------------------
+
+
+def eligibility_reason(
+    cd: CallDescriptor,
+    resolved: ResolvedFunction,
+    *,
+    is_async: bool,
+    is_generator: bool,
+) -> str | None:
+    """Return a human reason to DECLINE the step-through, or None if eligible.
+
+    A decline means: fall back to the existing reactive Marimo box (spec §7).
+    Async / generator targets are honestly un-representable on a linear
+    scrubber; a method with no proposed ctor cannot form a runnable call.
+
+    NOTE: an ASYNC GENERATOR reports is_async=True (Task 4 detect_kind), so it
+    declines with the 'async' reason — checked before the generator branch.
+    """
+    if is_async:
+        return "async functions step through as one frame; using the input box instead"
+    if is_generator:
+        return "generator functions step through as one frame; using the input box instead"
+    if resolved.kind == "method" or resolved.parent_class:
+        if cd.ctor is None:
+            return "this method needs constructor arguments the example did not supply"
+    return None

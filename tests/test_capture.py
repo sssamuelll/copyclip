@@ -178,3 +178,61 @@ def test_responses_to_dict():
     fb = FallbackResponse(reason="async function", iframe_url="http://127.0.0.1:5000/")
     assert fb.to_dict() == {"kind": "fallback", "reason": "async function",
                             "iframe_url": "http://127.0.0.1:5000/"}
+
+
+# ---------------------------------------------------------------------------
+# Task 3: Eligibility gate
+# ---------------------------------------------------------------------------
+
+from copyclip.intelligence.playground import ResolvedFunction
+from copyclip.intelligence.capture import eligibility_reason
+
+
+def _resolved(kind="function", parent=None, name="bar"):
+    return ResolvedFunction(file="src/copyclip/foo.py", name=name,
+                            qualname=(f"{parent}.{name}" if parent else name),
+                            kind=kind, module="copyclip.foo",
+                            line_start=10, parent_class=parent)
+
+
+def test_eligible_plain_function_with_no_args_required():
+    cd = CallDescriptor.from_dict({"function_ref": {"file": "src/copyclip/foo.py", "name": "bar"}})
+    assert eligibility_reason(cd, _resolved(), is_async=False, is_generator=False) is None
+
+
+def test_async_function_declines():
+    cd = CallDescriptor.from_dict({"function_ref": {"file": "src/copyclip/foo.py", "name": "bar"}})
+    reason = eligibility_reason(cd, _resolved(), is_async=True, is_generator=False)
+    assert reason and "async" in reason.lower()
+
+
+def test_async_generator_declines_with_async_reason():
+    # detect_kind reports is_async for an async generator (Task 4); the gate must
+    # surface the 'async' reason, not the 'generator' one (spec §7 decline copy).
+    cd = CallDescriptor.from_dict({"function_ref": {"file": "src/copyclip/foo.py", "name": "bar"}})
+    reason = eligibility_reason(cd, _resolved(), is_async=True, is_generator=False)
+    assert reason and "async" in reason.lower()
+
+
+def test_generator_function_declines():
+    cd = CallDescriptor.from_dict({"function_ref": {"file": "src/copyclip/foo.py", "name": "bar"}})
+    reason = eligibility_reason(cd, _resolved(), is_async=False, is_generator=True)
+    assert reason and "generator" in reason.lower()
+
+
+def test_method_without_ctor_declines():
+    cd = CallDescriptor.from_dict({
+        "function_ref": {"file": "src/copyclip/foo.py", "name": "m", "qualname": "Foo.m"},
+    })
+    reason = eligibility_reason(cd, _resolved(kind="method", parent="Foo", name="m"),
+                               is_async=False, is_generator=False)
+    assert reason and "constructor" in reason.lower()
+
+
+def test_method_with_ctor_is_eligible():
+    cd = CallDescriptor.from_dict({
+        "function_ref": {"file": "src/copyclip/foo.py", "name": "m", "qualname": "Foo.m"},
+        "ctor": {"args": [1]},
+    })
+    assert eligibility_reason(cd, _resolved(kind="method", parent="Foo", name="m"),
+                              is_async=False, is_generator=False) is None
