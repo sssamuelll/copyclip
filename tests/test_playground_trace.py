@@ -71,7 +71,15 @@ def _lines(trace):
 
 _FAKE_DETECT = {"is_async": False, "is_generator": False}
 _FAKE_SOURCE_LINES: list = []
+# Empty steps — used for tests that explicitly probe the empty-trace → fallback path.
 _FAKE_STEPS: list = []
+
+
+def _one_step():
+    """Return a one-element Step list so launch_playground returns StepThroughResponse
+    (not FallbackResponse — empty trace now returns fallback per Critical #2)."""
+    from copyclip.intelligence.capture import Step
+    return [Step(line=1, event="line", changed=[], scope=[])]
 
 
 def _stub_probe(monkeypatch):
@@ -83,18 +91,19 @@ def _stub_probe(monkeypatch):
 
 
 def _stub_run_capture(monkeypatch):
-    """Make run_capture return an empty Step[] list."""
+    """Make run_capture return a one-element Step[] list (non-empty so
+    launch_playground returns StepThroughResponse, not a FallbackResponse)."""
     monkeypatch.setattr(
         "copyclip.intelligence.capture.run_capture",
-        lambda *a, **kw: (_FAKE_STEPS, False),
+        lambda *a, **kw: (_one_step(), False),
     )
 
 
 def _stub_run_free_text_capture(monkeypatch):
-    """Make run_free_text_capture return an empty Step[] list."""
+    """Make run_free_text_capture return a one-element Step[] list."""
     monkeypatch.setattr(
         "copyclip.intelligence.capture.run_free_text_capture",
-        lambda *a, **kw: (_FAKE_STEPS, False),
+        lambda *a, **kw: (_one_step(), False),
     )
 
 
@@ -112,8 +121,8 @@ def test_launch_traces_resolve_notebook_spawn_ready(tmp_path, monkeypatch):
     resp = launch_playground(_req(), str(tmp_path), _conn_with_symbol(), 1,
                              FakeRunner(), trace=trace)
     trace.close(outcome="ready")
-    # The cuaderno path with empty steps returns a StepThroughResponse, not a
-    # PlaygroundLaunchResponse; the Marimo runner is NOT exercised here.
+    # The cuaderno path with a non-empty stub trace returns a StepThroughResponse,
+    # not a PlaygroundLaunchResponse; the Marimo runner is NOT exercised here.
     # These assertions verify the trace event sequence for the cuaderno path.
     lines = _lines(trace)
     names = [l["event"] for l in lines]
@@ -233,7 +242,7 @@ def test_launch_without_trace_still_works(tmp_path, monkeypatch):
     _stub_probe(monkeypatch)
     _stub_run_capture(monkeypatch)
     resp = launch_playground(_req(), str(tmp_path), _conn_with_symbol(), 1, FakeRunner())
-    # cuaderno path with stubs returns a StepThroughResponse (not PlaygroundLaunchResponse)
+    # cuaderno path with a non-empty stub returns StepThroughResponse (not PlaygroundLaunchResponse)
     from copyclip.intelligence.capture import StepThroughResponse
     assert isinstance(resp, StepThroughResponse)
 
@@ -401,7 +410,7 @@ def test_launch_playground_routes_call_args_into_call_descriptor(tmp_path, monke
         captured_descriptor["args"] = cd.args
         captured_descriptor["kwargs"] = cd.kwargs
         captured_descriptor["ctor"] = cd.ctor
-        return (_FAKE_STEPS, False)
+        return (_one_step(), False)
 
     _stub_probe(monkeypatch)
     monkeypatch.setattr(
@@ -441,7 +450,7 @@ def test_launch_playground_routes_ctor_into_call_descriptor(tmp_path, monkeypatc
     def _recording_run_capture(cd, resolved, **kw):
         captured_descriptor["args"] = cd.args
         captured_descriptor["ctor"] = cd.ctor
-        return (_FAKE_STEPS, False)
+        return (_one_step(), False)
 
     _stub_probe(monkeypatch)
     monkeypatch.setattr(
@@ -476,4 +485,131 @@ def test_launch_playground_routes_ctor_into_call_descriptor(tmp_path, monkeypatc
     assert captured_descriptor["args"] == ["input.txt"]
     assert captured_descriptor["ctor"] == {"args": [], "kwargs": {"mode": "strict"}}, (
         f"Expected ctor with mode='strict', got {captured_descriptor['ctor']!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# NEW: Critical #2 — empty captured trace returns FallbackResponse
+# ---------------------------------------------------------------------------
+
+def test_empty_trace_returns_fallback_response(tmp_path, monkeypatch):
+    """When run_capture returns an empty Step[] (the call never entered the
+    target function), launch_playground must return a FallbackResponse — NOT a
+    StepThroughResponse(trace=[]) — so the frontend shows an honest 'nothing ran'
+    message instead of mounting an empty stepper."""
+    _stub_probe(monkeypatch)
+    monkeypatch.setattr(
+        "copyclip.intelligence.capture.run_capture",
+        lambda *a, **kw: ([], False),   # empty trace
+    )
+    # Make _cuaderno_fallback → _launch_marimo work without a real notebook file.
+    monkeypatch.setattr(
+        "copyclip.intelligence.playground.generate_marimo_notebook",
+        lambda *a, **k: os.path.join(str(tmp_path), "pg", "playground.py"),
+    )
+    os.makedirs(os.path.join(str(tmp_path), "pg"), exist_ok=True)
+
+    from copyclip.intelligence.capture import FallbackResponse
+    resp = launch_playground(_req(), str(tmp_path), _conn_with_symbol(), 1, FakeRunner())
+    assert isinstance(resp, FallbackResponse), (
+        f"Empty trace must yield FallbackResponse, got {type(resp).__name__}"
+    )
+    assert "nothing" in resp.reason.lower() or "didn't run" in resp.reason.lower(), (
+        f"FallbackResponse.reason must explain why: got {resp.reason!r}"
+    )
+
+
+def test_empty_free_text_trace_returns_fallback_response(tmp_path, monkeypatch):
+    """Same guard applies to the free-text path."""
+    _stub_probe(monkeypatch)
+    monkeypatch.setattr(
+        "copyclip.intelligence.capture.run_free_text_capture",
+        lambda *a, **kw: ([], False),
+    )
+    monkeypatch.setattr(
+        "copyclip.intelligence.playground.generate_marimo_notebook",
+        lambda *a, **k: os.path.join(str(tmp_path), "pg2", "playground.py"),
+    )
+    os.makedirs(os.path.join(str(tmp_path), "pg2"), exist_ok=True)
+
+    from copyclip.intelligence.capture import FallbackResponse
+    resp = launch_playground(_req(call_text="foo(1)"), str(tmp_path),
+                             _conn_with_symbol(), 1, FakeRunner())
+    assert isinstance(resp, FallbackResponse), (
+        f"Empty free-text trace must yield FallbackResponse, got {type(resp).__name__}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# NEW: Critical #3/#5 — _cuaderno_fallback sets playground_id from inner.playground_id
+# ---------------------------------------------------------------------------
+
+def test_cuaderno_fallback_sets_playground_id_from_runner(tmp_path, monkeypatch):
+    """FallbackResponse.playground_id must come from the Marimo runner's returned
+    playground_id (inner.playground_id), not from idFromIframeUrl heuristics.
+    The FakeRunner returns 'pgid123' — the FallbackResponse must carry that."""
+    # Force the ctor short-circuit path (method with no ctor) → hits _cuaderno_fallback
+    monkeypatch.setattr(
+        "copyclip.intelligence.playground.generate_marimo_notebook",
+        lambda *a, **k: os.path.join(str(tmp_path), "fb", "playground.py"),
+    )
+    os.makedirs(os.path.join(str(tmp_path), "fb"), exist_ok=True)
+
+    conn = _conn_with_symbol(kind="method", name="meth")
+    req = _req(name="meth", qualname="MyClass.meth")
+
+    from copyclip.intelligence.capture import FallbackResponse
+    resp = launch_playground(req, str(tmp_path), conn, 1, FakeRunner())
+    assert isinstance(resp, FallbackResponse)
+    assert resp.playground_id == "pgid123", (
+        f"FallbackResponse.playground_id must be the runner's id; "
+        f"got {resp.playground_id!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# NEW: Low display — func_name uses qualname when parent_class is set
+# ---------------------------------------------------------------------------
+
+def test_func_name_uses_qualname_when_method(tmp_path, monkeypatch):
+    """StepThroughResponse.func_name must be resolved.qualname (e.g. 'MyClass.process')
+    when parent_class is set, so the stepper shows class context."""
+    captured_response = {}
+
+    _stub_probe(monkeypatch)
+
+    def _recording_run_capture(cd, resolved, **kw):
+        # Return a non-empty trace so we don't hit the empty-trace fallback
+        from copyclip.intelligence.capture import Step
+        steps = [Step(line=1, event="line", changed=[], scope=[])]
+        return steps, False
+
+    monkeypatch.setattr("copyclip.intelligence.capture.run_capture", _recording_run_capture)
+
+    conn = _conn_with_symbol(kind="method", name="process")
+    req = PlaygroundLaunchRequest.from_dict({
+        "source": "cuaderno",
+        "function_ref": {
+            "file": "src/copyclip/util.py",
+            "name": "process",
+            "qualname": "MyClass.process",
+        },
+        "breadcrumb": "Step through MyClass.process",
+        "call": {
+            "function_ref": {
+                "file": "src/copyclip/util.py",
+                "name": "process",
+                "qualname": "MyClass.process",
+            },
+            "args": [],
+            "kwargs": {},
+            "ctor": {"args": [], "kwargs": {}},
+        },
+    })
+
+    from copyclip.intelligence.capture import StepThroughResponse
+    resp = launch_playground(req, str(tmp_path), conn, 1, FakeRunner())
+    assert isinstance(resp, StepThroughResponse), f"Expected StepThroughResponse, got {type(resp).__name__}"
+    assert resp.func_name == "MyClass.process", (
+        f"func_name must be qualname when parent_class is set; got {resp.func_name!r}"
     )

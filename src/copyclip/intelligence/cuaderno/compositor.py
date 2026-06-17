@@ -12,6 +12,7 @@ from .prompts import (
     RESPONSIVENESS_RETRY_FALLBACK, INVALID_BLOCK_RECOVERY, WIDGET_RECOVERY_DIRECTIVE,
     WIDGET_RECOVERY_DIRECTIVE_VISUAL, WIDGET_RECOVERY_DIRECTIVE_RUN,
 )
+from .emit_fold import fold_playground_widget
 from .read_ledger import ReadLedger, is_content_bearing_read
 from .trace import NULL_TRACE
 from .quality import assess, cheap_verdict_dict, artifacts_cited
@@ -167,7 +168,11 @@ def _construct_playground_floor(question: str, conn: Optional[sqlite3.Connection
     breadcrumb = (f"Recorre {resolved.name} paso a paso"
                   if _is_es else f"Step through {resolved.name}")
     call = {"function_ref": fr}
-    block = Block.widget(Widget.playground(function_ref=fr, breadcrumb=breadcrumb, call=call).to_dict())
+    raw_widget_dict = Widget.playground(function_ref=fr, breadcrumb=breadcrumb, call=call).to_dict()
+    # Apply the emit-boundary fold so the floor widget also gets call_text
+    # (the function name with empty parens for a no-arg floor widget).
+    folded_block_dict = fold_playground_widget({"kind": "widget", "widget": raw_widget_dict})
+    block = Block.from_dict(folded_block_dict)
     # Defensive: the floor must meet the same emit-time bar as a model widget.
     reason = validate_widget_payload(block.to_dict(), GraphEvidence())
     if reason is not None:
@@ -420,6 +425,10 @@ def iter_compose_events(
                     blk = sev.get("block") or {}
                     if blk.get("type") == "tool_use" and blk.get("name") == "emit_block":
                         inp = blk.get("input") or {}
+                        # EMIT BOUNDARY (Critical #1): fold top-level args/kwargs/ctor on
+                        # playground widgets into nested `call` + pre-render `call_text`
+                        # BEFORE validation so widget_checks see the final wire shape.
+                        inp = fold_playground_widget(inp)
                         reason = validate_block_dict(inp)
                         if reason is None:
                             reason = validate_widget_payload(inp, evidence)

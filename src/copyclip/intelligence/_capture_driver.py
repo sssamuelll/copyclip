@@ -31,14 +31,60 @@ WALL_CLOCK_BUDGET_S = 8.0
 LARGE_CHILDREN_CAP = 20
 
 # Dangerous-to-repr types: file handles, sockets, DB sessions, lazy proxies
-# whose __repr__ may block, hit the network, or mutate. Matched by module-
-# qualified type-name substring so we never import optional deps to check.
-_OPAQUE_TYPE_MARKERS = (
-    "io.TextIOWrapper", "io.BufferedReader", "io.BufferedWriter", "io.BufferedRandom",
-    "socket.socket", "ssl.SSLSocket",
-    "sqlite3.Connection", "sqlite3.Cursor",
-    "Session", "Engine", "Connection",  # SQLAlchemy / requests-style
-    "subprocess.Popen", "threading.Thread", "Lock",
+# whose __repr__ may block, hit the network, or mutate.
+#
+# IMPORTANT: match on MODULE-ANCHORED FQN PREFIXES (e.g. "sqlite3.") — NOT
+# on loose type-name substrings — so a user class named ConnectionManager or
+# EngineConfig is never wrongly hidden (spec §5 cap 4 + Medium correctness fix).
+#
+# Each entry is matched as a PREFIX of the fully-qualified "module.TypeName"
+# string returned by _type_fqn().  Entries that must match any class in a
+# well-known module use the module prefix only (e.g. "sqlalchemy.orm.").
+_OPAQUE_FQN_PREFIXES: tuple[str, ...] = (
+    # stdlib: io — both the public 'io' alias and the C '_io' backing module
+    "io.TextIOWrapper",
+    "_io.TextIOWrapper",
+    "io.BufferedReader",
+    "_io.BufferedReader",
+    "io.BufferedWriter",
+    "_io.BufferedWriter",
+    "io.BufferedRandom",
+    "_io.BufferedRandom",
+    "io.FileIO",
+    "_io.FileIO",
+    "io.RawIOBase",
+    "_io.RawIOBase",
+    "io.BufferedIOBase",
+    "_io.BufferedIOBase",
+    "io.TextIOBase",
+    "_io.TextIOBase",
+    # stdlib: socket / ssl
+    "socket.socket",
+    "ssl.SSLSocket",
+    "ssl.SSLObject",
+    # stdlib: sqlite3
+    "sqlite3.Connection",
+    "sqlite3.Cursor",
+    # stdlib: subprocess / threading / _thread / multiprocessing
+    "subprocess.Popen",
+    "threading.Thread",
+    "threading.Lock",
+    "threading._RLock",
+    "_thread.lock",
+    "_thread.RLock",
+    "multiprocessing.process.BaseProcess",
+    # SQLAlchemy (any version — match the module prefix)
+    "sqlalchemy.",
+    # requests / httpx sessions
+    "requests.sessions.Session",
+    "httpx.",
+    # psycopg2 / pymysql connections
+    "psycopg2.",
+    "pymysql.",
+    # redis
+    "redis.",
+    # celery
+    "celery.",
 )
 
 _LARGE_BY_LEN = (list, tuple, set, frozenset, dict, bytes, bytearray)
@@ -51,9 +97,15 @@ def _type_fqn(obj: object) -> str:
 
 
 def _is_opaque_type(obj: object) -> bool:
+    """Return True iff the object should be rendered opaque (never repr'd).
+
+    Matches MODULE-ANCHORED FQN prefixes only — a user class whose name
+    contains 'Connection' but lives in __main__ or a project module will NOT
+    match any entry (their FQN starts with '__main__.' or 'myproject.', not
+    'sqlite3.' etc.).
+    """
     fqn = _type_fqn(obj)
-    name = type(obj).__name__
-    return any(m in fqn or m == name for m in _OPAQUE_TYPE_MARKERS)
+    return any(fqn == prefix or fqn.startswith(prefix) for prefix in _OPAQUE_FQN_PREFIXES)
 
 
 def _safe_repr(obj: object) -> str | None:

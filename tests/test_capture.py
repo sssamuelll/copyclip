@@ -177,9 +177,11 @@ def test_responses_to_dict():
         func_name="f", file_line="src/foo.py:1", truncated=False)
     assert st.to_dict()["kind"] == "trace"
     assert st.to_dict()["truncated"] is False
-    fb = FallbackResponse(reason="async function", iframe_url="http://127.0.0.1:5000/")
+    fb = FallbackResponse(reason="async function", iframe_url="http://127.0.0.1:5000/",
+                          playground_id="pgid-test")
     assert fb.to_dict() == {"kind": "fallback", "reason": "async function",
-                            "iframe_url": "http://127.0.0.1:5000/"}
+                            "iframe_url": "http://127.0.0.1:5000/",
+                            "playground_id": "pgid-test"}
 
 
 # ---------------------------------------------------------------------------
@@ -597,3 +599,213 @@ def test_run_capture_raise_is_terminal_step(tmp_path):
     steps, truncated = run_capture(cd, resolved, project_root=str(root))
     assert steps[-1].event == "raise"
     assert steps[-1].raised["type"] == "KeyError"
+
+
+# ---------------------------------------------------------------------------
+# NEW: Critical #3/#5 — FallbackResponse must carry playground_id
+# ---------------------------------------------------------------------------
+
+def test_fallback_response_to_dict_includes_playground_id():
+    """FallbackResponse must serialize playground_id so the frontend can use it
+    for the live-state id, /status poll, and reap — NOT idFromIframeUrl."""
+    fb = FallbackResponse(reason="async function", iframe_url="http://127.0.0.1:5000/",
+                          playground_id="pgid-abc")
+    d = fb.to_dict()
+    assert d == {"kind": "fallback", "reason": "async function",
+                 "iframe_url": "http://127.0.0.1:5000/", "playground_id": "pgid-abc"}
+
+
+def test_fallback_response_playground_id_required():
+    """playground_id is a required field; omitting it must fail."""
+    import inspect as _i
+    params = _i.signature(FallbackResponse.__init__).parameters
+    # dataclass: check that playground_id has no default (is required)
+    assert "playground_id" in params
+
+
+# ---------------------------------------------------------------------------
+# NEW: Critical #2 — empty trace → FallbackResponse (not StepThroughResponse)
+# This is tested at the _build_invocation level via capture module seam.
+# The launch_playground integration test lives in test_playground_trace.py.
+# ---------------------------------------------------------------------------
+
+def test_fallback_response_shape_roundtrip():
+    """FallbackResponse.to_dict() produces the exact shape the frontend consumes."""
+    fb = FallbackResponse(reason="that call didn't run the function — nothing to step through",
+                          iframe_url="http://127.0.0.1:5000/",
+                          playground_id="pg-xyz")
+    d = fb.to_dict()
+    assert d["kind"] == "fallback"
+    assert d["reason"] == "that call didn't run the function — nothing to step through"
+    assert d["iframe_url"] == "http://127.0.0.1:5000/"
+    assert d["playground_id"] == "pg-xyz"
+
+
+# ---------------------------------------------------------------------------
+# NEW: Medium correctness — opaque skip-list tightening
+# _is_opaque_type must use module-anchored FQN so a user class named
+# ConnectionManager is NOT hidden while a real sqlite3.Connection IS.
+# ---------------------------------------------------------------------------
+
+def test_opaque_skips_real_sqlite3_connection():
+    """A real sqlite3.Connection must be rendered opaque (dangerous to repr)."""
+    import sqlite3 as _sq3
+    conn = _sq3.connect(":memory:")
+    try:
+        v = driver.var_for("conn", conn)
+        assert v["kind"] == "opaque", (
+            f"sqlite3.Connection should be opaque, got kind={v['kind']!r}"
+        )
+    finally:
+        conn.close()
+
+
+def test_opaque_does_not_hide_user_class_with_connection_substring():
+    """A user-defined class whose name contains 'Connection' must NOT be skipped.
+    The skip-list must match module-anchored FQN prefixes, not loose substrings."""
+    class ConnectionManager:  # user class — NOT sqlite3/sqlalchemy
+        def __repr__(self):
+            return "ConnectionManager(host='localhost')"
+
+    v = driver.var_for("mgr", ConnectionManager())
+    assert v["kind"] != "opaque", (
+        f"A user class named ConnectionManager must NOT be rendered opaque; "
+        f"got kind={v['kind']!r}. The opaque skip-list must match module-anchored "
+        f"FQN prefixes (e.g. 'sqlite3.'), not loose substrings."
+    )
+    # Also verify that a class named 'Engine' in __main__ is not skipped
+    class Engine:
+        def __repr__(self):
+            return "Engine(threads=4)"
+
+    ve = driver.var_for("eng", Engine())
+    assert ve["kind"] != "opaque", (
+        f"A user class named Engine must NOT be rendered opaque; "
+        f"got kind={ve['kind']!r}"
+    )
+
+
+def test_opaque_does_not_hide_user_class_named_session():
+    """A user class named Session (not sqlalchemy.orm.Session) must not be opaque."""
+    class Session:  # user class
+        def __repr__(self):
+            return "Session(user='alice')"
+
+    v = driver.var_for("s", Session())
+    assert v["kind"] != "opaque", (
+        f"User class 'Session' should NOT be opaque (no module prefix match); "
+        f"got kind={v['kind']!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# NEW: Critical #1 — emit boundary SEAM: model top-level args/kwargs/ctor
+# folded into widget.data.call + call_text computed from _build_invocation logic
+# ---------------------------------------------------------------------------
+
+from copyclip.intelligence.cuaderno.emit_fold import fold_playground_widget
+
+
+def test_emit_fold_plain_function_produces_call_and_call_text():
+    """A plain-function emit_block dict with top-level args/kwargs must produce
+    widget.data.call and widget.data.call_text."""
+    emit_block = {
+        "kind": "widget",
+        "widget": {
+            "kind": "playground",
+            "function_ref": {"file": "src/foo.py", "name": "addup"},
+            "breadcrumb": "Step through addup",
+            "args": [1, 2],
+            "kwargs": {"verbose": True},
+        },
+    }
+    result = fold_playground_widget(emit_block)
+    w = result["widget"]
+    assert "call" in w, "folded widget must have a 'call' key"
+    assert w["call"]["function_ref"] == {"file": "src/foo.py", "name": "addup"}
+    assert w["call"]["args"] == [1, 2]
+    assert w["call"]["kwargs"] == {"verbose": True}
+    assert "call_text" in w, "folded widget must have a 'call_text' key"
+    # call_text must be a real invocation, not a placeholder
+    assert w["call_text"] == "addup(1, 2, verbose=True)", (
+        f"Expected 'addup(1, 2, verbose=True)', got {w['call_text']!r}"
+    )
+    # Top-level args/kwargs must be removed from widget root (they live in call now)
+    assert "args" not in w
+    assert "kwargs" not in w
+
+
+def test_emit_fold_method_with_ctor_produces_call_and_call_text():
+    """A method emit_block with ctor must produce call_text of the form
+    'Foo(ctor_args).method(args)' with repr-literal args."""
+    emit_block = {
+        "kind": "widget",
+        "widget": {
+            "kind": "playground",
+            "function_ref": {
+                "file": "src/foo.py",
+                "name": "process",
+                "qualname": "MyClass.process",
+            },
+            "breadcrumb": "Step through MyClass.process",
+            "args": ["input.txt"],
+            "kwargs": {},
+            "ctor": {"args": [42], "kwargs": {"mode": "strict"}},
+        },
+    }
+    result = fold_playground_widget(emit_block)
+    w = result["widget"]
+    assert w["call"]["ctor"] == {"args": [42], "kwargs": {"mode": "strict"}}
+    # strings must be repr()'d — 'input.txt' → "'input.txt'"
+    assert w["call_text"] == "MyClass(42, mode='strict').process('input.txt')", (
+        f"Got {w['call_text']!r}"
+    )
+
+
+def test_emit_fold_string_arg_is_repr_quoted():
+    """String args must appear quoted in call_text (repr-literal form, spec §4)."""
+    emit_block = {
+        "kind": "widget",
+        "widget": {
+            "kind": "playground",
+            "function_ref": {"file": "src/foo.py", "name": "greet"},
+            "breadcrumb": "Step through greet",
+            "args": ["hello world"],
+            "kwargs": {},
+        },
+    }
+    result = fold_playground_widget(emit_block)
+    w = result["widget"]
+    assert w["call_text"] == "greet('hello world')", (
+        f"String arg must be repr-quoted; got {w['call_text']!r}"
+    )
+
+
+def test_emit_fold_no_args_no_call_text_placeholder():
+    """When no args/kwargs/ctor are present, call_text is 'name()' (not a placeholder)."""
+    emit_block = {
+        "kind": "widget",
+        "widget": {
+            "kind": "playground",
+            "function_ref": {"file": "src/foo.py", "name": "run"},
+            "breadcrumb": "Step through run",
+        },
+    }
+    result = fold_playground_widget(emit_block)
+    w = result["widget"]
+    assert w["call_text"] == "run()"
+    assert w["call"]["args"] == []
+    assert w["call"]["kwargs"] == {}
+    assert w["call"].get("ctor") is None
+
+
+def test_emit_fold_non_playground_widget_passthrough():
+    """A non-playground widget block must pass through unmodified."""
+    block = {"kind": "widget", "widget": {"kind": "graph_subset", "nodes": [], "edges": []}}
+    assert fold_playground_widget(block) is block
+
+
+def test_emit_fold_non_widget_block_passthrough():
+    """A non-widget block must pass through unmodified."""
+    block = {"kind": "paragraph", "text": "hello"}
+    assert fold_playground_widget(block) is block

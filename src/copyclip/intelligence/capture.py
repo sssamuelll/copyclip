@@ -222,9 +222,11 @@ class StepThroughResponse:
 class FallbackResponse:
     reason: str
     iframe_url: str
+    playground_id: str = ""  # set from inner.playground_id in _cuaderno_fallback (spec §8)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"kind": "fallback", "reason": self.reason, "iframe_url": self.iframe_url}
+        return {"kind": "fallback", "reason": self.reason,
+                "iframe_url": self.iframe_url, "playground_id": self.playground_id}
 
 
 def _var_from_raw(raw: dict[str, Any]) -> Var:
@@ -389,7 +391,13 @@ def _run_driver(spec: dict, project_root: str) -> dict:
             out, err = proc.communicate(timeout=WALL_CLOCK_BUDGET_S + 4.0)
         except subprocess.TimeoutExpired:
             _kill_group(proc)
-            out, err = proc.communicate()
+            # Medium robustness: bound the post-kill drain so a pipe-holding
+            # grandchild (e.g. a spawned subprocess the user's code started)
+            # cannot hang the HTTP worker forever (spec §10 process-group kill).
+            try:
+                out, err = proc.communicate(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                out, err = "", ""
             raise CaptureError("capture exceeded the wall-clock budget and was killed")
         if proc.returncode != 0 and not out.strip():
             raise CaptureError(f"capture subprocess failed (rc={proc.returncode}): {err[-500:]}")

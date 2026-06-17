@@ -601,9 +601,19 @@ def launch_playground(
             except CaptureError as exc:
                 trace.event("launch.error", stage="capture", error=str(exc))
                 raise
+        # Critical #2: an empty trace means the call never entered the target
+        # function — return a FallbackResponse so the frontend shows an honest
+        # "nothing ran" note instead of mounting an empty stepper (spec §8).
+        if not steps:
+            reason = "that call didn't run the function — nothing to step through"
+            trace.event("launch.capture", outcome="fallback", reason=reason)
+            return _cuaderno_fallback(req, project_root, resolved, runner, reason, trace)
         trace.event("launch.capture", outcome="trace", steps=len(steps), truncated=truncated)
+        # Low display #6: for a method, use qualname (e.g. "MyClass.process") so
+        # the stepper header shows class context; fall back to name otherwise.
+        func_name = (resolved.qualname if resolved.parent_class else resolved.name)
         return StepThroughResponse(
-            trace=steps, source_lines=source_lines, func_name=resolved.name,
+            trace=steps, source_lines=source_lines, func_name=func_name,
             file_line=file_line, truncated=truncated)
 
     # Non-cuaderno sources: the Marimo iframe path is UNCHANGED.
@@ -650,10 +660,15 @@ def _cuaderno_fallback(
     reason: str,
     trace: object,
 ) -> "FallbackResponse":
-    """Decline the step-through, fall back to the Marimo reactive box."""
+    """Decline the step-through, fall back to the Marimo reactive box.
+
+    Sets playground_id from inner.playground_id (spec §8) so the frontend can
+    use it for the live-state id, /status poll, and reap — NOT idFromIframeUrl.
+    """
     from .capture import FallbackResponse
     inner = _launch_marimo(req, project_root, resolved, runner, trace)
-    return FallbackResponse(reason=reason, iframe_url=inner.iframe_url)
+    return FallbackResponse(reason=reason, iframe_url=inner.iframe_url,
+                            playground_id=inner.playground_id)
 
 
 # ---------------------------------------------------------------------------
