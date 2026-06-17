@@ -229,4 +229,22 @@ describe('Stepper', () => {
     expect(screen.getByRole('button', { name: /next change/i })).toBeInTheDocument()
     expect(screen.getByText(/library calls appear as one step/i)).toBeInTheDocument()
   })
+
+  // Critical #2: empty trace guard — must NOT crash or index trace[-1]
+  it('renders an empty-trace message (not a step counter) when trace:[] is passed directly', () => {
+    const emptyResp: StepThroughResponse = { ...resp, trace: [] }
+    render(<Stepper response={emptyResp} onClose={() => {}} />)
+    // Must NOT show a step counter (would require trace[0])
+    expect(screen.queryByText(/step \d+ \/ \d+/)).toBeNull()
+    // Must render the fallback message
+    expect(screen.getByText(/no steps captured/i)).toBeInTheDocument()
+  })
+
+  it('fires onClose from the × button on the empty-trace fallback', async () => {
+    const onClose = vi.fn()
+    const emptyResp: StepThroughResponse = { ...resp, trace: [] }
+    render(<Stepper response={emptyResp} onClose={onClose} />)
+    await userEvent.click(screen.getByRole('button', { name: '×' }))
+    expect(onClose).toHaveBeenCalled()
+  })
 })

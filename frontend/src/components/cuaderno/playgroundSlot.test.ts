@@ -12,7 +12,7 @@ vi.mock('../../api/client', () => ({
   },
 }))
 
-import { launch, getState, close, idFromIframeUrl } from './playgroundSlot'
+import { launch, getState, close, idFromIframeUrl, _resetForTests } from './playgroundSlot'
 import { api } from '../../api/client'
 
 const launchPlayground = vi.mocked(api.launchPlayground)
@@ -26,14 +26,15 @@ const TRACE: StepThroughResponse = {
   file_line: 'a.py:255',
   truncated: false,
 }
-const FALLBACK: FallbackResponse = { kind: 'fallback', reason: 'generator', iframe_url: '/playground/pg-42' }
+const FALLBACK: FallbackResponse = { kind: 'fallback', reason: 'generator', iframe_url: '/playground/pg-42', playground_id: 'pg-42' }
+const FALLBACK_WITH_REASON: FallbackResponse = { kind: 'fallback', reason: 'async function — nothing to step through', iframe_url: 'http://127.0.0.1:5000/', playground_id: 'pg-abc123' }
 const req = { source: 'cuaderno' as const, function_ref: { file: 'a.py', name: 'f' }, breadcrumb: 'Step through f' }
 
 beforeEach(() => {
   launchPlayground.mockReset()
   closePlayground.mockClear()
   vi.mocked(api.playgroundStatus).mockReset()
-  close()
+  _resetForTests()
 })
 afterEach(() => { vi.useRealTimers() })
 
@@ -65,8 +66,72 @@ describe('playgroundSlot', () => {
     expect(s.kind).toBe('live')
     if (s.kind === 'live') {
       expect(s.iframeUrl).toBe('/playground/pg-42')
-      expect(s.playgroundId).toBe('pg-42')   // recovered via idFromIframeUrl
+      // playground_id taken directly from res.playground_id (not re-derived from iframe_url)
+      expect(s.playgroundId).toBe('pg-42')
     }
+  })
+
+  it('uses res.playground_id directly (not idFromIframeUrl) for a "http://127.0.0.1:PORT/" fallback url', async () => {
+    // The new contract: FallbackResponse carries playground_id; the frontend uses it directly.
+    // idFromIframeUrl on 'http://127.0.0.1:5000/' would return '5000' (wrong!); playground_id='pg-abc123' is correct.
+    launchPlayground.mockResolvedValue(FALLBACK_WITH_REASON)
+    await launch('a.py:f:', req)
+    const s = getState()
+    expect(s.kind).toBe('live')
+    if (s.kind === 'live') {
+      expect(s.playgroundId).toBe('pg-abc123')   // direct from playground_id, NOT from idFromIframeUrl
+      expect(s.fallbackReason).toBe('async function — nothing to step through')
+    }
+  })
+
+  it('propagates res.reason as fallbackReason on the live slot', async () => {
+    launchPlayground.mockResolvedValue(FALLBACK)
+    await launch('a.py:f:', req)
+    const s = getState()
+    expect(s.kind).toBe('live')
+    if (s.kind === 'live') {
+      expect(s.fallbackReason).toBe('generator')
+    }
+  })
+
+  it('treats kind:"trace" with empty trace as nothing_ran (not an empty Stepper)', async () => {
+    const emptyTrace = { ...TRACE, trace: [] }
+    launchPlayground.mockResolvedValue(emptyTrace)
+    await launch('a.py:f:', req)
+    const s = getState()
+    expect(s.kind).toBe('nothing_ran')
+    if (s.kind === 'nothing_ran') {
+      expect(s.widgetKey).toBe('a.py:f:')
+      expect(s.message).toMatch(/didn't run/)
+    }
+  })
+
+  it('close() while in nothing_ran state transitions to ended', async () => {
+    const emptyTrace = { ...TRACE, trace: [] }
+    launchPlayground.mockResolvedValue(emptyTrace)
+    await launch('a.py:f:', req)
+    expect(getState().kind).toBe('nothing_ran')
+    close()
+    await Promise.resolve()
+    expect(getState().kind).toBe('ended')
+    const s = getState()
+    if (s.kind === 'ended') {
+      expect(s.reason).toBe('closed')
+    }
+  })
+
+  it('a stale fallback closes orphaned playground via playground_id (not idFromIframeUrl)', async () => {
+    let resolveFirst!: (v: FallbackResponse) => void
+    launchPlayground.mockReturnValueOnce(new Promise((r) => { resolveFirst = r }))
+    launchPlayground.mockResolvedValueOnce(TRACE)
+    const p1 = launch('a.py:f:', req)
+    await Promise.resolve()
+    const p2 = launch('a.py:f:', req)
+    await p2
+    resolveFirst(FALLBACK_WITH_REASON)   // late fallback with explicit playground_id
+    await p1
+    // Must close 'pg-abc123', NOT '5000' (what idFromIframeUrl would return for the port-only url)
+    expect(closePlayground).toHaveBeenCalledWith('pg-abc123')
   })
 
   it('a stale launch (superseded token) discards a late trace response', async () => {

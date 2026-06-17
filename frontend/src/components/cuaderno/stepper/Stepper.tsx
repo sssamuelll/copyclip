@@ -18,6 +18,19 @@ export function Stepper({ response, onClose, lang }: Props) {
   const [step, setStep] = useState(1)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
 
+  // Belt-and-suspenders: empty trace should never reach Stepper (the slot converts
+  // it to 'nothing_ran'), but guard here too so we never index trace[cur-1] on [].
+  if (total === 0) {
+    return (
+      <div className="widget stepper-widget">
+        <div style={{ padding: '16px', color: 'var(--ink-3)', fontFamily: 'var(--font-ui)', fontSize: '13px' }}>
+          {func_name}: no steps captured — the call did not enter this function.
+          <button onClick={onClose} aria-label="×" style={{ marginLeft: '12px', border: 'none', background: 'none', cursor: 'pointer', color: 'var(--ink-4)' }}>×</button>
+        </div>
+      </div>
+    )
+  }
+
   // Synchronous derived-state reset: compare the current response identity to the
   // previous one via a ref.  When they differ we reset step/expanded during this
   // render (before any JSX is evaluated), so there is never a frame where stale

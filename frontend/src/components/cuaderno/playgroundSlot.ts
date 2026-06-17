@@ -4,9 +4,10 @@ import type { PlaygroundLaunchRequest, StepThroughResponse } from '../../types/a
 export type SlotState =
   | { kind: 'empty' }
   | { kind: 'spawning'; widgetKey: string; token: number }
-  | { kind: 'live'; widgetKey: string; playgroundId: string; iframeUrl: string; token: number }
+  | { kind: 'live'; widgetKey: string; playgroundId: string; iframeUrl: string; fallbackReason?: string; token: number }
   | { kind: 'trace'; widgetKey: string; response: StepThroughResponse; token: number }
   | { kind: 'ended'; widgetKey: string; reason: 'closed' | 'evicted' | 'exited' | 'error'; message?: string }
+  | { kind: 'nothing_ran'; widgetKey: string; message: string; token: number }
 
 let state: SlotState = { kind: 'empty' }
 let token = 0
@@ -54,6 +55,8 @@ async function killCurrent(reason: 'closed' | 'evicted'): Promise<void> {
     // capture-only: no subprocess to close, but the slot must transition to
     // ended so subscribers (e.g. PlaygroundWidget) reflect the new state.
     set({ kind: 'ended', widgetKey: state.widgetKey, reason })
+  } else if (state.kind === 'nothing_ran') {
+    set({ kind: 'ended', widgetKey: state.widgetKey, reason })
   }
 }
 
@@ -67,15 +70,31 @@ export async function launch(widgetKey: string, req: PlaygroundLaunchRequest): P
     if (token !== myToken) {
       // late result for a superseded launch: a fallback spawned a real
       // playground we must reap; a trace has no subprocess.
-      if (res.kind === 'fallback') api.closePlayground(idFromIframeUrl(res.iframe_url)).catch(() => {})
+      if (res.kind === 'fallback') {
+        const id = res.playground_id ?? idFromIframeUrl(res.iframe_url)
+        api.closePlayground(id).catch(() => {})
+      }
       return
     }
     if (res.kind === 'trace') {
+      if (res.trace.length === 0) {
+        // Empty trace: the user's call didn't enter the target function.
+        // Treat as 'nothing ran' rather than mounting an empty Stepper.
+        set({ kind: 'nothing_ran', widgetKey, message: "that call didn't run the function", token: myToken })
+        return
+      }
       // capture-only: no subprocess to poll, the trace is immutable per launch
       set({ kind: 'trace', widgetKey, response: res, token: myToken })
+    } else if (res.kind === 'fallback') {
+      // Use playground_id directly; fall back to idFromIframeUrl only if absent (older server)
+      const playgroundId = res.playground_id ?? idFromIframeUrl(res.iframe_url)
+      set({ kind: 'live', widgetKey, playgroundId, iframeUrl: res.iframe_url, fallbackReason: res.reason, token: myToken })
+      startPoll(playgroundId, widgetKey, myToken)
     } else {
-      const playgroundId = idFromIframeUrl(res.iframe_url)
-      set({ kind: 'live', widgetKey, playgroundId, iframeUrl: res.iframe_url, token: myToken })
+      // Non-cuaderno PlaygroundLaunchResponse (no kind field): treat as live iframe
+      const { playground_id, iframe_url } = res as unknown as { playground_id: string; iframe_url: string }
+      const playgroundId = playground_id ?? idFromIframeUrl(iframe_url)
+      set({ kind: 'live', widgetKey, playgroundId, iframeUrl: iframe_url, token: myToken })
       startPoll(playgroundId, widgetKey, myToken)
     }
   } catch (e) {

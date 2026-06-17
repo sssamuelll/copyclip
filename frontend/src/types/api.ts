@@ -687,7 +687,8 @@ export type StepThroughResponse = {
 export type FallbackResponse = {
   kind: 'fallback'
   reason: string
-  iframe_url: string                  // spec §8: no playground_id; id recovered from this
+  iframe_url: string
+  playground_id: string               // authoritative id — use directly, do NOT re-derive from iframe_url
 }
 
 export type PlaygroundLaunchResult = StepThroughResponse | FallbackResponse

@@ -7,6 +7,7 @@ import { PreviewCall } from '../stepper/PreviewCall'
 import { Spawning } from '../stepper/Spawning'
 import { Stepper } from '../stepper/Stepper'
 import { EndedCards } from '../stepper/EndedCards'
+import { t } from '../strings'
 
 type Props = {
   widget: PlaygroundWidgetData
@@ -16,9 +17,10 @@ type Props = {
 
 // Build a faithful invocation string from the model's structured descriptor.
 // Prefer the pre-rendered call_text; this is the fallback when only `call` is present.
+// String args are repr-quoted (single quotes); other values use JSON.stringify.
 function callTextOf(name: string, call?: CallDescriptor): string {
   if (!call) return `${name}()`
-  const lit = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v))
+  const lit = (v: unknown) => (typeof v === 'string' ? `'${v}'` : JSON.stringify(v))
   const pos = (call.args ?? []).map(lit)
   const kw = Object.entries(call.kwargs ?? {}).map(([k, v]) => `${k}=${lit(v)}`)
   return `${name}(${[...pos, ...kw].join(', ')})`
@@ -30,7 +32,7 @@ export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
 
   const fn = widget.function_ref
   const myKey = `${fn.file}:${fn.name}:${fn.line ?? ''}`
-  const isMine = slot.kind !== 'empty' && slot.widgetKey === myKey
+  const isMine = slot.kind !== 'empty' && 'widgetKey' in slot && slot.widgetKey === myKey
   const fileLine = fn.line != null ? `${fn.file}:${fn.line}` : fn.file
   // The REAL model-proposed invocation (D2): the pre-rendered text if the floor
   // emitted it, else built from the structured descriptor. Never a fake "name(…)".
@@ -60,9 +62,22 @@ export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
     })
   }
 
-  // trace: the React stepper
+  // trace: the React stepper (guarded: empty trace should never reach here since
+  // the slot converts trace.length===0 to nothing_ran, but belt-and-suspenders)
   if (isMine && slot.kind === 'trace') {
     return <Stepper response={slot.response} onClose={close} lang={lang} />
+  }
+
+  // nothing_ran: the call didn't enter the target function — show a dismissible note
+  if (isMine && slot.kind === 'nothing_ran') {
+    return (
+      <div className="widget stepper-widget">
+        <div className="playground-nothing-ran">
+          <span>{slot.message}</span>
+          <button onClick={close} aria-label="×">×</button>
+        </div>
+      </div>
+    )
   }
 
   // live: fallback Marimo iframe box (unchanged path) + surviving context band
@@ -81,6 +96,9 @@ export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
             {widget.breadcrumb ? (<span className="playground-breadcrumb">{widget.breadcrumb}</span>) : null}
             {widget.citation ? (<CitationChip citation={widget.citation} onClick={onOpenCitation} />) : null}
           </div>
+        ) : null}
+        {slot.fallbackReason ? (
+          <div className="playground-fallback-note">{t('playground_fallback_note', lang, { reason: slot.fallbackReason })}</div>
         ) : null}
         <div className="playground-live">
           <iframe

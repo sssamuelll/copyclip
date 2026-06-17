@@ -56,7 +56,8 @@ const truncatedTrace: StepThroughResponse = {
   truncated: true,
 }
 
-const fallback: FallbackResponse = { kind: 'fallback', reason: 'generator', iframe_url: '/playground/abc' }
+const fallback: FallbackResponse = { kind: 'fallback', reason: 'generator', iframe_url: '/playground/abc', playground_id: 'abc' }
+const fallbackWithReason: FallbackResponse = { kind: 'fallback', reason: 'async function — nothing to step through', iframe_url: 'http://127.0.0.1:5000/', playground_id: 'pg-abc123' }
 
 beforeEach(() => { launchPlayground.mockReset(); closePlayground.mockClear(); _resetForTests() })
 
@@ -185,5 +186,56 @@ describe('PlaygroundWidget — integration (real slot store)', () => {
     const iframe = container.querySelector('iframe')
     expect(iframe).toBeTruthy()
     expect(iframe!.getAttribute('src')).toBe('/playground/abc')
+  })
+
+  // ---- Fallback reason note (Critical #3 + High #5) ----
+
+  it('renders playground_fallback_note (en) above the iframe when kind:fallback has a reason', async () => {
+    launchPlayground.mockResolvedValue(fallbackWithReason)
+    render(<PlaygroundWidget widget={widget} onOpenCitation={() => {}} lang="en" />)
+    await userEvent.click(screen.getByRole('button', { name: /step through/i }))
+    await act(async () => { await userEvent.click(screen.getByRole('button', { name: /^step through$/i })) })
+    // The fallback note is the localized string with {reason} interpolated
+    expect(await screen.findByText(/async function — nothing to step through/)).toBeInTheDocument()
+    // Full note text
+    expect(screen.getByText("This function can't be stepped through yet — async function — nothing to step through. Here's its input and output.")).toBeInTheDocument()
+  })
+
+  it('renders playground_fallback_note (es) with the reason interpolated', async () => {
+    launchPlayground.mockResolvedValue(fallbackWithReason)
+    render(<PlaygroundWidget widget={widget} onOpenCitation={() => {}} lang="es" />)
+    await userEvent.click(screen.getByRole('button', { name: /recorrer/i }))
+    await act(async () => { await userEvent.click(screen.getByRole('button', { name: /^recorrer$/i })) })
+    expect(await screen.findByText(/async function — nothing to step through/)).toBeInTheDocument()
+    expect(screen.getByText('Esta función no se puede recorrer paso a paso todavía — async function — nothing to step through. Aquí está su entrada y salida.')).toBeInTheDocument()
+  })
+
+  // ---- Empty trace guard (Critical #2) ----
+
+  it('shows nothing_ran message (not an empty Stepper) when kind:trace has trace:[]', async () => {
+    launchPlayground.mockResolvedValue({ kind: 'trace', trace: [], source_lines: [], func_name: 'resolve_function_ref', file_line: 'intelligence/symbols.py:255', truncated: false })
+    render(<PlaygroundWidget widget={widget} onOpenCitation={() => {}} />)
+    await userEvent.click(screen.getByRole('button', { name: /step through/i }))
+    await act(async () => { await userEvent.click(screen.getByRole('button', { name: /^step through$/i })) })
+    // Must NOT render a step counter (would mean Stepper was mounted on empty trace)
+    expect(screen.queryByText(/step \d+ \/ \d+/)).toBeNull()
+    // Must render the nothing-ran message
+    expect(await screen.findByText(/didn't run the function/)).toBeInTheDocument()
+  })
+
+  // ---- callTextOf fallback quotes string args (High #4) ----
+
+  it('callTextOf fallback quotes string args — widget without call_text shows repr literals', async () => {
+    const widgetNoCallText: typeof widget = {
+      ...widget,
+      call_text: undefined,
+      call: { function_ref: fn, args: ['hello', 42] },
+    }
+    render(<PlaygroundWidget widget={widgetNoCallText} onOpenCitation={() => {}} />)
+    await userEvent.click(screen.getByRole('button', { name: /step through/i }))
+    // String arg 'hello' must be repr-quoted, not raw 'hello'
+    expect(screen.getByText("resolve_function_ref('hello', 42)")).toBeInTheDocument()
+    // Must NOT show the unquoted version
+    expect(screen.queryByText('resolve_function_ref(hello, 42)')).not.toBeInTheDocument()
   })
 })
