@@ -1,0 +1,143 @@
+"""Cuaderno step-through capture (spec 2026-06-16).
+
+A run-request for source "cuaderno" no longer mounts a Marimo iframe: the
+model proposes a complete CALL DESCRIPTOR (or the user edits a free-text call),
+we run that call ONCE under our own bounded ``sys.settrace`` callback in a
+dedicated subprocess (bounded by MAX_STEPS + per-value repr size/time caps +
+a dangerous-type skip-list + a wall-clock guard), and we return a Step[] trace
+the React stepper replays client-side.
+
+Two authorized consent paths (spec §10):
+  1. The MODEL's proposed args/kwargs/ctor are injected as repr() literals,
+     never raw source — the same discipline FunctionRef already applies to
+     identifiers and paths. This guards against a garbled model proposal.
+  2. The USER's edited free-text call is THEIR own code, exec'd in the module
+     namespace (REPL-like) only on explicit confirm, under the same pytest
+     trust boundary. The repr-literal guard protects against the model, not
+     against the user editing their own call. Caps still apply.
+
+There is NO third-party tracer dependency: the capture is our own settrace
+callback (spec §0 decision 1 dropped json-tracer). The license rule (never
+copy Online Python Tutor source) holds by not copying it — we emit our own
+Step/Var schema directly.
+"""
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from typing import Any
+
+from .playground import (
+    FunctionRef,
+    PlaygroundError,
+    _is_identifier,  # reuse the existing identifier check
+)
+
+# Caps — enforced INSIDE the capture callback (spec §5). Defaults chosen to
+# abort well under any launch window and to never OOM the subprocess. These
+# mirror the driver's module-level caps (Task 5); the orchestrator reads them
+# here only for the outer wall-clock backstop timeout.
+MAX_STEPS = 1000
+REPR_SIZE_CAP = 1000          # chars; longer values surface as kind:"large"
+REPR_TIME_BUDGET_S = 0.05     # per-value __repr__ time cap
+WALL_CLOCK_BUDGET_S = 8.0     # whole-capture guard
+LARGE_CHILDREN_CAP = 20       # first-N children captured for a large value
+
+
+class InvalidCallDescriptorError(PlaygroundError):
+    error_code = "invalid_call_descriptor"
+    http_status = 400
+
+
+class CaptureError(PlaygroundError):
+    error_code = "capture_failed"
+    http_status = 500
+
+
+def _assert_json_serializable(value: object, where: str) -> None:
+    try:
+        json.dumps(value)
+    except (TypeError, ValueError) as exc:
+        raise InvalidCallDescriptorError(
+            f"{where} must be JSON-serializable, got {type(value).__name__}: {exc}"
+        ) from exc
+
+
+@dataclass(frozen=True)
+class CallDescriptor:
+    """The MODEL's proposed invocation (consent path 1). All values are
+    repr()-literal-guarded JSON literals."""
+    function_ref: FunctionRef
+    args: list[Any] = field(default_factory=list)
+    kwargs: dict[str, Any] = field(default_factory=dict)
+    ctor: dict[str, Any] | None = None  # {"args": [...], "kwargs": {...}}
+
+    @classmethod
+    def from_dict(cls, data: object) -> "CallDescriptor":
+        if not isinstance(data, dict):
+            raise InvalidCallDescriptorError("call descriptor must be an object")
+        ref = FunctionRef.from_dict(data.get("function_ref") or {})
+        args = cls._parse_args(data.get("args"), "args")
+        kwargs = cls._parse_kwargs(data.get("kwargs"), "kwargs")
+        ctor_raw = data.get("ctor")
+        ctor: dict[str, Any] | None = None
+        if ctor_raw is not None:
+            if not isinstance(ctor_raw, dict):
+                raise InvalidCallDescriptorError("ctor must be an object when provided")
+            ctor = {
+                "args": cls._parse_args(ctor_raw.get("args"), "ctor.args"),
+                "kwargs": cls._parse_kwargs(ctor_raw.get("kwargs"), "ctor.kwargs"),
+            }
+        return cls(function_ref=ref, args=args, kwargs=kwargs, ctor=ctor)
+
+    @staticmethod
+    def _parse_args(raw: object, where: str) -> list[Any]:
+        if raw is None:
+            return []
+        if not isinstance(raw, list):
+            raise InvalidCallDescriptorError(f"{where} must be a list when provided")
+        for v in raw:
+            _assert_json_serializable(v, f"{where} element")
+        return list(raw)
+
+    @staticmethod
+    def _parse_kwargs(raw: object, where: str) -> dict[str, Any]:
+        if raw is None:
+            return {}
+        if not isinstance(raw, dict):
+            raise InvalidCallDescriptorError(f"{where} must be an object when provided")
+        out: dict[str, Any] = {}
+        for k, v in raw.items():
+            if not isinstance(k, str) or not _is_identifier(k):
+                raise InvalidCallDescriptorError(
+                    f"{where} key must be a Python identifier, got {k!r}"
+                )
+            _assert_json_serializable(v, f"{where}[{k!r}]")
+            out[k] = v
+        return out
+
+
+@dataclass(frozen=True)
+class FreeTextCall:
+    """The USER's edited free-text call (consent path 2). NOT repr-guarded:
+    it is the user's own expression, exec'd in the module namespace on confirm
+    (spec §6/§10). We constrain it to a SINGLE expression so the confirm gesture
+    stays 'run this call', not 'run a script' — the caps still bound execution."""
+    text: str
+
+    @classmethod
+    def from_text(cls, raw: object) -> "FreeTextCall":
+        if not isinstance(raw, str) or not raw.strip():
+            raise InvalidCallDescriptorError("call_text must be a non-empty string")
+        text = raw.strip()
+        if ";" in text or "\n" in text:
+            raise InvalidCallDescriptorError(
+                "call_text must be a single expression (no ';' or newlines)"
+            )
+        try:
+            compile(text, "<call_text>", "eval")
+        except SyntaxError as exc:
+            raise InvalidCallDescriptorError(
+                f"call_text must be a valid Python expression: {exc}"
+            ) from exc
+        return cls(text=text)
