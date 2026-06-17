@@ -47,23 +47,21 @@ function raisedResp(extra: Partial<StepThroughResponse> = {}): StepThroughRespon
 }
 
 describe('Stepper — --neg token contract (raised exception card)', () => {
-  it('raised exception card uses background:var(--neg) on a terminal raise step', () => {
-    const { container } = render(
+  it('raised exception card uses background:var(--neg) and border var(--neg-line) on a terminal raise step, and renders exception text', () => {
+    const { container, getByText } = render(
       <Stepper response={raisedResp()} onClose={() => {}} />,
     )
-    // The card is the only element in the state panel whose background is --neg
-    const card = Array.from(container.querySelectorAll<HTMLElement>('div')).find(
-      (el) => el.style.background === 'var(--neg)' && el.style.borderColor === '',
-    )
-    // More precisely: find the element that has both --neg background AND --neg-line border
+    // The Stepper renders the card with `border:1px solid var(--neg-line)` (shorthand).
+    // JSDOM stores the shorthand on el.style.border, NOT on el.style.borderColor.
+    // Checking el.style.border.includes('var(--neg-line)') is the reliable way.
     const raisedCard = Array.from(container.querySelectorAll<HTMLElement>('div')).find(
       (el) =>
         el.style.background === 'var(--neg)' &&
-        el.style.borderColor === 'var(--neg-line)',
+        el.style.border.includes('var(--neg-line)'),
     )
-    expect(raisedCard, 'raised exception card must use background:var(--neg)').not.toBeNull()
-    // Suppress the unused `card` reference (used as fallback search above)
-    void card
+    expect(raisedCard, 'raised exception card must exist with background:var(--neg) and border containing var(--neg-line)').not.toBeUndefined()
+    // The card must also render the exception type and message
+    expect(getByText("KeyError: 'ghost'"), 'exception type:message must render inside the card').toBeInTheDocument()
   })
 
   it('raised exception card is absent when there is no raised field', () => {
@@ -73,15 +71,18 @@ describe('Stepper — --neg token contract (raised exception card)', () => {
       changed: [],
       scope: [v('x', 'scalar', { text: '1' })],
     }
-    const { container } = render(
+    const { container, queryByText } = render(
       <Stepper response={{ ...baseResp, trace: [noRaise] }} onClose={() => {}} />,
     )
+    // The card must not exist: no element should have both --neg background and --neg-line border
     const raisedCard = Array.from(container.querySelectorAll<HTMLElement>('div')).find(
       (el) =>
         el.style.background === 'var(--neg)' &&
-        el.style.borderColor === 'var(--neg-line)',
+        el.style.border.includes('var(--neg-line)'),
     )
     expect(raisedCard, 'no raised card when step has no raised field').toBeUndefined()
+    // Additionally: the exception text must not appear at all
+    expect(queryByText(/KeyError/), 'exception text must not render when no raised field').toBeNull()
   })
 })
 

@@ -157,7 +157,12 @@ describe('Stepper', () => {
     // slabBg must NOT be the negative (red) token when truncated=true
     const bg = slab!.style.background
     expect(bg).not.toBe('var(--neg)')
-    // slabBorder must also not be red
-    expect(slab!.style.borderLeftColor).not.toBe('var(--neg-ink)')
+    // The slab renders with `border-left:2px solid ${slabBorder}` (shorthand).
+    // JSDOM stores this on el.style.borderLeft, NOT on el.style.borderLeftColor.
+    // Asserting borderLeftColor would always be '' — vacuous.  Check borderLeft instead.
+    const borderLeft = slab!.style.borderLeft
+    expect(borderLeft, 'slabBorder must not use the --neg-ink token when truncated').not.toContain('var(--neg-ink)')
+    // The expected accent token must be present
+    expect(borderLeft, 'slabBorder must use var(--accent) token when truncated').toContain('var(--accent)')
   })
 })
