@@ -236,3 +236,116 @@ def test_method_with_ctor_is_eligible():
     })
     assert eligibility_reason(cd, _resolved(kind="method", parent="Foo", name="m"),
                               is_async=False, is_generator=False) is None
+
+
+# ---------------------------------------------------------------------------
+# Task 4: In-subprocess capture driver (bounded settrace; every cap proven)
+# ---------------------------------------------------------------------------
+
+import importlib
+
+driver = importlib.import_module("copyclip.intelligence._capture_driver")
+
+
+def test_bounded_repr_summarizes_large_collection():
+    v = driver.var_for("xs", list(range(5000)))
+    assert v["kind"] == "large"
+    assert v["summary"] == "list"
+    assert "5,000" in v["meta"] or "5000" in v["meta"]
+    assert len(v["children"]) <= driver.LARGE_CHILDREN_CAP
+
+
+def test_bounded_repr_scalar_is_capped_text():
+    v = driver.var_for("n", 42)
+    assert v["kind"] == "scalar"
+    assert v["text"] == "42"
+
+
+def test_repr_size_cap_demotes_huge_string_to_large():
+    # A scalar whose repr exceeds REPR_SIZE_CAP must surface as kind:"large",
+    # never inlined whole (spec §5 cap 2 fires).
+    v = driver.var_for("s", "x" * (driver.REPR_SIZE_CAP + 500))
+    assert v["kind"] == "large"
+
+
+def test_opaque_skip_list_for_file_handle(tmp_path):
+    f = open(tmp_path / "x.txt", "w")
+    try:
+        v = driver.var_for("fh", f)
+        assert v["kind"] == "opaque"
+        assert "TextIOWrapper" in v["label"]
+        assert "text" not in v  # never repr'd (spec §5 cap 4 fires)
+    finally:
+        f.close()
+
+
+def test_repr_that_raises_is_opaque_not_crash():
+    class Boom:
+        def __repr__(self):
+            raise RuntimeError("nope")
+    v = driver.var_for("b", Boom())
+    assert v["kind"] == "opaque"  # repr failure → opaque, never propagates
+
+
+def test_repr_time_budget_cap_fires(monkeypatch):
+    # spec §5 cap 3: a __repr__ that BLOCKS must not hang the serializer — the
+    # per-value time budget aborts it and the value renders opaque.
+    monkeypatch.setattr(driver, "REPR_TIME_BUDGET_S", 0.01)
+
+    class Slow:
+        def __repr__(self):
+            import time as _t
+            _t.sleep(0.2)  # blows the 0.01s budget
+            return "slow"
+    v = driver.var_for("s", Slow())
+    assert v["kind"] == "opaque"  # overran the time budget → opaque, not the repr
+
+
+def test_trace_function_records_steps_and_scope():
+    def sample(a):
+        b = a + 1
+        c = b * 2
+        return c
+    raw = driver.trace_call(sample, args=[3], kwargs={})
+    assert raw["trace"][-1]["event"] == "return"
+    assert not raw.get("truncated")
+    names = {v["name"] for ev in raw["trace"] for v in ev["scope"]}
+    assert {"a", "b", "c"} <= names
+    # The driver does NOT emit `changed` — that is the normalizer's job (spec §9).
+    assert all("changed" not in ev for ev in raw["trace"])
+
+
+def test_trace_records_raise_terminal_step():
+    def boom(x):
+        return {}[x]
+    raw = driver.trace_call(boom, args=["k"], kwargs={})
+    last = raw["trace"][-1]
+    assert last["event"] == "raise"
+    assert last["raised"]["type"] == "KeyError"
+
+
+def test_max_steps_cap_fires(monkeypatch):
+    # spec §5 cap 1: a runaway loop truncates, never hangs.
+    monkeypatch.setattr(driver, "MAX_STEPS", 20)
+    def loopy(n):
+        total = 0
+        while True:
+            total += 1
+    raw = driver.trace_call(loopy, args=[0], kwargs={})
+    assert raw["truncated"] is True
+    assert len(raw["trace"]) <= 25  # MAX_STEPS + a small terminal slack
+
+
+def test_wall_clock_cap_fires(monkeypatch):
+    # spec §5 cap 5: a long-running capture aborts on the wall-clock guard even
+    # if it stays under MAX_STEPS (e.g. a slow body per line).
+    monkeypatch.setattr(driver, "WALL_CLOCK_BUDGET_S", 0.05)
+    monkeypatch.setattr(driver, "MAX_STEPS", 10_000_000)
+    def slow_loop(n):
+        import time as _t
+        total = 0
+        for _ in range(10_000_000):
+            _t.sleep(0.001)  # each line burns time → trips the 0.05s guard
+            total += 1
+    raw = driver.trace_call(slow_loop, args=[0], kwargs={})
+    assert raw["truncated"] is True
