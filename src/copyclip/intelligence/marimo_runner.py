@@ -24,6 +24,7 @@ from __future__ import annotations
 import collections
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -163,11 +164,17 @@ class MarimoRunner:
                 "--headless",
                 "--no-token",
             ]
+            popen_kwargs = {}
+            if sys.platform == "win32":
+                popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            else:
+                popen_kwargs["start_new_session"] = True
             try:
                 process = subprocess.Popen(
                     cmd,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.PIPE,
+                    **popen_kwargs,
                 )
             except FileNotFoundError as exc:
                 # sys.executable went away; treat as marimo-unavailable.
@@ -318,6 +325,15 @@ class MarimoRunner:
     def _best_effort_kill(self, process: subprocess.Popen) -> None:
         if process.poll() is not None:
             return
+        # Reclaim the whole process tree first (spec §10): the child was spawned
+        # in its own group, so a single signal reaps any grandchildren too.
+        try:
+            if sys.platform == "win32":
+                process.send_signal(signal.CTRL_BREAK_EVENT)
+            else:
+                os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+        except Exception:
+            pass
         try:
             process.terminate()
         except Exception:
@@ -328,6 +344,8 @@ class MarimoRunner:
         except subprocess.TimeoutExpired:
             pass
         try:
+            if sys.platform != "win32":
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
             process.kill()
         except Exception:
             pass

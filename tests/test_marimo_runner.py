@@ -749,3 +749,37 @@ def test_launch_emits_launch_spawn_event(monkeypatch, tmp_path):
     assert "marimo" in payload["cmd"]
 
     r.kill_all()
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: Task 6 — process-group kill in _best_effort_kill
+# ---------------------------------------------------------------------------
+
+
+import signal
+import sys
+from unittest.mock import MagicMock
+
+
+def test_best_effort_kill_uses_process_group_on_windows(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    proc = MagicMock()
+    proc.poll.return_value = None  # still alive
+    proc.wait.side_effect = [__import__("subprocess").TimeoutExpired("x", 1), None]
+    MarimoRunner()._best_effort_kill(proc)
+    proc.send_signal.assert_any_call(signal.CTRL_BREAK_EVENT)
+
+
+def test_best_effort_kill_killpg_on_posix(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    killed = {}
+    # getpgid / killpg are POSIX-only; patch them into the os module (raising=False
+    # so the patch works even on Windows where they don't exist).
+    monkeypatch.setattr("os.getpgid", lambda pid: 4242, raising=False)
+    monkeypatch.setattr("os.killpg", lambda pgid, sig: killed.setdefault("pgid", (pgid, sig)), raising=False)
+    proc = MagicMock()
+    proc.poll.return_value = None
+    proc.pid = 999
+    proc.wait.side_effect = [__import__("subprocess").TimeoutExpired("x", 1), None]
+    MarimoRunner()._best_effort_kill(proc)
+    assert killed["pgid"][0] == 4242
