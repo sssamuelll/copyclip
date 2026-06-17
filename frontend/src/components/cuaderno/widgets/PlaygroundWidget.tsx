@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore } from 'react'
+import { useState, useEffect, useSyncExternalStore } from 'react'
 import type { PlaygroundWidgetData, Citation, CallDescriptor } from '../../../types/api'
 import { CitationChip } from '../CitationChip'
 import { subscribe, getState, launch, close } from '../playgroundSlot'
@@ -35,6 +35,16 @@ export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
   // The REAL model-proposed invocation (D2): the pre-rendered text if the floor
   // emitted it, else built from the structured descriptor. Never a fake "name(…)".
   const proposedCall = widget.call_text ?? callTextOf(fn.name, widget.call)
+
+  // When Widget B takes the slot (isMine becomes false and slot is non-empty),
+  // reset our previewing flag so the stale preview cannot resurface later when
+  // Widget B finishes and the slot returns to 'empty' (slot.kind==='empty' would
+  // re-satisfy the `previewing && (slot.kind==='empty' || isMine)` guard).
+  useEffect(() => {
+    if (previewing && !isMine && slot.kind !== 'empty') {
+      setPreviewing(false)
+    }
+  }, [previewing, isMine, slot.kind])
 
   // On confirm the (possibly edited) free text flows through as call_text (D2);
   // the structured descriptor rides along for the backend's repr-literal guard.

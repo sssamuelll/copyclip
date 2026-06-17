@@ -324,6 +324,12 @@ describe('PlaygroundWidget — citation and breadcrumb in non-live states', () =
 describe('PlaygroundWidget — previewing guard: stale preview clears when slot taken by another widget', () => {
   const OTHER_KEY = 'other.py:other_func:'
 
+  beforeEach(() => {
+    vi.clearAllMocks()
+    // Default to empty slot so each test starts from a known clean state
+    vi.mocked(getState).mockReturnValue({ kind: 'empty' })
+  })
+
   it('Widget A in previewing state falls back to idle when the slot is taken by Widget B (kind=spawning)', () => {
     // Step 1: Widget A starts idle (slot empty)
     vi.mocked(getState).mockReturnValue({ kind: 'empty' })
@@ -348,22 +354,59 @@ describe('PlaygroundWidget — previewing guard: stale preview clears when slot 
     expect(screen.getByRole('button', { name: /step through/i })).toBeInTheDocument()
   })
 
-  it('Widget A in previewing state does NOT call launch when the slot is owned by Widget B', () => {
-    // Step 1: Widget A starts idle
+  it('Widget A previewing=true: confirm button (PreviewCall "Step through") IS present before Widget B takes slot, then disappears — proving the guard actually removes it', () => {
+    // Positive control: without Widget B taking the slot, the confirm button exists.
+    // This makes the subsequent absence assertion meaningful.
     vi.mocked(getState).mockReturnValue({ kind: 'empty' })
     const { rerender } = render(
       <PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />
     )
-    // Step 2: user clicks "Step through" — previewing=true
+    // Click IdleInvitation's "Step through →" button to enter previewing mode
     fireEvent.click(screen.getByRole('button', { name: /step through/i }))
 
-    // Step 3: Widget B takes the slot
+    // PreviewCall's confirm button has accessible name "Step through" (no arrow).
+    // It MUST be present at this point — otherwise the test that follows would be vacuous.
+    const confirmBtn = screen.getByRole('button', { name: 'Step through' })
+    expect(confirmBtn).toBeInTheDocument()
+
+    // Widget B takes the slot — the guard must remove the confirm button
     vi.mocked(getState).mockReturnValue({ kind: 'spawning', widgetKey: OTHER_KEY, token: 1 })
     rerender(<PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />)
 
-    // Step 4: The confirm button from PreviewCall must be gone — cannot evict Widget B
-    expect(screen.queryByRole('button', { name: /^step through$/i })).toBeNull()
+    // The PreviewCall confirm button must be gone now — clicking it would evict Widget B
+    expect(screen.queryByRole('button', { name: 'Step through' })).toBeNull()
+    // launch must not have been called at any point (confirm button was never clickable after B took slot)
     expect(launch).not.toHaveBeenCalled()
+  })
+
+  it('stale previewing=true does NOT resurface after Widget B releases the slot (slot returns to empty)', () => {
+    // Bug scenario: Widget A previewing=true → Widget B takes slot (preview hidden correctly)
+    // → Widget B ends → slot returns to empty → Widget A must NOT re-show PreviewCall.
+    // Without the fix (useEffect that resets previewing when B takes slot), the guard
+    // `previewing && (slot.kind === 'empty' || isMine)` allows resurrection when
+    // slot.kind goes back to 'empty' with previewing still true.
+    vi.mocked(getState).mockReturnValue({ kind: 'empty' })
+    const { rerender } = render(
+      <PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />
+    )
+    // Widget A enters previewing state
+    fireEvent.click(screen.getByRole('button', { name: /step through/i }))
+    expect(screen.getByText(/step through this call/i)).toBeInTheDocument()
+
+    // Widget B takes the slot — Widget A's preview is correctly hidden
+    vi.mocked(getState).mockReturnValue({ kind: 'spawning', widgetKey: OTHER_KEY, token: 1 })
+    rerender(<PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />)
+    expect(screen.queryByText(/step through this call/i)).toBeNull()
+
+    // Widget B's run ends — slot empties again
+    vi.mocked(getState).mockReturnValue({ kind: 'empty' })
+    rerender(<PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />)
+
+    // Widget A must NOT resurface its stale PreviewCall.
+    // Without the fix, previewing is still true and slot.kind === 'empty' → PreviewCall re-appears.
+    expect(screen.queryByText(/step through this call/i)).toBeNull()
+    // Widget A should be in idle state, not preview
+    expect(screen.getByRole('button', { name: /step through/i })).toBeInTheDocument()
   })
 
   it('Widget A in previewing state remains visible while the slot is still empty (guard does not break normal flow)', () => {
