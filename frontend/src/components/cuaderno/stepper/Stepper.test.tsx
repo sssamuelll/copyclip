@@ -166,6 +166,25 @@ describe('Stepper', () => {
     expect(borderLeft, 'slabBorder must use var(--accent) token when truncated').toContain('var(--accent)')
   })
 
+  // Issue 5: handleColor must respect truncated priority — accent handle on truncated+raise step
+  it('uses --accent handle colour (not --neg-ink) when truncated=true even on a raise step', () => {
+    // Use line 255 which IS in resp.source_lines so the slab renders
+    const raisedTruncTrace: Step[] = [
+      { line: 255, event: 'raise', changed: [], scope: [], raised: { type: 'RuntimeError', message: 'cut' } },
+    ]
+    const { container } = render(
+      <Stepper response={{ ...resp, trace: raisedTruncTrace, truncated: true }} onClose={() => {}} lang="en" />
+    )
+    const allEls = container.querySelectorAll<HTMLElement>('[style]')
+    const handle = Array.from(allEls).find(
+      (el) => el.style.borderRadius === '50%',
+    )
+    expect(handle, 'scrubber handle element must exist').toBeTruthy()
+    // When truncated=true, handle must stay neutral (accent), NOT turn red
+    expect(handle!.style.background, 'handle must use var(--accent) when truncated').toBe('var(--accent)')
+    expect(handle!.style.background, 'handle must NOT use var(--neg-ink) when truncated').not.toBe('var(--neg-ink)')
+  })
+
   // Task 11 pixel-fidelity: raised terminal handle uses --neg-ink, not --accent (handoff §07 line 521)
   it('uses --neg-ink handle colour at the raised terminal step', async () => {
     const raisedTrace: Step[] = [

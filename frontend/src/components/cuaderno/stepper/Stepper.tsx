@@ -70,7 +70,8 @@ export function Stepper({ response, onClose, lang }: Props) {
   const terminal = truncated || raised
 
   // Raised terminal handle: use --neg-ink instead of --accent (handoff state 07, line 521).
-  const handleColor = raised ? 'var(--neg-ink)' : 'var(--accent)'
+  // Respect truncated priority: when truncated=true the slab stays neutral, so the handle must too.
+  const handleColor = raised && !truncated ? 'var(--neg-ink)' : 'var(--accent)'
 
   const btn = 'width:28px;height:28px;flex:none;border-radius:7px;border:1px solid var(--hairline);background:var(--paper);color:var(--ink-2);cursor:pointer;font-size:9px;display:flex;align-items:center;justify-content:center;'
 
