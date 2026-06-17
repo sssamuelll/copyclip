@@ -165,4 +165,49 @@ describe('Stepper', () => {
     // The expected accent token must be present
     expect(borderLeft, 'slabBorder must use var(--accent) token when truncated').toContain('var(--accent)')
   })
+
+  // Task 11 pixel-fidelity: raised terminal handle uses --neg-ink, not --accent (handoff §07 line 521)
+  it('uses --neg-ink handle colour at the raised terminal step', async () => {
+    const raisedTrace: Step[] = [
+      ...trace,
+      { line: 263, event: 'raise', changed: [], scope: [v('qualname', 'scalar', { text: "'ghost'" })], raised: { type: 'KeyError', message: "'ghost'" } },
+    ]
+    const { container } = render(<Stepper response={{ ...resp, trace: raisedTrace }} onClose={() => {}} lang="en" />)
+    const next = screen.getByRole('button', { name: '▶' })
+    for (let i = 0; i < 10; i++) await userEvent.click(next)
+    // The scrubber handle is a div with borderRadius=50%. JSDOM stores inline styles with
+    // space after colon ("border-radius: 50%"), so we iterate all styled elements and
+    // check via el.style.borderRadius (the CSSOM property accessor) which is reliable.
+    const allEls = container.querySelectorAll<HTMLElement>('[style]')
+    const handle = Array.from(allEls).find(
+      (el) => el.style.borderRadius === '50%' && el.style.background.includes('var(--neg-ink)'),
+    )
+    expect(handle, 'raised handle must use var(--neg-ink)').toBeTruthy()
+  })
+
+  // Task 11 pixel-fidelity: terminal states (truncated/raised) omit "next change ◆" and honesty note (handoff §05/§07)
+  it('hides next-change button and honesty note in the truncated terminal state', () => {
+    render(<Stepper response={{ ...resp, truncated: true }} onClose={() => {}} lang="en" />)
+    expect(screen.queryByRole('button', { name: /next change/i })).toBeNull()
+    expect(screen.queryByText(/library calls appear as one step/i)).toBeNull()
+  })
+
+  it('hides next-change button and honesty note in the raised terminal state', async () => {
+    const raisedTrace: Step[] = [
+      ...trace,
+      { line: 263, event: 'raise', changed: [], scope: [], raised: { type: 'KeyError', message: "'ghost'" } },
+    ]
+    render(<Stepper response={{ ...resp, trace: raisedTrace }} onClose={() => {}} lang="en" />)
+    const next = screen.getByRole('button', { name: '▶' })
+    for (let i = 0; i < 10; i++) await userEvent.click(next)
+    expect(screen.queryByRole('button', { name: /next change/i })).toBeNull()
+    expect(screen.queryByText(/library calls appear as one step/i)).toBeNull()
+  })
+
+  // Task 11 pixel-fidelity: "next change ◆" and honesty note ARE present in the normal stepping state
+  it('shows next-change button and honesty note in normal stepping state', () => {
+    render(<Stepper response={resp} onClose={() => {}} lang="en" />)
+    expect(screen.getByRole('button', { name: /next change/i })).toBeInTheDocument()
+    expect(screen.getByText(/library calls appear as one step/i)).toBeInTheDocument()
+  })
 })

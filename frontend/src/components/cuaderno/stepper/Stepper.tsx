@@ -65,6 +65,12 @@ export function Stepper({ response, onClose, lang }: Props) {
   }
   const onNextChange = () => setStep(nextChange(cur, trace))
   const atEnd = cur >= total
+  // terminal = the trace has reached a natural end: truncation cap or a raise at the last step.
+  // In these states the handoff omits "next change ◆" and the honesty note (pixel-fidelity).
+  const terminal = truncated || raised
+
+  // Raised terminal handle: use --neg-ink instead of --accent (handoff state 07, line 521).
+  const handleColor = raised ? 'var(--neg-ink)' : 'var(--accent)'
 
   const btn = 'width:28px;height:28px;flex:none;border-radius:7px;border:1px solid var(--hairline);background:var(--paper);color:var(--ink-2);cursor:pointer;font-size:9px;display:flex;align-items:center;justify-content:center;'
 
@@ -138,16 +144,20 @@ export function Stepper({ response, onClose, lang }: Props) {
             {markers.map((left, i) => (
               <div key={i} style={{ ...s('position:absolute;top:50%;transform:translate(-50%,-50%);width:2px;height:11px;border-radius:1px;background:var(--accent-line);'), left: `${left}%` }} />
             ))}
-            <div style={{ ...s('position:absolute;width:13px;height:13px;border-radius:50%;background:var(--accent);border:2px solid var(--surface);transform:translateX(-50%);transition:left .22s cubic-bezier(.4,0,.2,1);box-shadow:0 1px 3px rgba(0,0,0,.3);'), left: handleLeft }} />
+            <div style={{ ...s(`position:absolute;width:13px;height:13px;border-radius:50%;background:${handleColor};border:2px solid var(--surface);transform:translateX(-50%);transition:left .22s cubic-bezier(.4,0,.2,1);box-shadow:0 1px 3px rgba(0,0,0,.3);`), left: handleLeft }} />
           </div>
           <button onClick={() => move(1)} aria-label="▶" className="stepper-btn" style={{ ...s(btn), ...(atEnd ? s('color:var(--ink-4);') : {}) }}>▶</button>
-          <button onClick={onNextChange} className="stepper-btn" style={s('flex:none;height:28px;border-radius:7px;border:1px solid var(--hairline);background:var(--paper);color:var(--ink-3);cursor:pointer;font-size:11px;padding:0 11px;white-space:nowrap;')}>{t('playground_next_change', lang)}</button>
+          {!terminal && (
+            <button onClick={onNextChange} className="stepper-btn" style={s('flex:none;height:28px;border-radius:7px;border:1px solid var(--hairline);background:var(--paper);color:var(--ink-3);cursor:pointer;font-size:11px;padding:0 11px;white-space:nowrap;')}>{t('playground_next_change', lang)}</button>
+          )}
         </div>
-        {/* honesty note */}
-        <div style={s('display:flex;align-items:center;gap:8px;margin-top:11px;')}>
-          <span style={s('width:5px;height:5px;border-radius:50%;background:var(--accent);opacity:.55;flex:none;')} />
-          <span style={s('font-size:11.5px;color:var(--ink-3);')}>{t('playground_python_limit', lang)}</span>
-        </div>
+        {/* honesty note — hidden in terminal states (truncated/raised) to match handoff */}
+        {!terminal && (
+          <div style={s('display:flex;align-items:center;gap:8px;margin-top:11px;')}>
+            <span style={s('width:5px;height:5px;border-radius:50%;background:var(--accent);opacity:.55;flex:none;')} />
+            <span style={s('font-size:11.5px;color:var(--ink-3);')}>{t('playground_python_limit', lang)}</span>
+          </div>
+        )}
       </div>
     </div>
   )
