@@ -420,21 +420,37 @@ def test_free_text_raise_step_line_comes_from_last_traced_event(tmp_path):
     This verifies the specific implementation detail that distinguishes
     _trace_free_text from trace_call: there is no last_line tracking, so the
     raise event's line is taken from the final captured trace event.
+
+    The assertion uses a CONCRETE expected line number derived from the module
+    source written below:
+      line 1:  def boom(x):
+      line 2:      return {}[x]     <-- last executed line before KeyError
+
+    If line-tracking ever regressed (e.g. the raise step always used line 0
+    or the call-frame entry line), this test would fail.
     """
-    mod_name = _make_free_text_mod(tmp_path, "_ft_raise", dedent("""\
+    source = dedent("""\
         def boom(x):
             return {}[x]
-    """))
+    """)
+    mod_name = _make_free_text_mod(tmp_path, "_ft_raise", source)
+    # The last statement executed inside boom before the KeyError is the
+    # "return {}[x]" expression, which is line 2 of the module source above.
+    EXPECTED_RAISE_LINE = 2
     try:
         spec = {"module": mod_name, "name": "boom", "call_text": 'boom("k")'}
         raw = driver._trace_free_text(spec)
         last = raw["trace"][-1]
         assert last["event"] == "raise"
         assert last["raised"]["type"] == "KeyError"
-        # The raise-step line must equal the line of the last traced event
-        # (events[-2] before the raise was appended), not 0 or an arbitrary value.
-        pre_raise_line = raw["trace"][-2]["line"]
-        assert last["line"] == pre_raise_line
+        # The raise-step line must equal the concrete source line of the last
+        # statement executed before the exception propagated. If line tracking
+        # were broken (e.g. always returning 0 or the def-line), this fails.
+        assert last["line"] == EXPECTED_RAISE_LINE, (
+            f"raise step line was {last['line']}, expected {EXPECTED_RAISE_LINE} "
+            f"(line of 'return {{}}[x]' in the test module); "
+            f"line-tracking may have regressed in _trace_free_text"
+        )
     finally:
         sys.modules.pop(mod_name, None)
 

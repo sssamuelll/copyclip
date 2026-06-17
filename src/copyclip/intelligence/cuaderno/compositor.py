@@ -66,6 +66,10 @@ _RUN_REQUEST_TERMS = (
     "ejecut", "córre", "corre ", "prueba", "pruéba",
 )
 
+# Spanish-only subset of _RUN_REQUEST_TERMS used for language-branch breadcrumbs.
+# Defined here (colocated with its parent) so the two never drift independently.
+_ES_RUN_TERMS = ("ejecut", "córre", "corre ", "prueba", "pruéba")
+
 
 def _is_visual_request(question: str) -> bool:
     q = question.lower()
@@ -159,7 +163,6 @@ def _construct_playground_floor(question: str, conn: Optional[sqlite3.Connection
     if resolved.qualname and resolved.qualname != resolved.name:
         fr["qualname"] = resolved.qualname
     lang = detect_language(question)
-    _ES_RUN_TERMS = ("ejecut", "córre", "corre ", "prueba", "pruéba")
     _is_es = lang == "es" or any(t in question.lower() for t in _ES_RUN_TERMS)
     breadcrumb = (f"Recorre {resolved.name} paso a paso"
                   if _is_es else f"Step through {resolved.name}")
