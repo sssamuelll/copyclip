@@ -1126,3 +1126,107 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ---------- step-through trace widget ---------- */
+.playground-trace {
+  padding: 14px 18px;
+}
+.playground-trace-file {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  letter-spacing: 0.04em;
+  margin-bottom: 10px;
+}
+.playground-trace-steps {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.playground-trace-step {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--ink-2);
+}
+.playground-trace-step + .playground-trace-step {
+  border-top: 1px solid var(--hairline-soft);
+}
+/* event variants */
+.playground-trace-step--call {
+  color: var(--ink);
+  font-weight: 500;
+}
+.playground-trace-step--line {
+  color: var(--ink-2);
+}
+.playground-trace-step--return {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+}
+.playground-trace-step--raise {
+  color: var(--neg-ink);
+  background: var(--neg);
+  border-left: 2px solid var(--neg-line);
+  padding-left: 10px;
+}
+/* line number gutter */
+.playground-trace-lineno {
+  display: inline-block;
+  min-width: 2.4ch;
+  color: var(--ink-4);
+  font-size: 10.5px;
+  margin-right: 8px;
+  text-align: right;
+  flex: 0 0 auto;
+  user-select: none;
+}
+/* changed-var list */
+.playground-trace-vars {
+  list-style: none;
+  padding: 0 0 0 calc(2.4ch + 16px);
+  margin: 2px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.playground-trace-varname {
+  color: var(--accent-ink);
+  font-weight: 500;
+}
+.playground-trace-varval {
+  color: var(--ink-2);
+}
+/* exception band — uses the --neg/--neg-ink/--neg-line token family */
+.playground-trace-raised {
+  margin-top: 4px;
+  padding: 4px 10px;
+  background: var(--neg);
+  border: 1px solid var(--neg-line);
+  border-radius: var(--radius-sm);
+  color: var(--neg-ink);
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+/* truncated-badge in widget-head */
+.playground-truncated-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--ink-4);
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 1px 7px;
+  margin-left: 6px;
+  vertical-align: 1px;
+  text-transform: uppercase;
+}
