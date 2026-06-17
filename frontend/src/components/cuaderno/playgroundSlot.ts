@@ -1,10 +1,11 @@
 import { api } from '../../api/client'
-import type { PlaygroundLaunchRequest, PlaygroundLaunchResponse } from '../../types/api'
+import type { PlaygroundLaunchRequest, StepThroughResponse } from '../../types/api'
 
 export type SlotState =
   | { kind: 'empty' }
   | { kind: 'spawning'; widgetKey: string; token: number }
   | { kind: 'live'; widgetKey: string; playgroundId: string; iframeUrl: string; token: number }
+  | { kind: 'trace'; widgetKey: string; response: StepThroughResponse; token: number }
   | { kind: 'ended'; widgetKey: string; reason: 'closed' | 'evicted' | 'exited' | 'error'; message?: string }
 
 let state: SlotState = { kind: 'empty' }
@@ -15,6 +16,14 @@ const listeners = new Set<() => void>()
 function set(next: SlotState) { state = next; listeners.forEach((l) => l()) }
 export function subscribe(l: () => void): () => void { listeners.add(l); return () => { listeners.delete(l) } }
 export function getState(): SlotState { return state }
+
+/** Recover the playground id from a fallback iframe_url ("/playground/<id>"). */
+export function idFromIframeUrl(url: string): string {
+  // Strip query string and fragment, then take the last non-empty path segment.
+  const path = url.split('?')[0].split('#')[0]
+  const parts = path.split('/').filter(Boolean)
+  return parts[parts.length - 1] ?? url
+}
 
 function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null } }
 
@@ -50,11 +59,21 @@ export async function launch(widgetKey: string, req: PlaygroundLaunchRequest): P
   if (token !== myToken) return
   set({ kind: 'spawning', widgetKey, token: myToken })
   try {
-    // cast: Task 4 will widen this to PlaygroundLaunchResult once SlotState gains 'trace'
-    const res = await api.launchPlayground(req) as unknown as PlaygroundLaunchResponse
-    if (token !== myToken) { api.closePlayground(res.playground_id).catch(() => {}); return }
-    set({ kind: 'live', widgetKey, playgroundId: res.playground_id, iframeUrl: res.iframe_url, token: myToken })
-    startPoll(res.playground_id, widgetKey, myToken)
+    const res = await api.launchPlayground(req)
+    if (token !== myToken) {
+      // late result for a superseded launch: a fallback spawned a real
+      // playground we must reap; a trace has no subprocess.
+      if (res.kind === 'fallback') api.closePlayground(idFromIframeUrl(res.iframe_url)).catch(() => {})
+      return
+    }
+    if (res.kind === 'trace') {
+      // capture-only: no subprocess to poll, the trace is immutable per launch
+      set({ kind: 'trace', widgetKey, response: res, token: myToken })
+    } else {
+      const playgroundId = idFromIframeUrl(res.iframe_url)
+      set({ kind: 'live', widgetKey, playgroundId, iframeUrl: res.iframe_url, token: myToken })
+      startPoll(playgroundId, widgetKey, myToken)
+    }
   } catch (e) {
     if (token !== myToken) return
     set({ kind: 'ended', widgetKey, reason: 'error', message: e instanceof Error ? e.message : String(e) })
