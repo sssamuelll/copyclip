@@ -742,7 +742,10 @@ export type CallersTreeWidget = {
 
 export type GraphViewWidget = {
   kind: 'graph_view'
-  nodes: Array<{ id: string; label: string; citation?: Citation }>
+  // heat is the server-stamped maintenance-pressure score: a number = measured,
+  // null = unmeasured (typed unknown — never rendered as low). Never set by the
+  // model; the compositor stamps it from this turn's evidence.
+  nodes: Array<{ id: string; label: string; citation?: Citation; heat?: number | null }>
   edges: Array<{ from: string; to: string; weight?: number }>
   focus?: string
   truncated?: boolean
@@ -775,7 +778,7 @@ export type Block =
       kind: 'citation_stack'
       items: Array<{ citation: Citation; note?: string }>
     }
-  | { kind: 'callout'; kicker: string; text: string; citations?: Citation[] }
+  | { kind: 'callout'; kicker: string; text: string; citations?: Citation[]; decision_action?: { decision_id: number; to_status: string } }
   | { kind: 'widget'; widget: Widget }
   | {
       kind: 'followups'
@@ -804,7 +807,7 @@ export type CuadernoQuestion = {
   question: string
   frame: Frame
   bookmarked: boolean
-  got_it: 'got' | 'didnt' | null
+  answer_check: 'answers' | 'not_yet' | null
   created_at: string
 }
 

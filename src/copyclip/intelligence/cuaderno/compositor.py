@@ -13,11 +13,12 @@ from .prompts import (
     SYSTEM_PROMPT, GROUNDING_RETRY_DIRECTIVE, LANGUAGE_RETRY_DIRECTIVE,
     RESPONSIVENESS_RETRY_FALLBACK, INVALID_BLOCK_RECOVERY, WIDGET_RECOVERY_DIRECTIVE,
     WIDGET_RECOVERY_DIRECTIVE_VISUAL, WIDGET_RECOVERY_DIRECTIVE_RUN,
+    ALTITUDE_RETRY_DIRECTIVE,
 )
 from .emit_fold import fold_playground_widget
 from .read_ledger import ReadLedger, is_content_bearing_read
 from .trace import NULL_TRACE
-from .quality import assess, cheap_verdict_dict, artifacts_cited
+from .quality import assess, cheap_verdict_dict, artifacts_cited, altitude_violation
 from .judge import judge_verdict_dict
 from .language import detect_language
 from .i18n import tr
@@ -27,8 +28,40 @@ from .schema import (
     FRAME_STATUS_UNGROUNDED, FRAME_STATUS_INSUFFICIENT_EVIDENCE, FRAME_STATUS_OFF_TARGET,
 )
 from .tool_catalog import ANSWER_TOOLS, build_tool_definitions, dispatch_tool
-from .widget_checks import GraphEvidence, validate_widget_payload
+from .widget_checks import GraphEvidence, validate_widget_payload, stamp_widget_payload
+from .anchor import ACCEPTED_NOT_DECIDED
 from ..playground import FunctionRef, resolve_function_ref
+
+
+def rationale_stamp_violation(
+    block: dict[str, Any], accepted_not_decided_files: set[str]
+) -> Optional[str]:
+    """Structural ② gate: a callout citing a file get_rationale ruled
+    `accepted_not_decided` (the ledger is silent — no recorded 'why') MUST carry
+    the verbatim ACCEPTED_NOT_DECIDED constant, or it is rejected.
+
+    CITE∩CITE, never INFER: the witnessed verdict (the file is in the floor) ∩ the
+    witnessed citation (the callout cites it) → require the witnessed constant. It
+    NEVER reads the prose to decide whether a 'why' is fabricated — it only checks
+    that the stamp is present when a silent-ledger file is cited. Only callouts are
+    gated (the claim block); 'recovered' files are absent from the floor and pass."""
+    if not accepted_not_decided_files or block.get("kind") != "callout":
+        return None
+    cited = {
+        (c.get("path") or "").replace("\\", "/")
+        for c in (block.get("citations") or [])
+        if isinstance(c, dict) and c.get("kind") == "path"
+    }
+    hit = cited & accepted_not_decided_files
+    if not hit:
+        return None
+    if ACCEPTED_NOT_DECIDED in (block.get("text") or ""):
+        return None
+    return (
+        f"callout cites {sorted(hit)[0]}, which get_rationale ruled "
+        f"accepted_not_decided — there is no recorded rationale to paraphrase; it "
+        f"must carry the verbatim stamp '{ACCEPTED_NOT_DECIDED}'."
+    )
 
 CLOSING_DIRECTIVE = (
     "You have gathered your evidence — the research tools are no longer "
@@ -485,7 +518,11 @@ def iter_compose_events(
     trace = trace if trace is not None else NULL_TRACE
     grounding_retry_used = False
     responsiveness_retry_used = False
+    altitude_retry_used = False
     evidence = GraphEvidence()  # graph-tool results seen this TURN — accumulates across rounds
+    # Files get_rationale ruled accepted_not_decided this TURN — accumulates across
+    # rounds, same as `evidence`. A callout citing one must carry the verbatim stamp.
+    rationale_floor: set[str] = set()
 
     for round_i in range(max_tool_rounds):
         # Final round: take the research tools away and force an answer, so a
@@ -527,8 +564,14 @@ def iter_compose_events(
                         reason = validate_block_dict(inp)
                         if reason is None:
                             reason = validate_widget_payload(inp, evidence)
+                        if reason is None:
+                            reason = rationale_stamp_violation(inp, rationale_floor)
                         emit_status[blk["id"]] = reason
                         if reason is None:
+                            # Evidence-bearing values (fog score + citation) are the
+                            # server's, not the model's: stamp from this turn's
+                            # evidence so a fabricated number cannot cross.
+                            stamp_widget_payload(inp, evidence)
                             b = Block.from_dict(inp)
                             emitted.append(b)
                             trace.event("block.accept", block=b.to_dict(), sse=True)
@@ -603,6 +646,26 @@ def iter_compose_events(
                            "frame": _seal(question, emitted, verdict.status,
                                           cheap_verdict_dict(verdict))}
                     return
+                # Grounding passed. Open-order nudge (Level 2, council-corrected):
+                # a code answer must not OPEN with the wall — a dense citation_stack
+                # as the first block, no plain lead. A NUDGE, not an invariant
+                # (legibility is not structurally sealable); block-kind only, never
+                # reads text. It sits BEHIND grounding (which already `continue`d if
+                # it fired), so the two never contest the one shared retry.
+                altitude = altitude_violation(emitted, question)
+                if altitude and not altitude_retry_used and can_retry:
+                    altitude_retry_used = True
+                    discarded = len(emitted)
+                    emitted.clear()
+                    acks = _ack_terminal_tools(turn_content, emit_status)
+                    if acks:
+                        messages.append({"role": "user", "content": acks})
+                    _inject_directive(messages, ALTITUDE_RETRY_DIRECTIVE)
+                    trace.event("retry", kind="altitude", reason=altitude,
+                                directive=ALTITUDE_RETRY_DIRECTIVE,
+                                discarded_blocks=discarded, sse=True)
+                    yield {"type": "reset"}
+                    continue
                 if judge is not None:
                     jv = judge(question, emitted, ledger)
                     _trace_judge(trace, jv)
@@ -682,6 +745,11 @@ def iter_compose_events(
                     evidence.add_callers(args.get("symbol", ""), result)
                 elif name == "get_callees":
                     evidence.add_callees(args.get("symbol", ""), result)
+                elif name == "get_rationale":
+                    if (isinstance(result, dict)
+                            and result.get("verdict") == "accepted_not_decided"
+                            and result.get("file")):
+                        rationale_floor.add(result["file"].replace("\\", "/"))
                 ms = int((time.perf_counter() - t0) * 1000)
                 tool_results.append(_ack(tuid, result))
                 # result_paths is the LEDGER DELTA: paths this call newly

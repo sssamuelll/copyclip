@@ -88,7 +88,8 @@ def test_build_handoff_packet_includes_scope_decisions_risks_and_projection(tmp_
     assert any(item["type"] == "architectural_decision" for item in packet["constraints"])
     assert packet["risk_dark_zones"]
     assert any(item["kind"] == "intent_drift" for item in packet["risk_dark_zones"])
-    assert any(item["kind"] == "cognitive_debt" for item in packet["risk_dark_zones"])
+    # Wave 5: the synthetic debt-derived risk kind is now "heat" on every surface.
+    assert any(item["kind"] == "heat" for item in packet["risk_dark_zones"])
     assert any(evidence_id.startswith("risk:debt:") for item in packet["risk_dark_zones"] for evidence_id in item["evidence"])
     assert packet["agent_consumable_packet"]["allowed_write_scope"] == ["src/copyclip/mcp_server.py"]
     assert "frontend" in packet["agent_consumable_packet"]["do_not_touch"]

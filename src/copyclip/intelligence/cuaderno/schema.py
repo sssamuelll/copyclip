@@ -197,6 +197,13 @@ KNOWN_BLOCK_KINDS: frozenset[str] = frozenset({
     "citation", "citation_stack", "callout", "widget", "followups",
 })
 
+# Decision statuses the ledger accepts (kept in sync with the PATCH
+# /api/decisions/{id} handler in server.py). A callout's proposed decision_action
+# must target one of these.
+DECISION_STATUSES: frozenset[str] = frozenset({
+    "proposed", "accepted", "unresolved", "resolved", "superseded",
+})
+
 
 def validate_block_dict(d: Any) -> Optional[str]:
     """Return None if d is a renderable Block dict, else a short reason string.
@@ -211,4 +218,26 @@ def validate_block_dict(d: Any) -> Optional[str]:
     kind = d.get("kind")
     if kind not in KNOWN_BLOCK_KINDS:
         return f"unknown or missing block kind: {kind!r}"
+    if kind == "callout":
+        # A callout is the cuaderno's claim block (a risk, a recovered decision,
+        # an explicit commitment). In an evidence-first surface a claim without
+        # evidence is fabrication, so a callout MUST be anchored — either by a
+        # path/commit citation, or by a decision_action that references a real
+        # ledger row (the proposal the human will confirm with a click).
+        action = d.get("decision_action")
+        has_action = isinstance(action, dict)
+        citations = d.get("citations")
+        has_citation = isinstance(citations, list) and any(
+            isinstance(c, dict) and (c.get("path") or c.get("commit")) for c in citations
+        )
+        if not has_citation and not has_action:
+            return "callout must carry at least one citation (a claim needs evidence)"
+        if has_action:
+            # The cuaderno's ONLY write: a proposed decision status change. The
+            # model only PROPOSES; the human's click performs the PATCH. Validate
+            # the proposal's shape so a malformed action never reaches the button.
+            if not isinstance(action.get("decision_id"), int):
+                return "callout decision_action needs an integer decision_id"
+            if action.get("to_status") not in DECISION_STATUSES:
+                return f"callout decision_action to_status must be one of {sorted(DECISION_STATUSES)}"
     return None

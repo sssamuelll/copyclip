@@ -1,5 +1,6 @@
 import type { Block, Citation, Frame } from '../../../types/api'
 import { CitationChip } from '../CitationChip'
+import { DecisionConfirm } from '../DecisionConfirm'
 import { renderInline } from '../inline'
 import { t } from '../strings'
 import { GraphSubset } from '../widgets/GraphSubset'
@@ -185,6 +186,9 @@ function BlockRender({
                 </div>
               ))
             : null}
+          {block.decision_action ? (
+            <DecisionConfirm action={block.decision_action} lang={lang} />
+          ) : null}
         </div>
       )
     case 'widget':

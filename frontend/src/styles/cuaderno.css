@@ -30,6 +30,11 @@
   --neg-ink:  oklch(0.46 0.12 30);
   --neg-line: oklch(0.56 0.13 30 / 0.34);
 
+  /* cognitive-debt fog — a NEUTRAL data signal, deliberately outside the warm
+     editorial accent: cyan says "this is just data, not an alert". Self-contained
+     here so the cuaderno never depends on the dying styles.css. */
+  --accent-cyan:  #06b6d4;
+
   /* radii + shadow */
   --radius-sm: 4px;
   --radius:    8px;
@@ -67,6 +72,9 @@
   --neg:      oklch(0.60 0.13 30 / 0.20);
   --neg-ink:  oklch(0.74 0.12 30);
   --neg-line: oklch(0.60 0.13 30 / 0.34);
+
+  /* brighter cyan for legibility on dark paper */
+  --accent-cyan:  #22d3ee;
 
   --shadow-1: 0 1px 0 rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.35);
   --shadow-2: 0 6px 20px rgba(0,0,0,0.55), 0 1px 0 rgba(0,0,0,0.5);
@@ -804,6 +812,27 @@
   opacity: 0.7;
   z-index: 1;
 }
+
+/* decision status change — the cuaderno's only write, behind a human click */
+.decision-confirm { margin-top: 10px; }
+.decision-confirm-btn {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.decision-confirm-btn:disabled { opacity: 0.6; cursor: default; }
+.decision-confirm.done {
+  margin-top: 10px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--accent-ink);
+}
+.decision-confirm-err { margin-left: 10px; font-size: 12px; color: var(--ink-3); }
 
 /* diff widget */
 .diff {

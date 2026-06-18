@@ -28,15 +28,13 @@ dependencies = [
   "psutil>=5.9",
   "anthropic>=0.39",
   "openai>=1.40",
+  "marimo>=0.10",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pytest>=9.0",
   "pytest-asyncio>=1.0",
-]
-playground = [
-  "marimo>=0.10",
 ]
 
 [project.scripts]

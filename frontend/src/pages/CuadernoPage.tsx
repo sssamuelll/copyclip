@@ -3,10 +3,11 @@ import type { Block, CuadernoQuestion, ToolRow, CuadernoProvidersResponse } from
 import { Cuaderno } from '../components/cuaderno/Cuaderno'
 import { askStream, cuadernoApi } from '../api/cuaderno'
 import { reconcileOnMount, onActiveFrameChange } from '../components/cuaderno/playgroundSlot'
+import type { SurvivorPage } from '../nav'
 
 const SESSION_STORAGE_KEY = 'copyclip.cuaderno.session_id'
 
-export function CuadernoPage({ onOpenDashboard }: { onOpenDashboard?: () => void } = {}) {
+export function CuadernoPage({ onNavigate }: { onNavigate?: (target: SurvivorPage) => void } = {}) {
   const [sessionId, setSessionId] = useState<string | null>(() =>
     localStorage.getItem(SESSION_STORAGE_KEY),
   )
@@ -129,7 +130,7 @@ export function CuadernoPage({ onOpenDashboard }: { onOpenDashboard?: () => void
               question,
               frame: e.frame,
               bookmarked: false,
-              got_it: null,
+              answer_check: null,
               created_at: new Date().toISOString(),
             }
             setQuestions((prev) => [...prev, newQ])
@@ -163,13 +164,13 @@ export function CuadernoPage({ onOpenDashboard }: { onOpenDashboard?: () => void
     setActivePosition(position)
   }
 
-  const onSetGotIt = (position: number, value: 'got' | 'didnt') => {
+  const onSetAnswerCheck = (position: number, value: 'answers' | 'not_yet') => {
     if (!sessionId) return
     cuadernoApi
-      .patchQuestion(sessionId, position, { got_it: value })
+      .patchQuestion(sessionId, position, { answer_check: value })
       .catch(() => {})
     setQuestions((prev) =>
-      prev.map((q) => (q.position === position ? { ...q, got_it: value } : q)),
+      prev.map((q) => (q.position === position ? { ...q, answer_check: value } : q)),
     )
   }
 
@@ -204,10 +205,10 @@ export function CuadernoPage({ onOpenDashboard }: { onOpenDashboard?: () => void
         toolCalls={toolCalls}
         providers={providers}
         onSetProvider={onSetProvider}
-        onOpenDashboard={onOpenDashboard}
+        onNavigate={onNavigate}
         onAsk={onAsk}
         onSelectFromHistory={onSelectFromHistory}
-        onSetGotIt={onSetGotIt}
+        onSetAnswerCheck={onSetAnswerCheck}
         questionLanguage={currentQuestionLanguage}
       />
     </>

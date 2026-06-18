@@ -35,6 +35,22 @@ DRIFT_CALIBRATION_VERSION = "v1.1"
 
 AGENT_SIGNATURES = ["cursor", "windsurf", "agent", "github-actions", "bot"]
 
+# Pulso: the Co-Authored-By trailer is the only LIVE AI-burst signal. git-blame
+# author is dead here (Samuel commits AI's work under his own name -> 0/203), so
+# AGENT_SIGNATURES above never fires; the trailer in the commit body does. We
+# count a commit as AI-attributed only when an AI co-author appears inside an
+# actual Co-authored-by trailer line, never anywhere else in the body.
+_AI_COAUTHOR_RE = re.compile(
+    r"(?im)^\s*co-authored-by:.*\b(claude|gpt|chatgpt|openai|anthropic|copilot|cursor|gemini)\b",
+)
+
+
+def _commit_is_ai_attributed(body: str) -> bool:
+    """True iff the commit body carries a Co-authored-by trailer naming an AI."""
+    if not body:
+        return False
+    return bool(_AI_COAUTHOR_RE.search(body))
+
 
 class AnalysisCanceled(Exception):
     pass
@@ -360,6 +376,55 @@ def _analyze_git_folder(project_root: str, project_id: int, conn) -> Dict:
 
 
 # Brief: analyze
+
+def _persist_last_contact(conn, project_id: int) -> None:
+    """Final pass: persist the Pulso 'Last contact' reading (days since a human
+    last touched a file after the most recent AI-attributed burst). NULL where
+    there is nothing honest to report — no burst, or the human already returned.
+    Reads commits.ai_attributed (the live trailer signal), never blame. Must run
+    after commits/file_changes are ingested; one file's failure never aborts."""
+    from .pulso import build_last_contact
+
+    rows = conn.execute(
+        "SELECT path FROM analysis_file_insights WHERE project_id=?",
+        (project_id,),
+    ).fetchall()
+    for (path,) in rows:
+        try:
+            reading = build_last_contact(conn, project_id, path)
+        except Exception:  # noqa: BLE001 — one file's reading must not abort the pass
+            reading = None
+        conn.execute(
+            "UPDATE analysis_file_insights SET pulso_last_contact_days=? WHERE project_id=? AND path=?",
+            (reading["last_contact_days"] if reading else None, project_id, path),
+        )
+
+
+def _persist_composite_scores(conn, project_id: int) -> None:
+    """Final pass: overwrite each file's cognitive_debt with the LIVE 8-factor
+    composite (build_debt_breakdown), not the dead single-factor scalar. One
+    number, one engine — the cuaderno fog, the MCP map, and handoff risks all
+    read this column, so feeding it from the live model collapses the two debt
+    lineages at once. Must run AFTER insights, churn, decisions and tests are
+    built (the composite reads them); a single file's failure never aborts the
+    pass."""
+    from .cognitive_debt import build_debt_breakdown
+
+    rows = conn.execute(
+        "SELECT path FROM analysis_file_insights WHERE project_id=?",
+        (project_id,),
+    ).fetchall()
+    for (path,) in rows:
+        try:
+            value = build_debt_breakdown(conn, project_id, "file", path)["score"]["value"]
+        except Exception:  # noqa: BLE001 — one file's score must not abort the pass
+            continue
+        conn.execute(
+            "UPDATE analysis_file_insights SET cognitive_debt=? WHERE project_id=? AND path=?",
+            (round(float(value or 0.0), 2), project_id, path),
+        )
+    conn.commit()
+
 
 async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, checkpoint_every: int = 500, checkpoint_cb=None, should_cancel=None) -> Dict[str, int]:
     root = os.path.abspath(project_root)
@@ -757,20 +822,30 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
     if progress_cb:
         progress_cb(PHASE_GIT_HISTORY, indexed, total_files, "collecting git history")
 
-    log = _safe_git(root, ["log", "--pretty=format:%H|%an|%ad|%s", "--date=iso", "-n", "300"])
+    # Fields are unit-separated (\x1f) and records record-separated (\x1e) so the
+    # multi-line commit body (%b) — where the Co-authored-by trailer lives — never
+    # collides with the delimiter the way a "|" subject split did.
+    log = _safe_git(
+        root,
+        ["log", "--pretty=format:%H%x1f%an%x1f%ad%x1f%s%x1f%b%x1e", "--date=iso", "-n", "300"],
+    )
     commits = 0
     if log:
-        for line in log.splitlines():
+        for record in log.split("\x1e"):
             _check_canceled()
-            try:
-                sha, author, date, msg = line.split("|", 3)
-                conn.execute(
-                    "INSERT OR REPLACE INTO commits(project_id,sha,author,date,message) VALUES(?,?,?,?,?)",
-                    (project_id, sha, author, date, msg),
-                )
-                commits += 1
-            except ValueError:
+            record = record.strip()
+            if not record:
                 continue
+            parts = record.split("\x1f")
+            if len(parts) < 4:
+                continue
+            sha, author, date, msg = parts[0], parts[1], parts[2], parts[3]
+            body = parts[4] if len(parts) > 4 else ""
+            conn.execute(
+                "INSERT OR REPLACE INTO commits(project_id,sha,author,date,message,ai_attributed) VALUES(?,?,?,?,?,?)",
+                (project_id, sha, author, date, msg, 1 if _commit_is_ai_attributed(body) else 0),
+            )
+            commits += 1
 
     churn = Counter()
     raw_changes = _safe_git(root, ["log", "--name-only", "--pretty=format:---%H", "-n", "200"])
@@ -1009,6 +1084,11 @@ async def analyze(project_root: str, progress_cb=None, start_cursor: int = 0, ch
                 ins.get("last_human_ts"),
             ),
         )
+
+    # Collapse to one debt engine: the persisted column now holds the live
+    # 8-factor composite, read by the fog, the MCP map, and handoff risks.
+    _persist_composite_scores(conn, project_id)
+    _persist_last_contact(conn, project_id)
 
     summary = {
         "files": indexed,

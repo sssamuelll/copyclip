@@ -1,151 +1,83 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { api } from './api/client'
-import { Sidebar, PAGE_LABELS } from './components/Sidebar'
-import { ReacquaintancePage } from './pages/ReacquaintancePage'
-import { ArchitecturePage } from './pages/ArchitecturePage'
-import { RisksPage } from './pages/RisksPage'
-import { ContextBuilderPage } from './pages/ContextBuilderPage'
-import { DecisionsPage } from './pages/DecisionsPage'
-import { SettingsPage } from './pages/SettingsPage'
-import { ImpactSimulatorPage } from './pages/ImpactSimulatorPage'
-import { ChangesPage } from './pages/ChangesPage'
-
+import { useState } from 'react'
 import { Atlas3DPage } from './pages/Atlas3DPage'
-import { TimelinePage } from './pages/TimelinePage'
-import { PlanningPage } from './pages/PlanningPage'
 import { HandoffPage } from './pages/HandoffPage'
-import { DebtNavigatorPage } from './pages/DebtNavigatorPage'
+import { SettingsPage } from './pages/SettingsPage'
 import { CuadernoPage } from './pages/CuadernoPage'
-
-import type { ArchEdge, ArchNode, ChangeItem, DecisionItem, Overview, RiskItem } from './types/api'
+import { SURVIVOR_LABELS, type SurvivorPage } from './nav'
 
 import './styles/cuaderno.css'
+import './styles/atlas-chrome.css'
 
-type Page = 'cuaderno' | 'reacquaintance' | 'handoff' | 'debt-navigator' | 'atlas-3d' | 'timeline' | 'planning' | 'changes' | 'architecture' | 'impact' | 'risks' | 'context-builder' | 'decisions' | 'settings'
+type Page = 'cuaderno' | SurvivorPage
 
+// copyclip IS the cuaderno: the full-screen home and the only persistent
+// surface (Wave 5 deleted the dashboard shell). The three surviving auxiliary
+// views are reached from the cuaderno's ⊞ menu and render full-screen with a
+// "back to cuaderno" control.
 export function App() {
   const [page, setPage] = useState<Page>('cuaderno')
-  const [dashLoaded, setDashLoaded] = useState(false)
-  const [overview, setOverview] = useState<Overview>()
-  const [decisions, setDecisions] = useState<DecisionItem[]>([])
-  const [risks, setRisks] = useState<RiskItem[]>([])
-  const [changes, setChanges] = useState<ChangeItem[]>([])
-  const [nodes, setNodes] = useState<ArchNode[]>([])
-  const [edges, setEdges] = useState<ArchEdge[]>([])
-  const [error, setError] = useState<string>('')
-  const [toast, setToast] = useState<string>('')
-  const [focusDecisionId, setFocusDecisionId] = useState<number | null>(null)
-  const [focusRiskArea, setFocusRiskArea] = useState<string | null>(null)
-  const [focusCommitId, setFocusCommitId] = useState<string | null>(null)
-  const [focusFilePath, setFocusFilePath] = useState<string | null>(null)
-  const reloadTimer = useRef<number | null>(null)
-
-  const loadAll = useCallback(async () => {
-    try {
-      const [o, d, r, c, a] = await Promise.all([
-        api.overview(),
-        api.decisions(),
-        api.risks(),
-        api.changes(),
-        api.architecture()
-      ])
-      setOverview(o)
-      setDecisions(d.items)
-      setRisks(r.items)
-      setChanges(c.items)
-      setNodes(a.nodes)
-      setEdges(a.edges)
-      setError('')
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load API data')
-    }
-  }, [])
-
-  // Dashboard data (overview/risks/changes/architecture) is only needed when the
-  // dashboard is shown — the cuaderno home has its own API. Load it lazily on the
-  // first entry into any dashboard page, once.
-  useEffect(() => {
-    if (page !== 'cuaderno' && !dashLoaded) {
-      setDashLoaded(true)
-      loadAll()
-    }
-  }, [page, dashLoaded, loadAll])
+  const [toast, setToast] = useState('')
 
   const notify = (msg: string) => {
     setToast(msg)
     window.setTimeout(() => setToast(''), 2200)
   }
 
-  const openDecision = (id: number) => {
-    setFocusDecisionId(id)
-    setPage('decisions')
-  }
-
-  const openRisk = (area: string) => {
-    setFocusRiskArea(area)
-    setPage('risks')
-  }
-
-  const openChanges = (opts?: { commitId?: string | null; filePath?: string | null }) => {
-    setFocusCommitId(opts?.commitId || null)
-    setFocusFilePath(opts?.filePath || null)
-    setPage('changes')
-  }
-
-  // copyclip IS the cuaderno: it is the full-screen home, rendered outside the
-  // dashboard shell. The dashboard pages are retained and reachable (the cuaderno
-  // offers a toggle into them; the sidebar returns here), to strengthen the
-  // cuaderno later. Reversible: flip the `page` default above to restore the
-  // dashboard-first behavior.
   if (page === 'cuaderno') {
     return (
       <div style={{ height: '100vh', overflow: 'hidden', background: 'var(--bg)', color: 'var(--text-primary)' }}>
-        <CuadernoPage onOpenDashboard={() => setPage('reacquaintance')} />
+        <CuadernoPage onNavigate={setPage} />
       </div>
     )
   }
 
   return (
-    <div className="app gen-ui-layout" style={{ display: 'flex', height: '100vh', background: 'var(--bg)', color: 'var(--text-primary)' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg)', color: 'var(--text-primary)' }}>
+      <header
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 14,
+          padding: '0 16px',
+          height: 44,
+          flex: '0 0 auto',
+          borderBottom: '1px solid var(--border)',
+        }}
+      >
+        <button className="btn" onClick={() => setPage('cuaderno')} style={{ padding: '5px 12px' }}>
+          ← cuaderno
+        </button>
+        <span style={{ fontSize: 12, color: 'var(--text-secondary)', letterSpacing: '.04em' }}>
+          {SURVIVOR_LABELS[page]}
+        </span>
+      </header>
 
-        <Sidebar
-          page={page}
-          setPage={(v) => setPage(v as Page)}
-          lastIndexedText={overview?.meta?.generated_at ? `last indexed ${overview.meta.generated_at.replace('T', ' ').slice(0, 16)}` : 'ready'}
-        />
+      <main style={{ flex: 1, overflowY: 'auto', position: 'relative', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: 24, flex: 1 }}>
+          {page === 'atlas-3d' && <Atlas3DPage />}
+          {page === 'handoff' && <HandoffPage onNotify={notify} />}
+          {page === 'settings' && <SettingsPage onNotify={notify} />}
+        </div>
+      </main>
 
-        <main style={{ flex: 1, overflowY: 'auto', position: 'relative', display: 'flex', flexDirection: 'column' }}>
-
-          {/* Top Indicator Persistent */}
-          <div style={{ position: 'absolute', top: 12, right: 24, zIndex: 10, display: 'flex', gap: 12 }}>
-             {error && <span className="badge badge-high">PROJECT MEMORY OFFLINE</span>}
-             <span className="badge badge-low">{PAGE_LABELS[page] ?? page.replace('-', ' ')} field</span>
-          </div>
-
-          <div style={{ padding: '24px', flex: 1 }}>
-            {page === 'reacquaintance' && <ReacquaintancePage onOpenDecision={openDecision} onOpenRisk={openRisk} onOpenChanges={openChanges} />}
-            {page === 'handoff' && <HandoffPage onNotify={notify} />}
-            {page === 'debt-navigator' && <DebtNavigatorPage onNotify={notify} />}
-            {page === 'atlas-3d' && <Atlas3DPage />}
-            {page === 'timeline' && <TimelinePage />}
-            {page === 'planning' && <PlanningPage />}
-            {page === 'changes' && <ChangesPage items={changes} risks={risks} focusCommitId={focusCommitId} focusFilePath={focusFilePath} onOpenDecision={openDecision} onOpenRisk={openRisk} />}
-            {page === 'architecture' && <ArchitecturePage nodes={nodes} edges={edges} />}
-            {page === 'impact' && <ImpactSimulatorPage />}
-            {page === 'risks' && <RisksPage items={risks} focusRiskArea={focusRiskArea} />}
-            {page === 'context-builder' && <ContextBuilderPage />}
-            {page === 'decisions' && <DecisionsPage items={decisions} focusDecisionId={focusDecisionId} />}
-            {page === 'settings' && <SettingsPage onNotify={notify} />}
-          </div>
-        </main>
-
-        {/* Global Toast */}
-        {toast && (
-          <div style={{ position: 'fixed', top: 24, left: '50%', transform: 'translateX(-50%)', background: 'var(--accent-cyan)', color: '#000', borderRadius: 4, padding: '8px 16px', zIndex: 9999, fontWeight: 500 }}>
-            {toast}
-          </div>
-        )}
-
-      </div>
+      {toast && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 24,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'var(--accent-cyan)',
+            color: '#000',
+            borderRadius: 4,
+            padding: '8px 16px',
+            zIndex: 9999,
+            fontWeight: 500,
+          }}
+        >
+          {toast}
+        </div>
+      )}
+    </div>
   )
 }

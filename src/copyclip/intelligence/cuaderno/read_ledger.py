@@ -8,6 +8,10 @@ from .tool_catalog import ANSWER_TOOLS
 _CONTENT_KEYS: tuple[str, ...] = (
     "lines", "entries", "symbols", "callers", "callees",
     "commits", "blame", "diff", "tests", "modules",
+    # Wave 4 tools each return real DB/git evidence the honesty gate must
+    # recognize — otherwise a risks/decisions answer seals as ungrounded.
+    "risks", "decisions", "impacted_modules", "snapshots",
+    "related_decisions", "top_changes", "read_first", "relevant_decisions",
 )
 
 

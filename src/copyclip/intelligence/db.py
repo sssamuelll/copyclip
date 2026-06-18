@@ -50,7 +50,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
             sha TEXT UNIQUE,
             author TEXT,
             date TEXT,
-            message TEXT
+            message TEXT,
+            ai_attributed INTEGER NOT NULL DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS file_changes (
@@ -277,6 +278,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             cognitive_debt REAL DEFAULT 0,
             agent_line_ratio REAL,
             last_human_ts REAL,
+            pulso_last_contact_days INTEGER,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(project_id, path)
         );
@@ -328,6 +330,22 @@ def init_schema(conn: sqlite3.Connection) -> None:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(projects)").fetchall()}
         if "story" not in cols:
             conn.execute("ALTER TABLE projects ADD COLUMN story TEXT")
+    except Exception:
+        pass
+
+    # Backfill the Pulso AI-attribution column on older commits tables.
+    try:
+        commit_cols = {row[1] for row in conn.execute("PRAGMA table_info(commits)").fetchall()}
+        if commit_cols and "ai_attributed" not in commit_cols:
+            conn.execute("ALTER TABLE commits ADD COLUMN ai_attributed INTEGER NOT NULL DEFAULT 0")
+    except Exception:
+        pass
+
+    # Backfill the Pulso "Last contact" column on older insight tables.
+    try:
+        afi_cols = {row[1] for row in conn.execute("PRAGMA table_info(analysis_file_insights)").fetchall()}
+        if afi_cols and "pulso_last_contact_days" not in afi_cols:
+            conn.execute("ALTER TABLE analysis_file_insights ADD COLUMN pulso_last_contact_days INTEGER")
     except Exception:
         pass
 
@@ -593,7 +611,7 @@ def init_cuaderno_schema(conn: sqlite3.Connection) -> None:
             question    TEXT NOT NULL,
             frame_json  TEXT NOT NULL,
             bookmarked  INTEGER NOT NULL DEFAULT 0,
-            got_it      TEXT,
+            answer_check TEXT,
             created_at  TEXT NOT NULL,
             UNIQUE(session_id, position)
         );
@@ -602,4 +620,19 @@ def init_cuaderno_schema(conn: sqlite3.Connection) -> None:
             ON cuaderno_questions(session_id, position);
         """
     )
+    # Repair the doctrine breach in existing DBs: the old `got_it` column stored a
+    # verdict on the MIND ('got'/'didnt'). Rename it to `answer_check` and re-scope
+    # the values to the ARTIFACT ('answers'/'not_yet') so no human's marks are lost.
+    try:
+        cq_cols = {row[1] for row in conn.execute(
+            "PRAGMA table_info(cuaderno_questions)").fetchall()}
+        if "got_it" in cq_cols and "answer_check" not in cq_cols:
+            conn.execute(
+                "ALTER TABLE cuaderno_questions RENAME COLUMN got_it TO answer_check")
+            conn.execute(
+                "UPDATE cuaderno_questions SET answer_check='answers' WHERE answer_check='got'")
+            conn.execute(
+                "UPDATE cuaderno_questions SET answer_check='not_yet' WHERE answer_check='didnt'")
+    except Exception:
+        pass
     conn.commit()

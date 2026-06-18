@@ -142,6 +142,233 @@ def build_tool_definitions() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "get_call_path",
+            "description": (
+                "Walk the STATIC downstream call slice from a symbol: every "
+                "function it calls, transitively, breadth-first and capped. Each "
+                "hop is a real citation (file + line range) — the slice IS its "
+                "citations, so emit it as an ordered citation_stack, one citation "
+                "per hop. Use for 'walk me through how X works end-to-end' / "
+                "'trace this'. This is STATIC call STRUCTURE from the symbol "
+                "index, NOT a runtime/execution trace — never present the order as "
+                "execution order, and do not redraw it as a sequence_diagram "
+                "(that reads as runtime). `truncated` means the node cap was hit; "
+                "`depth_capped` means real callees sit below the depth limit, "
+                "unshown — say so. An absent entry means the symbol is not indexed."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string", "description": "Entry symbol name to walk from."},
+                    "file": {"type": "string", "description": "Project-relative file to disambiguate a name shared by several symbols. Optional."},
+                    "max_depth": {"type": "integer", "default": 4, "description": "How many call levels deep to walk."},
+                    "max_nodes": {"type": "integer", "default": 40, "description": "Hard cap on total hops."},
+                },
+                "required": ["symbol"],
+            },
+        },
+        {
+            "name": "get_rationale",
+            "description": (
+                "Recover the recorded intent behind a FILE — the deliberation that "
+                "was delegated — and, when the ledger is silent, get a DETERMINISTIC "
+                "verdict so you never invent a 'why'. The server (not you) decides: "
+                "'recovered' (decisions reference the file → present them as a cited "
+                "citation_stack, 'this exists because…'); 'accepted_not_decided' "
+                "(committed but never deliberated → emit ONE callout carrying the "
+                "`stamp` VERBATIM, and if `ai_shaped` add 'an AI burst shaped it', "
+                "cited to a commit); 'untracked' (no history — say so). NEVER "
+                "paraphrase a plausible purpose: recovering recorded intent is not "
+                "the human holding it, and an invented why is the worst thing you "
+                "can emit. Use for 'why does this exist / why this way'."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "file": {"type": "string", "description": "Project-relative file path."},
+                },
+                "required": ["file"],
+            },
+        },
+        {
+            "name": "get_decisions",
+            "description": (
+                "Read the decision-ledger — the architectural decisions the human "
+                "recorded (and their status). Optionally filter by status "
+                "(proposed | accepted | resolved | ...). Cite a decision by its id."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "description": "Filter by status. Optional."},
+                    "limit":  {"type": "integer", "default": 50},
+                },
+            },
+        },
+        {
+            "name": "get_blast_radius",
+            "description": (
+                "What else does this touch — the STATIC blast radius of changing a "
+                "symbol: the call sites that break on a signature change "
+                "(`direct_callers`, symbol-level, each a citation) plus the modules "
+                "transitively impacted (`impacted_modules`, directory-level reach). "
+                "This is the REVEAL half of a predict-then-reveal: when the human "
+                "asks 'what breaks if I change X', FIRST pose the prediction as a "
+                "followup ('before I show you — which call sites break?') and STOP; "
+                "reveal with this tool on the NEXT turn, beside their guess. It is "
+                "STATIC topology, NOT runtime — say so; a matching guess matched "
+                "THESE cited edges, never 'you understand the blast radius'. Do NOT "
+                "score the guess. An absent entry means the symbol is not indexed."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string", "description": "Symbol whose blast radius to compute."},
+                    "file": {"type": "string", "description": "Project-relative file to disambiguate a shared name. Optional."},
+                },
+                "required": ["symbol"],
+            },
+        },
+        {
+            "name": "get_commit_change_graph",
+            "description": (
+                "The change graph of ONE commit: the files it changed plus the "
+                "call edges among them AS OF HEAD. Use for 'what was in that "
+                "change / show me the shape of commit X / the AI burst that "
+                "touched this file'. The SUBJECT is the COMMIT, never 'the plan' — "
+                "say what the commit changed and how those files call each other; "
+                "NEVER say you reassembled the plan or that the human now holds it "
+                "(they reassemble the intent themselves). Resolve by `commit` (sha "
+                "or prefix) or by `file` (its most-recent AI commit). `linked` "
+                "files have >=1 cited edge to another changed file — emit them as a "
+                "citation_stack, ONE item per `edges` row (from_symbol -> to_symbol "
+                "with lines); every edge is AS OF HEAD, never proven created in the "
+                "commit, and never execution order. `co_changed_unlinked` files "
+                "carry a `reason`: 'not_indexed' (no symbols — deleted/non-code/"
+                "unparsed) or 'no_edge_in_index' (has symbols, none link here) — "
+                "say 'co-changed; no witnessed structural link in the current "
+                "index', NEVER 'no relationship exists'. When `linked` is empty, "
+                "cite the coverage (`indexed_file_count`/`changed_file_count`): the "
+                "index is incomplete, the files are not 'unrelated'. Do NOT surface "
+                "additions/deletions or rank the files."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "commit": {"type": "string", "description": "Commit sha or prefix to graph. Optional."},
+                    "file": {"type": "string", "description": "Project-relative file; resolves to its most-recent AI-attributed commit. Optional."},
+                    "max_files": {"type": "integer", "default": 60, "description": "Cap on files returned (linked preferred); sets `truncated`."},
+                },
+            },
+        },
+        {
+            "name": "get_reverse_dependents",
+            "description": (
+                "Modules transitively impacted if a file changes (reverse-dependents "
+                "/ blast radius). Resolves the path to its module, then walks the "
+                "dependency graph upward. Use this for 'what breaks if I touch X'."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {"path": {"type": "string", "description": "Project-relative file path."}},
+                "required": ["path"],
+            },
+        },
+        {
+            "name": "git_archaeology",
+            "description": (
+                "A file's recent commit history crossed with the decisions that "
+                "reference it. Connects 'what changed here' to 'which decision you "
+                "made about it' — the commit↔decision link git_log alone can't give."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {"file": {"type": "string", "description": "Project-relative file path."}},
+                "required": ["file"],
+            },
+        },
+        {
+            "name": "get_story_snapshots",
+            "description": (
+                "Narrative snapshots of how the project shifted over time (focus "
+                "areas, major changes, open questions) — the connective tissue "
+                "between work bursts. Empty until analysis has run; says so."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {"limit": {"type": "integer", "default": 5}},
+            },
+        },
+        {
+            "name": "get_reacquaintance_briefing",
+            "description": (
+                "Re-entry briefing after a gap: top changes, what to read first, "
+                "relevant decisions, top risk — what reconnects you to your "
+                "intention across bursts. Use for 'catch me up' / 'what did I miss'."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "mode":       {"type": "string", "description": "baseline: last_seen | checkpoint | window. Default last_seen."},
+                    "window":     {"type": "string", "description": "lookback window, e.g. '7d'. Default 7d."},
+                    "checkpoint": {"type": "string", "description": "checkpoint name when mode=checkpoint. Optional."},
+                },
+            },
+        },
+        {
+            "name": "get_risks",
+            "description": (
+                "Read the project's risk signals (churn, test_gap, complexity, "
+                "intent_drift), highest score first. Each row is a deterministic "
+                "heuristic over real git data, citable by `area` (file path). Use "
+                "for 'what's risky' — emit cited callout blocks, never invent severity."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "kind":     {"type": "string", "description": "churn | test_gap | complexity | intent_drift. Optional."},
+                    "severity": {"type": "string", "description": "Filter by severity. Optional."},
+                    "limit":    {"type": "integer", "default": 50},
+                },
+            },
+        },
+        {
+            "name": "get_entry_cue",
+            "description": (
+                "The cuaderno's ENTRY CUE: the single most-overdue AI burst the "
+                "human has not returned to — the proactive launching point. Use it "
+                "when the human opens the cuaderno or asks 'where do I start / what "
+                "should I revisit / what did I miss'. Live-verified (never fires on "
+                "a file the human came back to). On a cue, emit ONE cited callout "
+                "('an AI burst shaped `X` ~N days ago; you haven't been back') and "
+                "ONE followup that launches get_rationale or get_call_path on that "
+                "file — NEVER the playground. If `stale` is true, scope the claim "
+                "to 'as of the last analysis ~`analyzed_age_days` days ago', do not "
+                "assert a present-tense gap. The FILE is stale, never the mind — "
+                "recency and a launch, never a comprehension claim. A null "
+                "entry_cue means nothing to surface: stay silent, do not invent one."
+            ),
+            "input_schema": {"type": "object", "properties": {}},
+        },
+        {
+            "name": "get_last_contact",
+            "description": (
+                "Read Pulso 'Last contact': files an AI burst last shaped that the "
+                "human has NOT returned to, longest gap (days) first, citable by "
+                "`file_path`. Reads the Co-Authored-By trailer signal, never blame; "
+                "files with no burst (or where the human is current) are absent, not "
+                "zero. Use for 'what did AI change that I haven't gone back to?'. "
+                "It proves elapsed TIME, never comprehension — say so, never imply "
+                "the human does or does not understand the code."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "default": 20},
+                },
+            },
+        },
+        {
             "name": "emit_block",
             "description": (
                 "Emit ONE block of your answer. Call once per block, in order. "
@@ -205,4 +432,48 @@ def dispatch_tool(
         return anchor.find_tests(project_root, args["symbol"])
     if name == "get_module_graph":
         return anchor.get_module_graph(conn, project_id, args.get("scope", ""))
+    if name == "get_call_path":
+        return anchor.get_call_path(
+            conn, project_id, args["symbol"],
+            file=args.get("file"),
+            max_depth=args.get("max_depth", 4),
+            max_nodes=args.get("max_nodes", 40),
+        )
+    if name == "get_rationale":
+        return anchor.get_rationale(conn, project_id, args["file"])
+    if name == "get_decisions":
+        return anchor.get_decisions(
+            conn, project_id, status=args.get("status"), limit=args.get("limit", 50)
+        )
+    if name == "get_blast_radius":
+        return anchor.get_blast_radius(conn, project_id, args["symbol"], file=args.get("file"))
+    if name == "get_commit_change_graph":
+        return anchor.get_commit_change_graph(
+            conn, project_id,
+            commit=args.get("commit"), file=args.get("file"),
+            max_files=args.get("max_files", 60),
+        )
+    if name == "get_reverse_dependents":
+        return anchor.get_reverse_dependents(conn, project_id, args["path"])
+    if name == "git_archaeology":
+        return anchor.git_archaeology(project_root, conn, project_id, args["file"])
+    if name == "get_story_snapshots":
+        return anchor.get_story_snapshots(conn, project_id, limit=args.get("limit", 5))
+    if name == "get_reacquaintance_briefing":
+        return anchor.get_reacquaintance_briefing(
+            project_root,
+            mode=args.get("mode", "last_seen"),
+            window=args.get("window", "7d"),
+            checkpoint=args.get("checkpoint"),
+        )
+    if name == "get_risks":
+        return anchor.get_risks(
+            conn, project_id,
+            kind=args.get("kind"), severity=args.get("severity"),
+            limit=args.get("limit", 50),
+        )
+    if name == "get_entry_cue":
+        return anchor.get_entry_cue(conn, project_id)
+    if name == "get_last_contact":
+        return anchor.get_last_contact(conn, project_id, limit=args.get("limit", 20))
     return {"error": "unknown_tool", "name": name}

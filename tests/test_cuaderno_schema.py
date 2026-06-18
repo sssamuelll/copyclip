@@ -124,3 +124,58 @@ def test_frame_verdict_defaults_none_for_legacy():
     from copyclip.intelligence.cuaderno.schema import frame_from_dict
     f = frame_from_dict({"question": "q", "blocks": [{"kind": "lead", "text": "x"}]})
     assert f.verdict is None and f.status == "legacy"
+
+
+# W4-2: a callout is the cuaderno's claim block; in an evidence-first surface a
+# claim without evidence is fabrication, so a callout MUST carry a citation.
+def test_callout_without_citation_rejected():
+    reason = validate_block_dict({"kind": "callout", "kicker": "risk", "text": "this area is risky"})
+    assert reason and "citation" in reason
+
+
+def test_callout_empty_citations_rejected():
+    reason = validate_block_dict({"kind": "callout", "kicker": "k", "text": "t", "citations": []})
+    assert reason and "citation" in reason
+
+
+def test_callout_with_path_citation_ok():
+    ok = validate_block_dict({
+        "kind": "callout", "kicker": "risk", "text": "churn-heavy",
+        "citations": [{"kind": "path", "path": "src/x.py"}],
+    })
+    assert ok is None
+
+
+def test_callout_with_commit_citation_ok():
+    ok = validate_block_dict({
+        "kind": "callout", "kicker": "decision", "text": "anchored",
+        "citations": [{"kind": "commit", "commit": "a0dae63"}],
+    })
+    assert ok is None
+
+
+# W4-2 decision B: a callout may propose a decision status change. The action
+# references a real ledger row, so it anchors the claim (no path citation needed),
+# and its shape is validated (the human confirms via a click — the only write).
+def test_callout_decision_action_valid_ok():
+    ok = validate_block_dict({
+        "kind": "callout", "kicker": "proposed change", "text": "anchor decision #3",
+        "decision_action": {"decision_id": 3, "to_status": "accepted"},
+    })
+    assert ok is None
+
+
+def test_callout_decision_action_bad_status_rejected():
+    bad = validate_block_dict({
+        "kind": "callout", "kicker": "k", "text": "t",
+        "decision_action": {"decision_id": 3, "to_status": "bogus"},
+    })
+    assert bad and "to_status" in bad
+
+
+def test_callout_decision_action_needs_int_id():
+    bad = validate_block_dict({
+        "kind": "callout", "kicker": "k", "text": "t",
+        "decision_action": {"decision_id": "three", "to_status": "accepted"},
+    })
+    assert bad and "decision_id" in bad

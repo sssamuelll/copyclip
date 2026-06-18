@@ -74,9 +74,9 @@ def test_breakdown_endpoint_returns_file_breakdown():
         breakdown = resp["breakdown"]
         assert breakdown["meta"]["scope_kind"] == "file"
         assert breakdown["meta"]["scope_id"] == "src/copyclip/mcp_server.py"
-        assert breakdown["meta"]["contract_version"] == "v1"
+        assert breakdown["meta"]["contract_version"] == "v2"
         factor_ids = [f["factor_id"] for f in breakdown["factor_breakdown"]]
-        assert "agent_authored_ratio" in factor_ids
+        assert "agent_authored_ratio" not in factor_ids  # removed in v2
         assert "decision_gap" in factor_ids
 
 

@@ -215,6 +215,9 @@ def run_server(
                 conn_r.commit()
                 conn_r.close()
                 publish_event("analyze.progress", {"job_id": job_id, "status": "running", "phase": "analyzing", "processed": int(resume_from or 0), "total": total})
+                # CLI notice (decision E): background analysis announces itself on the
+                # server console, so the trigger is observable without the dashboard.
+                print(f"[copyclip] analysis started in background — {total} files", flush=True)
 
                 try:
                     from .analyzer import AnalysisCanceled, analyze
@@ -262,6 +265,7 @@ def run_server(
                     conn_d.commit()
                     conn_d.close()
                     publish_event("analyze.completed", {"job_id": job_id, "summary": summary})
+                    print(f"[copyclip] analysis completed — {total} files", flush=True)
                 except AnalysisCanceled:
                     conn_c = connect(root)
                     init_schema(conn_c)
@@ -1478,11 +1482,11 @@ def run_server(
                     except json.JSONDecodeError:
                         self._json({"error": "invalid_request"}, 400)
                         return
-                    from .cuaderno.persistence import set_bookmark, set_got_it
+                    from .cuaderno.persistence import set_bookmark, set_answer_check
                     if "bookmarked" in data:
                         set_bookmark(conn, sid, pos, bool(data["bookmarked"]))
-                    if "got_it" in data:
-                        set_got_it(conn, sid, pos, data["got_it"])
+                    if "answer_check" in data:
+                        set_answer_check(conn, sid, pos, data["answer_check"])
                     self._json({"ok": True})
                     return
 

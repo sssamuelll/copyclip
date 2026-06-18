@@ -9,8 +9,8 @@ Three scenarios cover the realistic shapes a debt breakdown has to handle:
 - ``seed_clean_project``: a small project where no file reaches activation
   floors; used to verify remediation returns a ``no_action_needed`` note.
 - ``seed_greenfield_project``: persisted rows without blame so
-  ``agent_authored_ratio`` and ``review_staleness`` are unavailable and
-  confidence must fall to ``low`` or ``medium``.
+  ``review_staleness`` is unavailable (``agent_authored_ratio`` was removed in
+  the v2 contract) and confidence must fall to ``low`` or ``medium``.
 """
 
 from __future__ import annotations

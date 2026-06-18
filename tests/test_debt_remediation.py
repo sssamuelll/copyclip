@@ -84,7 +84,7 @@ def test_high_agent_ratio_produces_human_review_candidate(tmp_path):
     action_types = {c["action_type"] for c in plan["remediation_candidates"]}
     assert "review_this_recent_change" in action_types
     review = next(c for c in plan["remediation_candidates"] if c["action_type"] == "review_this_recent_change")
-    assert "agent_authored_ratio" in review["reduces_factors"]
+    assert "review_staleness" in review["reduces_factors"]
     assert review["expected_impact"]["score_delta"] < 0
     # must reference concrete commits in evidence
     assert any(ev.startswith("commit:") for ev in review["evidence"])

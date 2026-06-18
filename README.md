@@ -17,14 +17,16 @@ Built first for the author's own daily use, working alongside AI agents on long-
 
 ## What CopyClip does
 
+The cuaderno is the single surface: you ask, and an evidence-first tutor answers, reaching the capabilities below through cited tools and widgets. Two views live alongside it as side surfaces — the codebase map and safe handoff — and MCP exposes the same bounded views to external agents.
+
 ### Reacquaintance Mode
 Open any project after time away and get a five-minute briefing: what changed, who changed it, which decisions were made in your absence, and which files to read first. Anchored on the most recent human-authored commit so you re-enter through code you actually wrote, not through whatever an agent touched last.
 
 ### Ask Project — evidence-first answers
 Every answer is grounded in specific commits, decisions, and files. If the evidence is thin, CopyClip says so instead of confidently hallucinating. Contradictions in the codebase are flagged explicitly, not papered over.
 
-### Cognitive Debt Navigator
-Identifies modules that have drifted from your understanding — high churn, high agent-authored ratio, stale human review, missing decisions, weak test coverage. Each dark zone comes with a remediation plan: which commits to read first, which decisions to re-check, where to focus your next hour.
+### Heat & dark zones
+Flags the modules under the most maintenance and attention pressure — high churn, high agent-authored ratio, stale human review, missing decisions, weak test coverage. (Heat points your attention; it does not claim to measure how well you understand the code.) Each dark zone comes with a remediation plan: which commits to read first, which decisions to re-check, where to focus your next hour.
 
 ### Agent Handoff Contract
 Before you delegate work to a coding agent, CopyClip builds a bounded handoff packet: scope, constraints, do-not-touch boundaries, review gates. When the agent reports back, CopyClip generates a review summary comparing what changed against what was declared. Scope violations and unexpected dark-zone entries surface before merge, not after.

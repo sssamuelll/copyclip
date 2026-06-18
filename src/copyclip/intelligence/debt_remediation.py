@@ -25,7 +25,6 @@ REMEDIATION_ACTION_TYPES = {
 # Minimum normalized contribution (0-100) for a factor to trigger its template.
 # High contribution → candidate is worth surfacing; low contribution → noise.
 _FACTOR_ACTIVATION_FLOOR = {
-    "agent_authored_ratio": 40.0,
     "review_staleness": 40.0,
     "decision_gap": 60.0,
     "test_evidence_gap": 60.0,
@@ -101,16 +100,16 @@ def _estimate_impact(factor_map: dict[str, dict[str, Any]], factor_ids: list[str
 
 
 def _candidate_for_human_review(factor_map, target, evidence_ids, agent_commits) -> dict[str, Any] | None:
-    if not _is_factor_active(factor_map, "agent_authored_ratio") and not _is_factor_active(factor_map, "review_staleness"):
+    if not _is_factor_active(factor_map, "review_staleness"):
         return None
-    delta = _estimate_impact(factor_map, ["agent_authored_ratio", "review_staleness"], reduction=0.5)
+    delta = _estimate_impact(factor_map, ["review_staleness"], reduction=0.5)
     commit_evidence = [f"commit:{c['sha']}" for c in agent_commits[:3]]
     return {
         "id": "human_review_recent_changes",
         "action_type": "review_this_recent_change",
         "label": "Human-review the recent agent-authored changes to restore continuity",
         "target": target,
-        "reduces_factors": ["agent_authored_ratio", "review_staleness"],
+        "reduces_factors": ["review_staleness"],
         "expected_impact": {"score_delta": delta, "confidence": "medium"},
         "rationale": "Human review of recent non-human commits is the cheapest single reduction for drift and staleness.",
         "evidence": evidence_ids + commit_evidence,
@@ -203,16 +202,16 @@ def _candidate_for_blast_radius(factor_map, target) -> dict[str, Any] | None:
 def _candidate_for_read_anchor(factor_map, target, human_commits, last_human_ts) -> dict[str, Any] | None:
     if not human_commits:
         return None
-    if not (_is_factor_active(factor_map, "agent_authored_ratio") or _is_factor_active(factor_map, "review_staleness")):
+    if not _is_factor_active(factor_map, "review_staleness"):
         return None
-    delta = _estimate_impact(factor_map, ["agent_authored_ratio", "review_staleness"], reduction=0.2)
+    delta = _estimate_impact(factor_map, ["review_staleness"], reduction=0.2)
     first_human = human_commits[0]
     return {
         "id": "read_last_human_anchor",
         "action_type": "read_this_first",
         "label": f"Read the last human-authored anchor commit ({first_human['sha'][:7]})",
         "target": target,
-        "reduces_factors": ["agent_authored_ratio", "review_staleness"],
+        "reduces_factors": ["review_staleness"],
         "expected_impact": {"score_delta": delta, "confidence": "low"},
         "rationale": "Re-anchoring on the last human-authored version of this area is the fastest context-restore step.",
         "evidence": [f"{target['kind']}:{target.get('id') or target.get('module')}", f"commit:{first_human['sha']}"],

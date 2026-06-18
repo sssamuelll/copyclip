@@ -76,9 +76,9 @@ def test_missing_blame_signals_lower_confidence_but_keep_score_bounded(tmp_path)
     breakdown = build_debt_breakdown(conn, pid, "file", "src/copyclip/mcp_server.py", now_ts=_NOW_TS)
     conn.close()
 
-    # agent_authored_ratio and review_staleness should be unavailable without blame
+    # review_staleness should be unavailable without blame (agent_authored_ratio
+    # was the dead W4-3 signal and is removed in the v2 contract).
     unavailable = {f["factor_id"] for f in breakdown["factor_breakdown"] if not f["signal_available"]}
-    assert "agent_authored_ratio" in unavailable
     assert "review_staleness" in unavailable
     # signal_coverage must be strictly below 1.0 and confidence not 'high'
     assert breakdown["score"]["signal_coverage"] < 1.0

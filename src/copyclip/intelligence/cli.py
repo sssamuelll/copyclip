@@ -236,11 +236,11 @@ def _maybe_handle_internal(argv) -> bool:
 
         p = argparse.ArgumentParser(
             prog="copyclip start",
-            description="Launch the CopyClip intelligence dashboard.\n"
+            description="Launch the CopyClip cuaderno.\n"
                         "Runs semantic analysis on first start and opens the web UI.",
         )
         p.add_argument("--path", default=".", help="Project root path (default: current directory)")
-        p.add_argument("--port", type=int, default=4310, help="Dashboard port (default: 4310)")
+        p.add_argument("--port", type=int, default=4310, help="Web UI port (default: 4310)")
         p.add_argument("--open", dest="open_browser", action=argparse.BooleanOptionalAction, default=True, help="Open browser automatically (default: yes)")
         args = p.parse_args(argv[2:])
 
@@ -283,7 +283,7 @@ def _maybe_handle_internal(argv) -> bool:
             try:
                 if sys.platform == "darwin":
                     subprocess.Popen(["open", dash_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    print(_info(f"Opening dashboard: {dash_url}"))
+                    print(_info(f"Opening cuaderno: {dash_url}"))
             except Exception: pass
 
         try:
@@ -310,10 +310,10 @@ def _maybe_handle_internal(argv) -> bool:
         from ..mcp_server import main as run_mcp_server
         p = argparse.ArgumentParser(
             prog="copyclip mcp",
-            description="Start the MCP Intent Authority server for AI agent integration.",
+            description="Start the CopyClip MCP server for AI agent integration.",
         )
         p.parse_args(argv[2:])
-        print(_info("Starting MCP Oracle..."))
+        print(_info("Starting CopyClip MCP server..."))
         asyncio.run(run_mcp_server())
         return True
 

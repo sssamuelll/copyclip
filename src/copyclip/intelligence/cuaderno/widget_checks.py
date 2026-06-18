@@ -14,11 +14,20 @@ class GraphEvidence:
     def __init__(self) -> None:
         self.nodes: set[str] = set()
         self.edges: set[tuple[str, str]] = set()
+        # Per module-node authoritative metadata: name -> {file_path, heat}.
+        # This is the channel the STAMP reads so the heat and citation that cross
+        # to the human are the server's computation, not the model's utterance.
+        self.node_meta: dict[str, dict] = {}
 
     def add_module_graph(self, result: dict) -> None:
         for m in result.get("modules") or []:
             if isinstance(m, dict) and m.get("name"):
-                self.nodes.add(str(m["name"]))
+                name = str(m["name"])
+                self.nodes.add(name)
+                self.node_meta[name] = {
+                    "file_path": m.get("file_path"),
+                    "heat": m.get("heat"),
+                }
         for e in result.get("edges") or []:
             if isinstance(e, dict) and e.get("from") and e.get("to"):
                 self.edges.add((str(e["from"]), str(e["to"])))
@@ -85,3 +94,40 @@ def validate_widget_payload(block: Any, evidence: GraphEvidence) -> Optional[str
     if w.get("kind") == "playground":
         return _check_playground(w)
     return None
+
+
+def _stamp_graph_view(w: dict, ev: GraphEvidence) -> None:
+    """Make each node's fog and citation server-authoritative. The gate proves a
+    citation exists; the invariant demands the VALUE be demonstrable — so the
+    score the human sees and the file it cites are taken from THIS turn's evidence
+    (one row), overwriting whatever the model emitted. A node with no measured
+    debt (a symbol from get_callers/get_callees, or an unanalyzed module) gets a
+    typed unknown (None); a symbol node keeps its line-precise citation."""
+    for n in w.get("nodes") or []:
+        if not isinstance(n, dict):
+            continue
+        meta = ev.node_meta.get(str(n.get("id")))
+        if meta is None:
+            # Not a heat-bearing node (e.g. a symbol from get_callers/get_callees):
+            # heat is per-file, so this node has no heat CONCEPT. Drop any
+            # model-supplied value — a fabrication can't cross, and the node is
+            # not mislabeled "unmeasured" (absent != null). Citation untouched.
+            n.pop("heat", None)
+            continue
+        # A module/file node: the heat is the server's (number = measured,
+        # None = the module exists but wasn't analyzed — a typed unknown), and
+        # the citation is the same row the heat came from (one referent).
+        n["heat"] = meta.get("heat")
+        file_path = meta.get("file_path")
+        if file_path:
+            n["citation"] = {"kind": "path", "path": file_path}
+
+
+def stamp_widget_payload(block: Any, evidence: GraphEvidence) -> None:
+    """Mutate a validated widget so its evidence-bearing values are the server's,
+    not the model's. Call AFTER validate_widget_payload returns None."""
+    if not isinstance(block, dict) or block.get("kind") != "widget":
+        return
+    w = block.get("widget")
+    if isinstance(w, dict) and w.get("kind") == "graph_view":
+        _stamp_graph_view(w, evidence)

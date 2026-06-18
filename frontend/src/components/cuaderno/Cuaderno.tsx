@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import type { Block, Citation, CuadernoQuestion, ToolRow, CuadernoProvidersResponse } from '../../types/api'
+import { SURVIVOR_NAV, type SurvivorPage } from '../../nav'
 import { Composer } from './Composer'
-import { GotItMarkers } from './GotItMarkers'
+import { AnswerCheck } from './AnswerCheck'
 import { SidePanel } from './SidePanel'
 import { HistoryOverlay } from './HistoryOverlay'
 import { FrameEmpty } from './frames/FrameEmpty'
@@ -20,10 +21,10 @@ type Props = {
   toolCalls?: ToolRow[]
   providers?: CuadernoProvidersResponse | null
   onSetProvider?: (provider: string, model: string) => void
-  onOpenDashboard?: () => void
+  onNavigate?: (target: SurvivorPage) => void
   onAsk: (question: string) => void
   onSelectFromHistory: (position: number) => void
-  onSetGotIt: (position: number, value: 'got' | 'didnt') => void
+  onSetAnswerCheck: (position: number, value: 'answers' | 'not_yet') => void
   questionLanguage?: string | null
 }
 
@@ -38,14 +39,15 @@ export function Cuaderno({
   toolCalls = [],
   providers = null,
   onSetProvider,
-  onOpenDashboard,
+  onNavigate,
   onAsk,
   onSelectFromHistory,
-  onSetGotIt,
+  onSetAnswerCheck,
   questionLanguage,
 }: Props) {
   const [sidePanelFor, setSidePanelFor] = useState<Citation | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
 
   const scene: 'empty' | 'midstream' | 'writing' | 'frame' = !isLoading
     ? activeQuestion
@@ -67,15 +69,59 @@ export function Cuaderno({
           <span style={{ color: 'var(--ink-2)' }}>{sessionLabel}</span>
         </div>
         <div className="right">
-          {onOpenDashboard && (
-            <button
-              className="hamb"
-              onClick={onOpenDashboard}
-              aria-label="open dashboard"
-              title="dashboard"
-            >
-              ⊞
-            </button>
+          {onNavigate && (
+            <span style={{ position: 'relative', display: 'inline-flex' }}>
+              <button
+                className="hamb"
+                onClick={() => setMenuOpen((o) => !o)}
+                aria-label="open surfaces menu"
+                aria-expanded={menuOpen}
+                title="surfaces"
+              >
+                ⊞
+              </button>
+              {menuOpen && (
+                <div
+                  role="menu"
+                  style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 6px)',
+                    right: 0,
+                    zIndex: 50,
+                    minWidth: 160,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    background: 'var(--surface)',
+                    border: '1px solid var(--hairline)',
+                    borderRadius: 'var(--radius-sm)',
+                    boxShadow: 'var(--shadow-2)',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {SURVIVOR_NAV.map((s) => (
+                    <button
+                      key={s.id}
+                      role="menuitem"
+                      className="hamb"
+                      style={{
+                        textAlign: 'left',
+                        padding: '9px 12px',
+                        borderRadius: 0,
+                        color: 'var(--ink)',
+                        fontFamily: 'var(--font-ui)',
+                        fontSize: 13,
+                      }}
+                      onClick={() => {
+                        setMenuOpen(false)
+                        onNavigate(s.id)
+                      }}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </span>
           )}
           {onSetProvider && (
             <ProviderSelector data={providers} onChange={onSetProvider} />
@@ -122,9 +168,9 @@ export function Cuaderno({
                 {(!activeQuestion.frame.status ||
                   activeQuestion.frame.status === 'answer' ||
                   activeQuestion.frame.status === 'legacy') && (
-                  <GotItMarkers
-                    value={activeQuestion.got_it}
-                    onSet={(v) => onSetGotIt(activeQuestion.position, v)}
+                  <AnswerCheck
+                    value={activeQuestion.answer_check}
+                    onSet={(v) => onSetAnswerCheck(activeQuestion.position, v)}
                     language={activeQuestion.frame.question_language ?? questionLanguage}
                   />
                 )}

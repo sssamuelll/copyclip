@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import type { GraphViewWidget, Citation } from '../../../types/api'
+import { fogFill, fogBorder, relativeBand } from '../../../utils/debt'
 import { t } from '../strings'
 
 // ── layout constants (roster-ratified for frame-scale use) ──────────────────
@@ -21,6 +22,14 @@ type Props = {
 
 export function GraphView({ widget, onOpenCitation, lang }: Props) {
   const { nodes, edges } = widget
+
+  // Heat is banded RELATIVE to the scores shown, so the hottest node paints
+  // brightest even when the absolute distribution is compressed.
+  const measuredScores = nodes
+    .map((n) => n.heat)
+    .filter((s): s is number => typeof s === 'number')
+  const heatMin = measuredScores.length ? Math.min(...measuredScores) : 0
+  const heatMax = measuredScores.length ? Math.max(...measuredScores) : 0
 
   // ── adjacency ─────────────────────────────────────────────────────────────
   const outgoing = useMemo(() => {
@@ -288,8 +297,25 @@ export function GraphView({ widget, onOpenCitation, lang }: Props) {
               const isDimmed = connectedToFocus ? !connectedToFocus.has(node.id) : false
               const nodeOpacity = isDimmed ? 0.15 : 1
 
-              const fill = isFocused ? 'var(--accent)' : 'var(--surface)'
-              const stroke = isFocused ? 'var(--accent-ink)' : 'var(--hairline)'
+              // Cyan debt fog (neutral data, not alert), three honest states:
+              //   number -> painted by its severity band (measured debt)
+              //   null   -> dashed third state ("unmeasured" — never reads as low)
+              //   absent -> plain node (a symbol/non-fog node; no debt concept)
+              // A focused node shows selection (accent) over the fog.
+              const score = node.heat
+              const band = typeof score === 'number' ? relativeBand(score, heatMin, heatMax) : null
+              const unmeasured = score === null
+              const fill = isFocused
+                ? 'var(--accent)'
+                : band
+                ? fogFill({ severity: band })
+                : 'var(--surface)'
+              const stroke = isFocused
+                ? 'var(--accent-ink)'
+                : band
+                ? fogBorder({ severity: band })
+                : 'var(--hairline)'
+              const strokeDasharray = !isFocused && unmeasured ? '3 2' : undefined
               const textColor = isFocused ? 'var(--paper)' : 'var(--ink-2)'
 
               const label =
@@ -315,6 +341,7 @@ export function GraphView({ widget, onOpenCitation, lang }: Props) {
                     fill={fill}
                     stroke={stroke}
                     strokeWidth={1}
+                    strokeDasharray={strokeDasharray}
                   >
                     <title>{node.label}</title>
                   </rect>
