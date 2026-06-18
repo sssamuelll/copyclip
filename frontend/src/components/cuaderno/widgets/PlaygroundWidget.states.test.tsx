@@ -529,3 +529,59 @@ describe('PlaygroundWidget — live state renders .playground-fallback-note when
     expect(note!.getAttribute('style')).toBeNull()
   })
 })
+
+// ---------------------------------------------------------------------------
+// needs_args affordance: floor widget with incomplete call template
+// ---------------------------------------------------------------------------
+
+const NEEDS_ARGS_WIDGET: PlaygroundWidgetData = {
+  kind: 'playground',
+  function_ref: { file: 'src/pkg/mod.py', name: 'needs_arg', line: 1 },
+  breadcrumb: 'Step through needs_arg',
+  citation: { kind: 'path', path: 'src/pkg/mod.py', line_start: 1 },
+  needs_args: true,
+  call: { function_ref: { file: 'src/pkg/mod.py', name: 'needs_arg', line: 1 }, args: [], kwargs: {} },
+  call_text: 'needs_arg()',
+}
+
+describe('PlaygroundWidget — needs_args: complete-the-call affordance', () => {
+  beforeEach(() => {
+    vi.mocked(getState).mockReturnValue({ kind: 'empty' })
+    vi.mocked(getToken).mockReturnValue(0)
+    vi.clearAllMocks()
+    vi.mocked(getState).mockReturnValue({ kind: 'empty' })
+  })
+
+  it('needs_args widget: clicking "Step through" shows the complete-call hint in the preview', () => {
+    render(<PlaygroundWidget widget={NEEDS_ARGS_WIDGET} onOpenCitation={noopCitation} lang="en" />)
+    fireEvent.click(screen.getByRole('button', { name: /step through/i }))
+    // Hint must be present
+    expect(screen.getByTestId('needs-args-hint')).toBeInTheDocument()
+    expect(screen.getByText("Complete the call's arguments before stepping through.")).toBeInTheDocument()
+  })
+
+  it('needs_args widget: preview opens directly with editable textarea (no pencil click needed)', () => {
+    render(<PlaygroundWidget widget={NEEDS_ARGS_WIDGET} onOpenCitation={noopCitation} lang="en" />)
+    fireEvent.click(screen.getByRole('button', { name: /step through/i }))
+    // Textarea is directly visible
+    expect(screen.getByRole('textbox')).toBeInTheDocument()
+    // Pencil button (for toggling edit) absent — already in edit mode
+    expect(screen.queryByRole('button', { name: '✎' })).toBeNull()
+  })
+
+  it('needs_args=true (es): hint uses Spanish locale string', () => {
+    render(<PlaygroundWidget widget={NEEDS_ARGS_WIDGET} onOpenCitation={noopCitation} lang="es" />)
+    fireEvent.click(screen.getByRole('button', { name: /recorrer/i }))
+    expect(screen.getByTestId('needs-args-hint')).toBeInTheDocument()
+    expect(screen.getByText('Completa los argumentos de la llamada antes de recorrer.')).toBeInTheDocument()
+  })
+
+  it('normal widget (needs_args absent): NO hint after clicking Step through', () => {
+    render(<PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />)
+    fireEvent.click(screen.getByRole('button', { name: /step through/i }))
+    expect(screen.queryByTestId('needs-args-hint')).toBeNull()
+    expect(screen.queryByText("Complete the call's arguments before stepping through.")).toBeNull()
+    // Normal path: pencil button for editing is present
+    expect(screen.getByRole('button', { name: '✎' })).toBeInTheDocument()
+  })
+})

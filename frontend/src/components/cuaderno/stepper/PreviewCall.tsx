@@ -7,11 +7,13 @@ type Props = {
   initialCall: string             // the REAL model-proposed invocation (from widget.call_text)
   onConfirm: (callText: string, dirty: boolean) => void
   onCancel: () => void
+  needsArgs?: boolean             // floor widget: open directly into editing with a completion hint
   lang?: string | null
 }
 
-export function PreviewCall({ funcName, initialCall, onConfirm, onCancel, lang }: Props) {
-  const [editing, setEditing] = useState(false)
+export function PreviewCall({ funcName, initialCall, onConfirm, onCancel, needsArgs, lang }: Props) {
+  // needs_args widgets open directly into edit mode so the user can complete the call
+  const [editing, setEditing] = useState(needsArgs === true)
   const [callText, setCallText] = useState(initialCall)
   const [dirty, setDirty] = useState(false)
   return (
@@ -26,6 +28,14 @@ export function PreviewCall({ funcName, initialCall, onConfirm, onCancel, lang }
       <div style={{ ...s('display:flex;flex-direction:column;padding:18px 16px 13px;'), height: 'var(--stepper-preview-h)' }}>
         <div style={s('flex:1;display:flex;flex-direction:column;justify-content:center;')}>
           <div style={s('font-family:var(--font-body);font-size:15px;color:var(--ink-2);margin-bottom:13px;')}>{t('playground_preview_lead', lang)}</div>
+          {needsArgs ? (
+            <div
+              data-testid="needs-args-hint"
+              style={s('font-size:12.5px;color:var(--accent-ink);margin-bottom:10px;')}
+            >
+              {t('playground_complete_call', lang)}
+            </div>
+          ) : null}
           {editing ? (
             <textarea
               value={callText}
@@ -46,7 +56,9 @@ export function PreviewCall({ funcName, initialCall, onConfirm, onCancel, lang }
         </div>
         <div style={s('display:flex;align-items:center;gap:10px;padding-top:13px;border-top:1px solid var(--hairline-soft);')}>
           <button onClick={() => onConfirm(callText, dirty)} className="stepper-primary" style={s('border:1px solid var(--accent-line);background:var(--accent-soft);color:var(--accent-ink);border-radius:8px;padding:9px 18px;font-size:13.5px;font-weight:500;font-family:var(--font-ui);cursor:pointer;')}>{t('playground_step_through', lang)}</button>
-          <button onClick={() => setEditing((val) => !val)} style={s('border:1px solid var(--hairline);background:var(--paper);color:var(--ink-3);border-radius:8px;padding:9px 16px;font-size:13.5px;font-family:var(--font-ui);cursor:pointer;')}>{t('playground_edit_call', lang)}</button>
+          {!needsArgs ? (
+            <button onClick={() => setEditing((val) => !val)} style={s('border:1px solid var(--hairline);background:var(--paper);color:var(--ink-3);border-radius:8px;padding:9px 16px;font-size:13.5px;font-family:var(--font-ui);cursor:pointer;')}>{t('playground_edit_call', lang)}</button>
+          ) : null}
           <span style={s('flex:1;')} />
           <button onClick={onCancel} style={s('border:none;background:none;color:var(--ink-4);font-size:13px;cursor:pointer;font-family:var(--font-ui);')}>{t('playground_cancel', lang)}</button>
         </div>

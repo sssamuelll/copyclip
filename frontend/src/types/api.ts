@@ -756,6 +756,7 @@ export type PlaygroundWidgetData = {
   citation?: Citation
   call?: CallDescriptor      // the model's structured proposed invocation
   call_text?: string         // the model's proposed invocation pre-rendered as source text
+  needs_args?: boolean       // floor widget: call_text is an incomplete template; user must complete before confirming
 }
 
 export type Widget = GraphSubsetWidget | SequenceDiagramWidget | CallersTreeWidget | GraphViewWidget | PlaygroundWidgetData
