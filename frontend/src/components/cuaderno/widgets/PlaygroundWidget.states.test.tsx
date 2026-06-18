@@ -214,7 +214,7 @@ describe('PlaygroundWidget — nothing_ran state renders .playground-nothing-ran
     vi.mocked(getState).mockReturnValue({
       kind: 'nothing_ran',
       widgetKey: MY_KEY,
-      message: "that call didn't run the function",
+      message: 'my_func: call did not enter this function',
       token: 1,
     })
   })
@@ -228,7 +228,7 @@ describe('PlaygroundWidget — nothing_ran state renders .playground-nothing-ran
 
   it('renders the message text inside the nothing-ran container', () => {
     render(<PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />)
-    expect(screen.getByText("that call didn't run the function")).toBeInTheDocument()
+    expect(screen.getByText('my_func: call did not enter this function')).toBeInTheDocument()
   })
 
   it('has a × dismiss button', () => {

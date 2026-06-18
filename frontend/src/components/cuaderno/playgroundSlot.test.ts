@@ -102,7 +102,8 @@ describe('playgroundSlot', () => {
     expect(s.kind).toBe('nothing_ran')
     if (s.kind === 'nothing_ran') {
       expect(s.widgetKey).toBe('a.py:f:')
-      expect(s.message).toMatch(/didn't run/)
+      // message is now server-derived from func_name, not a client-side hardcoded constant
+      expect(s.message).toMatch(/did not enter/)
     }
   })
 

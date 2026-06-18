@@ -85,9 +85,13 @@ export async function launch(widgetKey: string, req: PlaygroundLaunchRequest): P
     }
     if (res.kind === 'trace') {
       if (res.trace.length === 0) {
-        // Empty trace: the user's call didn't enter the target function.
+        // Empty trace: the user's call did not enter the target function.
+        // Use the server-provided func_name as the authoritative name — single source.
         // Treat as 'nothing ran' rather than mounting an empty Stepper.
-        set({ kind: 'nothing_ran', widgetKey, message: "that call didn't run the function", token: myToken })
+        const nrMsg = res.func_name
+          ? `${res.func_name}: call did not enter this function`
+          : 'call did not enter the target function'
+        set({ kind: 'nothing_ran', widgetKey, message: nrMsg, token: myToken })
         return
       }
       // capture-only: no subprocess to poll, the trace is immutable per launch

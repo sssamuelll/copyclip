@@ -249,8 +249,8 @@ describe('PlaygroundWidget — integration (real slot store)', () => {
     await act(async () => { await userEvent.click(screen.getByRole('button', { name: /^step through$/i })) })
     // Must NOT render a step counter (would mean Stepper was mounted on empty trace)
     expect(screen.queryByText(/step \d+ \/ \d+/)).toBeNull()
-    // Must render the nothing-ran message
-    expect(await screen.findByText(/didn't run the function/)).toBeInTheDocument()
+    // Must render the nothing-ran message (server-derived from func_name)
+    expect(await screen.findByText(/did not enter this function/)).toBeInTheDocument()
   })
 
   // ---- Honest bare fallback when call_text absent (SHOULD — callTextOf deleted) ----
