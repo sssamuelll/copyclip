@@ -23,7 +23,7 @@ export function PreviewCall({ funcName, initialCall, onConfirm, onCancel, lang }
         <span style={s('flex:1;')} />
         <button onClick={onCancel} aria-label="×" style={s('border:none;background:none;color:var(--ink-4);cursor:pointer;font-size:16px;line-height:1;')}>×</button>
       </div>
-      <div style={{ ...s('display:flex;flex-direction:column;padding:18px 16px 13px;'), height: 430 }}>
+      <div style={{ ...s('display:flex;flex-direction:column;padding:18px 16px 13px;'), height: 'var(--stepper-preview-h)' }}>
         <div style={s('flex:1;display:flex;flex-direction:column;justify-content:center;')}>
           <div style={s('font-family:var(--font-body);font-size:15px;color:var(--ink-2);margin-bottom:13px;')}>{t('playground_preview_lead', lang)}</div>
           {editing ? (

@@ -72,14 +72,19 @@ export function Stepper({ response, onClose, lang }: Props) {
     : truncated
       ? { tick: 'var(--accent)', bg: 'var(--surface-2)', ink: 'var(--ink-2)', text: truncatedText }
       : null
-  const bodyHeight = banner ? 404 : 480
+  // Heights are CSS custom properties on .stepper-widget so density themes can override them.
+  // --stepper-h = 480px (normal), --stepper-h-banner = 404px (banner present).
+  const bodyHeight = banner ? 'var(--stepper-h-banner)' : 'var(--stepper-h)'
   // terminal = the trace has reached a natural end: truncation cap or a raise at the last step.
   // In these states the handoff omits "next change ◆" and the honesty note (pixel-fidelity).
   const terminal = truncated || raised
   // Compute the translateY so the highlighted line stays visible inside the
-  // clipped source column (overflow:hidden). The visible height estimate:
-  //   bodyHeight - body-padding(29px) - scrubber-strip(52px) - honesty-note(25px when !terminal)
-  const sourceVisibleH = bodyHeight - 29 - 52 - (terminal ? 0 : 25)
+  // clipped source column (overflow:hidden). The visible height estimate uses
+  // the numeric defaults matching the CSS var defaults (480 or 404). If the
+  // theme overrides --stepper-h, the highlight may be slightly off-center but
+  // never invisible.
+  const bodyHeightPx = banner ? 404 : 480
+  const sourceVisibleH = bodyHeightPx - 29 - 52 - (terminal ? 0 : 25)
   const srcTranslateY = sourceTranslateY(curIdx, source_lines.length, sourceVisibleH)
 
   const toggle = (name: string) =>
@@ -97,7 +102,7 @@ export function Stepper({ response, onClose, lang }: Props) {
   // raised wins over truncated: if the last step threw, the handle is red regardless.
   const handleColor = raised ? 'var(--neg-ink)' : 'var(--accent)'
 
-  const btn = 'width:28px;height:28px;flex:none;border-radius:7px;border:1px solid var(--hairline);background:var(--paper);color:var(--ink-2);cursor:pointer;font-size:9px;display:flex;align-items:center;justify-content:center;'
+  const btn = 'width:28px;height:28px;flex:none;border-radius:7px;border:1px solid var(--hairline);background:var(--stepper-btn-bg);color:var(--ink-2);cursor:pointer;font-size:9px;display:flex;align-items:center;justify-content:center;'
 
   return (
     <div className="widget stepper-widget">
@@ -190,7 +195,7 @@ export function Stepper({ response, onClose, lang }: Props) {
           </div>
           <button onClick={() => move(1)} aria-label="Next step" className="stepper-btn" style={{ ...s(btn), ...(atEnd ? s('color:var(--ink-4);') : {}) }}>▶</button>
           {!terminal && (
-            <button onClick={onNextChange} className="stepper-btn" style={s('flex:none;height:28px;border-radius:7px;border:1px solid var(--hairline);background:var(--paper);color:var(--ink-3);cursor:pointer;font-size:11px;padding:0 11px;white-space:nowrap;')}>{t('playground_next_change', lang)}</button>
+            <button onClick={onNextChange} className="stepper-btn" style={s('flex:none;height:28px;border-radius:7px;border:1px solid var(--hairline);background:var(--stepper-btn-bg);color:var(--ink-3);cursor:pointer;font-size:11px;padding:0 11px;white-space:nowrap;')}>{t('playground_next_change', lang)}</button>
           )}
         </div>
         {/* honesty note — hidden in terminal states (truncated/raised) to match handoff */}

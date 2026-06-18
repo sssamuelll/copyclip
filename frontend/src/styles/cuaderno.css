@@ -1232,7 +1232,20 @@
 }
 
 /* ---------- step-through stepper ---------- */
-.stepper-widget { overflow: hidden; }
+/* Base stepper styles (head strip, scrubber, state panel layout) live inline in
+   frontend/src/components/cuaderno/stepper/Stepper.tsx — the body height is
+   controlled by the CSS custom properties below so density themes can override. */
+.stepper-widget {
+  overflow: hidden;
+  --stepper-h: 480px;          /* normal state (no banner) */
+  --stepper-h-banner: 404px;   /* truncated or raised terminal — banner consumes 76px */
+  --stepper-preview-h: 430px;  /* PreviewCall edit-before-run height */
+  --stepper-btn-bg: var(--paper);  /* scrubber prev/next button background */
+}
+/* In dark mode --paper is near-black; use --surface-2 for button lift (handoff spec). */
+.theme-dark .stepper-widget {
+  --stepper-btn-bg: var(--surface-2);
+}
 .stepper-primary:hover { background: var(--accent); color: var(--paper); }
 .stepper-ghost:hover { border-color: var(--accent-line); }
 .stepper-btn:hover { border-color: var(--accent-line); color: var(--accent-ink); }
