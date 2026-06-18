@@ -77,9 +77,10 @@ export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
   const currentToken = getToken()
   const previewIsStale = previewing && previewToken >= 0 && currentToken !== previewToken && !isMine
 
-  // On confirm the (possibly edited) free text flows through as call_text (D2);
-  // the structured descriptor rides along for the backend's repr-literal guard.
-  const doLaunch = (callText: string) => {
+  // On confirm: if the user edited the preview (dirty=true), send call_text so the
+  // backend exec()s the user's free text. If unedited (dirty=false), omit call_text
+  // so the backend runs the structured repr-guarded path via the call descriptor.
+  const doLaunch = (callText: string, dirty: boolean) => {
     setPreviewing(false)
     setPreviewToken(-1)
     void launch(myKey, {
@@ -88,7 +89,9 @@ export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
       suggested_inputs: widget.suggested_inputs,
       breadcrumb: widget.breadcrumb,
       call: widget.call,
-      call_text: callText,
+      // Only send call_text when the user actually edited the preview (free-text path).
+      // When unedited, omit call_text so the backend runs the structured repr-guarded path.
+      ...(dirty ? { call_text: callText } : {}),
     })
   }
 

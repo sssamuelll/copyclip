@@ -5,7 +5,7 @@ import { s } from './StateRow'
 type Props = {
   funcName: string
   initialCall: string             // the REAL model-proposed invocation (from widget.call_text)
-  onConfirm: (callText: string) => void
+  onConfirm: (callText: string, dirty: boolean) => void
   onCancel: () => void
   lang?: string | null
 }
@@ -13,6 +13,7 @@ type Props = {
 export function PreviewCall({ funcName, initialCall, onConfirm, onCancel, lang }: Props) {
   const [editing, setEditing] = useState(false)
   const [callText, setCallText] = useState(initialCall)
+  const [dirty, setDirty] = useState(false)
   return (
     <div className="widget stepper-widget">
       <div style={s('display:flex;align-items:center;gap:9px;padding:9px 14px;border-bottom:1px solid var(--hairline-soft);')}>
@@ -28,7 +29,7 @@ export function PreviewCall({ funcName, initialCall, onConfirm, onCancel, lang }
           {editing ? (
             <textarea
               value={callText}
-              onChange={(e) => setCallText(e.target.value)}
+              onChange={(e) => { setCallText(e.target.value); setDirty(true) }}
               spellCheck={false}
               style={s('font-family:var(--font-mono);font-size:14px;color:var(--ink);background:var(--surface-2);border:1px solid var(--accent-line);border-radius:9px;padding:13px 14px;width:100%;resize:none;height:62px;line-height:1.5;outline:none;')}
             />
@@ -44,7 +45,7 @@ export function PreviewCall({ funcName, initialCall, onConfirm, onCancel, lang }
           </div>
         </div>
         <div style={s('display:flex;align-items:center;gap:10px;padding-top:13px;border-top:1px solid var(--hairline-soft);')}>
-          <button onClick={() => onConfirm(callText)} className="stepper-primary" style={s('border:1px solid var(--accent-line);background:var(--accent-soft);color:var(--accent-ink);border-radius:8px;padding:9px 18px;font-size:13.5px;font-weight:500;font-family:var(--font-ui);cursor:pointer;')}>{t('playground_step_through', lang)}</button>
+          <button onClick={() => onConfirm(callText, dirty)} className="stepper-primary" style={s('border:1px solid var(--accent-line);background:var(--accent-soft);color:var(--accent-ink);border-radius:8px;padding:9px 18px;font-size:13.5px;font-weight:500;font-family:var(--font-ui);cursor:pointer;')}>{t('playground_step_through', lang)}</button>
           <button onClick={() => setEditing((val) => !val)} style={s('border:1px solid var(--hairline);background:var(--paper);color:var(--ink-3);border-radius:8px;padding:9px 16px;font-size:13.5px;font-family:var(--font-ui);cursor:pointer;')}>{t('playground_edit_call', lang)}</button>
           <span style={s('flex:1;')} />
           <button onClick={onCancel} style={s('border:none;background:none;color:var(--ink-4);font-size:13px;cursor:pointer;font-family:var(--font-ui);')}>{t('playground_cancel', lang)}</button>

@@ -176,6 +176,36 @@ describe('PlaygroundWidget — integration (real slot store)', () => {
     )
   })
 
+  // ---- Dirty-flag consent-path (PR #177 must-fix #1) ----
+
+  it('unedited confirm sends call descriptor WITHOUT call_text (structured path)', async () => {
+    launchPlayground.mockResolvedValue(trace)
+    render(<PlaygroundWidget widget={widget} onOpenCitation={() => {}} />)
+    await userEvent.click(screen.getByRole('button', { name: /step through/i }))
+    // Confirm WITHOUT editing — dirty=false, so call_text must be absent
+    await act(async () => { await userEvent.click(screen.getByRole('button', { name: /^step through$/i })) })
+    expect(launchPlayground).toHaveBeenCalledWith(
+      expect.objectContaining({ call: widget.call }),
+    )
+    // call_text must NOT be present when unedited
+    const callArg = launchPlayground.mock.calls[0][0]
+    expect(callArg).not.toHaveProperty('call_text')
+  })
+
+  it('edited confirm sends call_text (free-text path)', async () => {
+    launchPlayground.mockResolvedValue(trace)
+    render(<PlaygroundWidget widget={widget} onOpenCitation={() => {}} />)
+    await userEvent.click(screen.getByRole('button', { name: /step through/i }))
+    await userEvent.click(screen.getByRole('button', { name: '✎' }))
+    const ta = screen.getByRole('textbox')
+    await userEvent.clear(ta)
+    await userEvent.type(ta, 'resolve_function_ref(conn, 0, ref)')
+    await act(async () => { await userEvent.click(screen.getByRole('button', { name: /^step through$/i })) })
+    expect(launchPlayground).toHaveBeenCalledWith(
+      expect.objectContaining({ call_text: 'resolve_function_ref(conn, 0, ref)' }),
+    )
+  })
+
   // ---- Fallback branch (deferred concern 1: iframe box) ----
 
   it('mounts the iframe box for kind:fallback', async () => {

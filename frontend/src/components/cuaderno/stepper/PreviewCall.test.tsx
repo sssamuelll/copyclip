@@ -13,7 +13,7 @@ describe('PreviewCall', () => {
     const onConfirm = vi.fn()
     render(<PreviewCall funcName="f" initialCall="f(1)" onConfirm={onConfirm} onCancel={() => {}} />)
     await userEvent.click(screen.getByRole('button', { name: /^step through$/i }))
-    expect(onConfirm).toHaveBeenCalledWith('f(1)')
+    expect(onConfirm).toHaveBeenCalledWith('f(1)', false)
   })
   it('reveals a textarea when editing and confirms the edited free-text call', async () => {
     const onConfirm = vi.fn()
@@ -23,12 +23,30 @@ describe('PreviewCall', () => {
     await userEvent.clear(ta)
     await userEvent.type(ta, 'f(2)')
     await userEvent.click(screen.getByRole('button', { name: /^step through$/i }))
-    expect(onConfirm).toHaveBeenCalledWith('f(2)')
+    expect(onConfirm).toHaveBeenCalledWith('f(2)', true)
   })
   it('fires onCancel', async () => {
     const onCancel = vi.fn()
     render(<PreviewCall funcName="f" initialCall="f(1)" onConfirm={() => {}} onCancel={onCancel} />)
     await userEvent.click(screen.getByRole('button', { name: /cancel/i }))
     expect(onCancel).toHaveBeenCalled()
+  })
+
+  it('onConfirm receives dirty=false when user never edited the textarea', async () => {
+    const onConfirm = vi.fn()
+    render(<PreviewCall funcName="f" initialCall="f(1)" onConfirm={onConfirm} onCancel={() => {}} />)
+    await userEvent.click(screen.getByRole('button', { name: /^step through$/i }))
+    expect(onConfirm).toHaveBeenCalledWith('f(1)', false)
+  })
+
+  it('onConfirm receives dirty=true when user edited the textarea', async () => {
+    const onConfirm = vi.fn()
+    render(<PreviewCall funcName="f" initialCall="f(1)" onConfirm={onConfirm} onCancel={() => {}} />)
+    await userEvent.click(screen.getByRole('button', { name: '✎' }))
+    const ta = screen.getByRole('textbox')
+    await userEvent.clear(ta)
+    await userEvent.type(ta, 'f(2)')
+    await userEvent.click(screen.getByRole('button', { name: /^step through$/i }))
+    expect(onConfirm).toHaveBeenCalledWith('f(2)', true)
   })
 })
