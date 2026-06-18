@@ -636,10 +636,22 @@ def _launch_marimo(
     resolved: ResolvedFunction,
     runner: MarimoRunner,
     trace: object,
+    *,
+    is_fallback: bool = False,
 ) -> PlaygroundLaunchResponse:
     """Generate a Marimo notebook and spawn via the runner. This is the
     original launch_playground tail, extracted verbatim so the cuaderno
-    fallback can reuse it without duplicating spawn logic."""
+    fallback can reuse it without duplicating spawn logic.
+
+    Mode decision (deliberate, not incidental):
+    - Non-cuaderno sources: 'edit' — the user navigates the notebook freely.
+    - Cuaderno non-fallback: 'run' — the notebook is a pre-wired reactive box;
+      hiding the code gives a cleaner run-only widget experience.
+    - Cuaderno fallback (is_fallback=True): 'edit' — this IS the interactive
+      input→output box the user steps through (async, generator, ctor-missing).
+      The user MUST be able to see and modify the input cell to interact; 'run'
+      would hide the cell and make the fallback box non-interactive.
+    """
     try:
         notebook_path = generate_marimo_notebook(req, project_root, resolved)
     except Exception as exc:
@@ -648,7 +660,10 @@ def _launch_marimo(
     trace.event("launch.notebook", path=notebook_path,
                 input_element=_build_input_element(req.suggested_inputs),
                 deps_hint=req.deps_hint)
-    mode = "run" if req.source == "cuaderno" else "edit"
+    if req.source == "cuaderno" and not is_fallback:
+        mode = "run"   # pre-wired reactive box: hide code for a clean widget
+    else:
+        mode = "edit"  # all other sources + cuaderno fallbacks: expose the cell
     try:
         playground_id, iframe_url = runner.launch(notebook_path, mode=mode, trace=trace)
     except Exception as exc:
@@ -706,10 +721,10 @@ def _cuaderno_fallback(
     Sets playground_id from inner.playground_id (spec §8) so the frontend can
     use it for the live-state id, /status poll, and reap — NOT idFromIframeUrl.
     """
-    from .capture import FallbackResponse
-    inner = _launch_marimo(req, project_root, resolved, runner, trace)
-    return FallbackResponse(reason=reason, iframe_url=inner.iframe_url,
-                            playground_id=inner.playground_id)
+    from . import capture as _capture_mod  # single deferred import; no duplicate from-import
+    inner = _launch_marimo(req, project_root, resolved, runner, trace, is_fallback=True)
+    return _capture_mod.FallbackResponse(reason=reason, iframe_url=inner.iframe_url,
+                                         playground_id=inner.playground_id)
 
 
 # ---------------------------------------------------------------------------

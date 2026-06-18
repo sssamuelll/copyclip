@@ -1058,16 +1058,15 @@ def _seed_user_symbol(conn, project_root, body, file_rel, name,
     return pid
 
 
-def test_cuaderno_fallback_launches_run_mode(tmp_path):
-    """The FALLBACK path (async function → Marimo) must launch with mode='run' for
-    cuaderno source. Eligible cuaderno requests no longer call runner.launch (they
-    return a StepThroughResponse directly — see test_cuaderno_eligible_returns_trace_response).
-    Any other source must use mode='edit'.
+def test_cuaderno_fallback_launches_edit_mode(tmp_path):
+    """The FALLBACK path (async function → Marimo) must launch with mode='edit'
+    for cuaderno source. The fallback box is the reactive input→output box the
+    user interacts with (async/generator/ctor-missing); mode='edit' keeps the
+    input cell visible so the user can modify it. mode='run' would hide the cell
+    and make the fallback box non-interactive (item 6, PR #177 staff review).
 
-    This test re-points the old test_cuaderno_source_launches_run_mode (Task 11):
-    an ELIGIBLE cuaderno descriptor goes straight to StepThroughResponse without
-    touching runner.launch; the mode='run' dispatch is still proven via the
-    async-fallback path, keeping source-keyed mode coverage intact.
+    Non-fallback cuaderno paths go straight to StepThroughResponse without
+    touching runner.launch (see test_cuaderno_eligible_returns_trace_response).
     """
     conn = connect(str(tmp_path)); init_schema(conn)
     pid = _seed_user_symbol(conn, tmp_path,
@@ -1080,7 +1079,7 @@ def test_cuaderno_fallback_launches_run_mode(tmp_path):
     })
     runner = Mock(); runner.launch.return_value = ("pg", "http://127.0.0.1:5000/")
     launch_playground(req, str(tmp_path), conn, pid, runner)
-    assert runner.launch.call_args.kwargs.get("mode") == "run"
+    assert runner.launch.call_args.kwargs.get("mode") == "edit"
 
 
 def test_cuaderno_eligible_returns_trace_response(tmp_path):
@@ -1131,7 +1130,9 @@ def test_cuaderno_async_falls_back_to_marimo(tmp_path):
     assert isinstance(resp, FallbackResponse)
     assert resp.iframe_url == "http://127.0.0.1:5000/"
     runner.launch.assert_called_once()
-    assert runner.launch.call_args.kwargs.get("mode") == "run"
+    # Cuaderno fallback uses 'edit' so the input cell stays visible and interactive
+    # (item 6, PR #177 staff review: fallback box is interactive, not a run-only widget).
+    assert runner.launch.call_args.kwargs.get("mode") == "edit"
 
 
 def test_non_cuaderno_source_unchanged_marimo_iframe(tmp_path):
