@@ -209,6 +209,11 @@ class StepThroughResponse:
     func_name: str
     file_line: str
     truncated: bool
+    # PR #177 fix 5: split the bare `truncated` bool into a REASON so the frontend
+    # shows the right message — 'steps' (MAX_STEPS overflow) vs 'time' (wall-clock
+    # overrun) — and never conflates truncation with a terminal raise. None when
+    # the trace completed cleanly.
+    truncated_reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -218,6 +223,7 @@ class StepThroughResponse:
             "func_name": self.func_name,
             "file_line": self.file_line,
             "truncated": self.truncated,
+            "truncated_reason": self.truncated_reason,
         }
 
 
@@ -244,7 +250,31 @@ def _var_from_raw(raw: dict[str, Any]) -> Var:
     )
 
 
-def normalize_trace(raw: dict[str, Any]) -> list[Step]:
+def _var_signature(v: Var) -> Any:
+    """The change-detection signature for one Var.
+
+    PR #177 fix 4 (change-derivation under-reports): keying a large var on
+    ``(summary, meta)`` alone misses an IN-PLACE mutation whose summary/meta stay
+    stable (e.g. a 30-item list whose 0th element changed). Fold the captured
+    ``children`` into the large signature so a same-summary content change still
+    flags. ``children`` are already capped at capture (LARGE_CHILDREN_CAP) and are
+    plain (name, text) dicts, so this stays cheap and side-effect-free — no extra
+    repr / len / id call here.
+
+    For scalar/object vars the signature is the capped repr text.
+    """
+    if v.text is not None:
+        return v.text
+    if v.kind == "large":
+        # Tuple-of-tuples so it is hashable/comparable and stable across steps.
+        child_sig = tuple(
+            (c.get("name"), c.get("text")) for c in (v.children or [])
+        )
+        return (v.summary, v.meta, child_sig)
+    return (v.summary, v.meta)
+
+
+def normalize_trace(raw: dict[str, Any], *, source_lines: list[dict[str, Any]] | None = None) -> list[Step]:
     """Map the driver's intermediate trace onto the fixed Step[] schema.
 
     The driver pre-flattens each event's in-scope vars into the Var shape but
@@ -263,20 +293,35 @@ def normalize_trace(raw: dict[str, Any]) -> list[Step]:
     every var is a function ARGUMENT (a pre-existing input) and does NOT flag — it
     only seeds ``prev``; on a ``line``/``return``/``raise`` step a name not yet in
     ``prev`` is a genuine first-bind and flags. Opaque values never flag.
+
+    Defense-in-depth (PR #177 fix 1): if ``source_lines`` is supplied, any step
+    whose ``line`` falls OUTSIDE the captured source range is DROPPED — a foreign
+    frame (a helper sibling, a leaked library frame) can never null the slab or
+    mis-anchor on the target's source pane even if frame-scoping ever regressed.
+    With no ``source_lines`` (back-compat / unit tests) every step is kept.
     """
     events = raw.get("trace", [])
+    lo = hi = None
+    if source_lines:
+        nums = [sl.get("num") for sl in source_lines if isinstance(sl.get("num"), int)]
+        if nums:
+            lo, hi = min(nums), max(nums)
     steps: list[Step] = []
-    # Maps var name → its last observed signature.  For scalar/object vars the
-    # signature is the capped repr text (str | None).  For large vars it is a
-    # (summary, meta) tuple so both fields participate in change detection.
-    prev: dict[str, str | None | tuple[str | None, str | None]] = {}
+    # Maps var name → its last observed signature (see _var_signature).
+    prev: dict[str, Any] = {}
     for ev in events:
+        line = int(ev.get("line", 0))
+        # Defense-in-depth: drop any step anchored outside the known source range.
+        # A line==0 sentinel (e.g. a raise before the target body ran) is exempt
+        # so a terminal raise is never silently swallowed.
+        if lo is not None and line != 0 and not (lo <= line <= hi):
+            continue
         event = ev.get("event", "line")
         is_call = event == "call"
         scope = [_var_from_raw(v) for v in ev.get("scope", [])]
         changed: list[str] = []
         for v in scope:
-            sig = v.text if v.text is not None else (v.summary, v.meta)
+            sig = _var_signature(v)
             seen = v.name in prev
             if v.kind == "opaque":
                 prev[v.name] = sig  # opaque never flags (spec §9); still seed prev
@@ -290,7 +335,7 @@ def normalize_trace(raw: dict[str, Any]) -> list[Step]:
                 changed.append(v.name)
             prev[v.name] = sig
         steps.append(Step(
-            line=int(ev.get("line", 0)),
+            line=line,
             event=event,
             changed=changed,
             scope=scope,
@@ -310,6 +355,7 @@ def eligibility_reason(
     *,
     is_async: bool,
     is_generator: bool,
+    is_decorated: bool = False,
 ) -> str | None:
     """Return a human reason to DECLINE the step-through, or None if eligible.
 
@@ -319,11 +365,19 @@ def eligibility_reason(
 
     NOTE: an ASYNC GENERATOR reports is_async=True (Task 4 detect_kind), so it
     declines with the 'async' reason — checked before the generator branch.
+
+    PR #177 fix 2 (empty-trace honesty): a DECORATED target makes the capture
+    anchor on the wrapper's file/code, so the real body is never traced and the
+    capture comes back empty. Detect it at probe time and decline with an honest
+    reason rather than ship an empty stepper or a misleading "didn't run" note.
     """
     if is_async:
         return "async functions step through as one frame; using the input box instead"
     if is_generator:
         return "generator functions step through as one frame; using the input box instead"
+    if is_decorated:
+        return ("this function is decorated, so the step-through can't anchor on its "
+                "body; using the input box instead")
     if resolved.kind == "method" or resolved.parent_class:
         if cd.ctor is None:
             return "this method needs constructor arguments the example did not supply"
@@ -447,13 +501,31 @@ def probe_target(resolved: ResolvedFunction, *, project_root: str) -> tuple[dict
         payload.get("source_lines", [])
 
 
-def run_capture(cd: CallDescriptor, resolved: ResolvedFunction, *, project_root: str):
-    """MODEL path: run the descriptor call ONCE; return (Step[], truncated)."""
+def _truncated_reason_of(payload: dict) -> str | None:
+    """Normalize the driver's truncated_reason ('steps'|'time'|None). Back-compat:
+    an older driver that only emits `truncated:true` (no reason) is reported as
+    'steps' (the historical default cause) so the frontend never sees a truthy
+    truncated with a null reason."""
+    if not payload.get("truncated"):
+        return None
+    reason = payload.get("truncated_reason")
+    return reason if reason in ("steps", "time") else "steps"
+
+
+def run_capture(cd: CallDescriptor, resolved: ResolvedFunction, *, project_root: str,
+                source_lines: list[dict[str, Any]] | None = None):
+    """MODEL path: run the descriptor call ONCE; return
+    (Step[], truncated, truncated_reason). ``source_lines`` (when supplied) gates
+    the defense-in-depth out-of-range filter in normalize_trace (PR #177 fix 1)."""
     payload = _run_driver(_spec_for(cd, resolved, probe=False), project_root)
-    return normalize_trace(payload), bool(payload.get("truncated"))
+    steps = normalize_trace(payload, source_lines=source_lines)
+    return steps, bool(payload.get("truncated")), _truncated_reason_of(payload)
 
 
-def run_free_text_capture(ft: FreeTextCall, resolved: ResolvedFunction, *, project_root: str):
-    """USER path: exec the edited free-text call ONCE; return (Step[], truncated)."""
+def run_free_text_capture(ft: FreeTextCall, resolved: ResolvedFunction, *, project_root: str,
+                          source_lines: list[dict[str, Any]] | None = None):
+    """USER path: exec the edited free-text call ONCE; return
+    (Step[], truncated, truncated_reason)."""
     payload = _run_driver(_free_text_spec(ft, resolved), project_root)
-    return normalize_trace(payload), bool(payload.get("truncated"))
+    steps = normalize_trace(payload, source_lines=source_lines)
+    return steps, bool(payload.get("truncated")), _truncated_reason_of(payload)

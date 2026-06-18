@@ -563,16 +563,17 @@ def launch_playground(
                 trace.event("launch.error", stage="call_text", error=str(exc))
                 raise
             detect, source_lines = probe_target(resolved, project_root=project_root)
-            if detect["is_async"] or detect["is_generator"]:
-                reason = (
-                    "async functions step through as one frame; using the input box instead"
-                    if detect["is_async"]
-                    else "generator functions step through as one frame; using the input box instead"
-                )
+            # The free-text path declines the same un-representable targets as the
+            # eligibility gate EXCEPT the method-ctor check (the user types the
+            # whole call, so the ctor is theirs to supply): async / generator /
+            # decorated. A decorated target anchors on the wrapper, not the body.
+            reason = _free_text_decline_reason(detect)
+            if reason is not None:
                 trace.event("launch.capture", outcome="fallback", reason=reason)
                 return _cuaderno_fallback(req, project_root, resolved, runner, reason, trace)
             try:
-                steps, truncated = run_free_text_capture(ft, resolved, project_root=project_root)
+                steps, truncated, truncated_reason = run_free_text_capture(
+                    ft, resolved, project_root=project_root, source_lines=source_lines)
             except CaptureError as exc:
                 trace.event("launch.error", stage="capture", error=str(exc))
                 raise
@@ -592,29 +593,38 @@ def launch_playground(
                 return _cuaderno_fallback(req, project_root, resolved, runner, reason, trace)
             detect, source_lines = probe_target(resolved, project_root=project_root)
             reason = eligibility_reason(cd, resolved, is_async=detect["is_async"],
-                                        is_generator=detect["is_generator"])
+                                        is_generator=detect["is_generator"],
+                                        is_decorated=detect.get("is_decorated", False))
             if reason is not None:
                 trace.event("launch.capture", outcome="fallback", reason=reason)
                 return _cuaderno_fallback(req, project_root, resolved, runner, reason, trace)
             try:
-                steps, truncated = run_capture(cd, resolved, project_root=project_root)
+                steps, truncated, truncated_reason = run_capture(
+                    cd, resolved, project_root=project_root, source_lines=source_lines)
             except CaptureError as exc:
                 trace.event("launch.error", stage="capture", error=str(exc))
                 raise
-        # Critical #2: an empty trace means the call never entered the target
-        # function — return a FallbackResponse so the frontend shows an honest
-        # "nothing ran" note instead of mounting an empty stepper (spec §8).
+        # PR #177 fix 2: an empty trace means execution never entered the target's
+        # OWN frames — the call ran entirely in library / C frames (invisible to
+        # sys.settrace, spec §7) or never reached the function body. Decorated
+        # targets are already declined up front (eligibility gate), so an empty
+        # trace here is the honest "ran, but nothing of YOUR Python anchored"
+        # case — distinct from "produced zero anchored steps after running". Both
+        # surface as a fallback with an honest note rather than an empty stepper.
         if not steps:
-            reason = "that call didn't run the function — nothing to step through"
+            reason = ("that call ran entirely in library/C frames — none of this "
+                      "function's own Python lines were reached, so there's nothing "
+                      "to step through")
             trace.event("launch.capture", outcome="fallback", reason=reason)
             return _cuaderno_fallback(req, project_root, resolved, runner, reason, trace)
-        trace.event("launch.capture", outcome="trace", steps=len(steps), truncated=truncated)
+        trace.event("launch.capture", outcome="trace", steps=len(steps),
+                    truncated=truncated, truncated_reason=truncated_reason)
         # Low display #6: for a method, use qualname (e.g. "MyClass.process") so
         # the stepper header shows class context; fall back to name otherwise.
         func_name = (resolved.qualname if resolved.parent_class else resolved.name)
         return StepThroughResponse(
             trace=steps, source_lines=source_lines, func_name=func_name,
-            file_line=file_line, truncated=truncated)
+            file_line=file_line, truncated=truncated, truncated_reason=truncated_reason)
 
     # Non-cuaderno sources: the Marimo iframe path is UNCHANGED.
     return _launch_marimo(req, project_root, resolved, runner, trace)
@@ -650,6 +660,21 @@ def _launch_marimo(
         playground_id=playground_id,
         iframe_url=iframe_url,
     )
+
+
+def _free_text_decline_reason(detect: dict) -> str | None:
+    """The free-text path's decline check (PR #177 fix 2): async / generator /
+    decorated are un-representable on a linear scrubber or un-anchorable; the
+    method-ctor gate does NOT apply here because the user types the whole call.
+    Returns the honest reason copy, or None if the target can be stepped."""
+    if detect.get("is_async"):
+        return "async functions step through as one frame; using the input box instead"
+    if detect.get("is_generator"):
+        return "generator functions step through as one frame; using the input box instead"
+    if detect.get("is_decorated"):
+        return ("this function is decorated, so the step-through can't anchor on its "
+                "body; using the input box instead")
+    return None
 
 
 def _cuaderno_fallback(

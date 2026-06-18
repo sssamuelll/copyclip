@@ -92,10 +92,11 @@ def _stub_probe(monkeypatch):
 
 def _stub_run_capture(monkeypatch):
     """Make run_capture return a one-element Step[] list (non-empty so
-    launch_playground returns StepThroughResponse, not a FallbackResponse)."""
+    launch_playground returns StepThroughResponse, not a FallbackResponse).
+    The capture functions return (steps, truncated, truncated_reason)."""
     monkeypatch.setattr(
         "copyclip.intelligence.capture.run_capture",
-        lambda *a, **kw: (_one_step(), False),
+        lambda *a, **kw: (_one_step(), False, None),
     )
 
 
@@ -103,7 +104,7 @@ def _stub_run_free_text_capture(monkeypatch):
     """Make run_free_text_capture return a one-element Step[] list."""
     monkeypatch.setattr(
         "copyclip.intelligence.capture.run_free_text_capture",
-        lambda *a, **kw: (_one_step(), False),
+        lambda *a, **kw: (_one_step(), False, None),
     )
 
 
@@ -410,7 +411,7 @@ def test_launch_playground_routes_call_args_into_call_descriptor(tmp_path, monke
         captured_descriptor["args"] = cd.args
         captured_descriptor["kwargs"] = cd.kwargs
         captured_descriptor["ctor"] = cd.ctor
-        return (_one_step(), False)
+        return (_one_step(), False, None)
 
     _stub_probe(monkeypatch)
     monkeypatch.setattr(
@@ -450,7 +451,7 @@ def test_launch_playground_routes_ctor_into_call_descriptor(tmp_path, monkeypatc
     def _recording_run_capture(cd, resolved, **kw):
         captured_descriptor["args"] = cd.args
         captured_descriptor["ctor"] = cd.ctor
-        return (_one_step(), False)
+        return (_one_step(), False, None)
 
     _stub_probe(monkeypatch)
     monkeypatch.setattr(
@@ -500,7 +501,7 @@ def test_empty_trace_returns_fallback_response(tmp_path, monkeypatch):
     _stub_probe(monkeypatch)
     monkeypatch.setattr(
         "copyclip.intelligence.capture.run_capture",
-        lambda *a, **kw: ([], False),   # empty trace
+        lambda *a, **kw: ([], False, None),   # empty trace
     )
     # Make _cuaderno_fallback → _launch_marimo work without a real notebook file.
     monkeypatch.setattr(
@@ -524,7 +525,7 @@ def test_empty_free_text_trace_returns_fallback_response(tmp_path, monkeypatch):
     _stub_probe(monkeypatch)
     monkeypatch.setattr(
         "copyclip.intelligence.capture.run_free_text_capture",
-        lambda *a, **kw: ([], False),
+        lambda *a, **kw: ([], False, None),
     )
     monkeypatch.setattr(
         "copyclip.intelligence.playground.generate_marimo_notebook",
@@ -571,6 +572,70 @@ def test_cuaderno_fallback_sets_playground_id_from_runner(tmp_path, monkeypatch)
 # NEW: Low display — func_name uses qualname when parent_class is set
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# TRACER-CORRECTNESS Fix 2: decorated target → honest fallback at launch
+# ---------------------------------------------------------------------------
+
+def test_decorated_target_falls_back_at_launch(tmp_path, monkeypatch):
+    """When probe_target reports is_decorated=True, launch_playground must
+    decline to a FallbackResponse with an honest reason — never run a capture
+    that would null the slab (the wrapper's file != the real body's anchor)."""
+    monkeypatch.setattr(
+        "copyclip.intelligence.capture.probe_target",
+        lambda *a, **kw: ({"is_async": False, "is_generator": False, "is_decorated": True},
+                          _FAKE_SOURCE_LINES),
+    )
+    monkeypatch.setattr(
+        "copyclip.intelligence.playground.generate_marimo_notebook",
+        lambda *a, **k: os.path.join(str(tmp_path), "dec", "playground.py"),
+    )
+    os.makedirs(os.path.join(str(tmp_path), "dec"), exist_ok=True)
+
+    from copyclip.intelligence.capture import FallbackResponse
+    resp = launch_playground(_req(), str(tmp_path), _conn_with_symbol(), 1, FakeRunner())
+    assert isinstance(resp, FallbackResponse), (
+        f"a decorated target must fall back, got {type(resp).__name__}"
+    )
+    assert "decorat" in resp.reason.lower(), (
+        f"the fallback reason must name the decorator; got {resp.reason!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# TRACER-CORRECTNESS Fix 5: truncated_reason carries through to the response
+# ---------------------------------------------------------------------------
+
+def test_truncated_reason_carried_on_step_through_response(tmp_path, monkeypatch):
+    """run_capture returns (steps, truncated, truncated_reason); the
+    StepThroughResponse must carry truncated_reason so the frontend can show the
+    right message (steps overflow vs wall-clock overrun)."""
+    _stub_probe(monkeypatch)
+    monkeypatch.setattr(
+        "copyclip.intelligence.capture.run_capture",
+        lambda *a, **kw: (_one_step(), True, "time"),
+    )
+    from copyclip.intelligence.capture import StepThroughResponse
+    resp = launch_playground(_req(), str(tmp_path), _conn_with_symbol(), 1, FakeRunner())
+    assert isinstance(resp, StepThroughResponse)
+    assert resp.truncated is True
+    assert resp.truncated_reason == "time", (
+        f"StepThroughResponse must carry truncated_reason; got {resp.truncated_reason!r}"
+    )
+    assert resp.to_dict()["truncated_reason"] == "time"
+
+
+def test_truncated_reason_none_serializes_on_response(tmp_path, monkeypatch):
+    """A non-truncated trace serializes truncated_reason=None."""
+    _stub_probe(monkeypatch)
+    monkeypatch.setattr(
+        "copyclip.intelligence.capture.run_capture",
+        lambda *a, **kw: (_one_step(), False, None),
+    )
+    resp = launch_playground(_req(), str(tmp_path), _conn_with_symbol(), 1, FakeRunner())
+    assert resp.to_dict()["truncated"] is False
+    assert resp.to_dict()["truncated_reason"] is None
+
+
 def test_func_name_uses_qualname_when_method(tmp_path, monkeypatch):
     """StepThroughResponse.func_name must be resolved.qualname (e.g. 'MyClass.process')
     when parent_class is set, so the stepper shows class context."""
@@ -582,7 +647,7 @@ def test_func_name_uses_qualname_when_method(tmp_path, monkeypatch):
         # Return a non-empty trace so we don't hit the empty-trace fallback
         from copyclip.intelligence.capture import Step
         steps = [Step(line=1, event="line", changed=[], scope=[])]
-        return steps, False
+        return steps, False, None
 
     monkeypatch.setattr("copyclip.intelligence.capture.run_capture", _recording_run_capture)
 

@@ -242,6 +242,25 @@ def test_method_with_ctor_is_eligible():
                               is_async=False, is_generator=False) is None
 
 
+def test_decorated_target_declines_with_honest_reason():
+    """Fix 2: a decorated target makes own_file the wrapper's file, so the real
+    body is never anchored. The gate must decline with an honest reason rather
+    than ship an empty stepper."""
+    cd = CallDescriptor.from_dict({"function_ref": {"file": "src/copyclip/foo.py", "name": "bar"}})
+    reason = eligibility_reason(cd, _resolved(), is_async=False, is_generator=False,
+                                is_decorated=True)
+    assert reason and "decorat" in reason.lower(), (
+        f"a decorated target must decline with a 'decorated' reason; got {reason!r}"
+    )
+
+
+def test_undecorated_target_is_eligible_with_decorated_kwarg():
+    """is_decorated=False (the default) must not change eligibility."""
+    cd = CallDescriptor.from_dict({"function_ref": {"file": "src/copyclip/foo.py", "name": "bar"}})
+    assert eligibility_reason(cd, _resolved(), is_async=False, is_generator=False,
+                              is_decorated=False) is None
+
+
 # ---------------------------------------------------------------------------
 # Task 4: In-subprocess capture driver (bounded settrace; every cap proven)
 # ---------------------------------------------------------------------------
@@ -538,8 +557,9 @@ def test_run_capture_traces_a_real_function(tmp_path):
                                 parent_class=None)
     cd = CallDescriptor.from_dict({"function_ref": {"file": "usermod.py", "name": "addup"},
                                    "args": [3]})
-    steps, truncated = run_capture(cd, resolved, project_root=str(root))
+    steps, truncated, truncated_reason = run_capture(cd, resolved, project_root=str(root))
     assert truncated is False
+    assert truncated_reason is None
     assert steps[-1].event == "return"
     names = {v.name for s in steps for v in s.scope}
     assert {"a", "b"} <= names
@@ -555,7 +575,7 @@ def test_run_free_text_capture_executes_user_expression(tmp_path):
                                 kind="function", module="usermod", line_start=1,
                                 parent_class=None)
     ft = FreeTextCall.from_text("addup(3 + 4)")
-    steps, truncated = run_free_text_capture(ft, resolved, project_root=str(root))
+    steps, truncated, truncated_reason = run_free_text_capture(ft, resolved, project_root=str(root))
     assert steps[-1].event == "return"
     names = {v.name for s in steps for v in s.scope}
     assert {"a", "b"} <= names
@@ -596,7 +616,7 @@ def test_run_capture_raise_is_terminal_step(tmp_path):
                                 parent_class=None)
     cd = CallDescriptor.from_dict({"function_ref": {"file": "usermod.py", "name": "boom"},
                                    "args": ["x"]})
-    steps, truncated = run_capture(cd, resolved, project_root=str(root))
+    steps, truncated, truncated_reason = run_capture(cd, resolved, project_root=str(root))
     assert steps[-1].event == "raise"
     assert steps[-1].raised["type"] == "KeyError"
 
@@ -1238,3 +1258,280 @@ def test_widget_recovery_directive_run_documents_call_descriptor_fields():
             f"WIDGET_RECOVERY_DIRECTIVE_RUN must mention '{field}' so the model "
             f"knows to include it. Got: {WIDGET_RECOVERY_DIRECTIVE_RUN!r}"
         )
+
+
+# ===========================================================================
+# TRACER-CORRECTNESS — PR #177 staff review (5 fixes), TDD (fail-first)
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# Fix 1: frame-scoping — anchor on the TARGET's CODE OBJECT, not its filename.
+# Other pure-Python functions in the SAME file must NOT interleave their lines
+# into the flat Step[] (spec §5 + §7 "library calls appear as one step").
+# ---------------------------------------------------------------------------
+
+def test_sibling_function_in_same_file_is_not_traced(tmp_path):
+    """A helper defined in the SAME module file as the target must appear as one
+    opaque step (no per-line interleaving). Anchoring on co_filename alone would
+    trace the helper's body and mis-anchor it on the target's source pane."""
+    mod_name = _make_free_text_mod(tmp_path, "_fs_sibling", dedent("""\
+        def helper(z):
+            a = z + 1
+            b = a + 1
+            return b
+
+        def target(n):
+            result = helper(n)
+            return result + 100
+    """))
+    try:
+        spec = {"module": mod_name, "name": "target", "call_text": "target(5)"}
+        raw = driver._trace_free_text(spec)
+        # The helper's body lines (2,3,4) must NOT appear as steps — only the
+        # target's own lines (the def-line and lines 7,8).
+        lines = [ev["line"] for ev in raw["trace"]]
+        # helper's interior lines (2 'a = z + 1', 3 'b = a + 1', 4 'return b')
+        for helper_line in (2, 3, 4):
+            assert helper_line not in lines, (
+                f"helper interior line {helper_line} leaked into the target trace: {lines!r}. "
+                "Frame-scoping must anchor on the target's CODE OBJECT, not co_filename."
+            )
+    finally:
+        sys.modules.pop(mod_name, None)
+
+
+def test_sibling_function_not_traced_model_path():
+    """Same guard for trace_call (the MODEL path): a sibling helper in the same
+    file as the target must not interleave its lines."""
+    src = dedent("""\
+        def _helper(z):
+            inner_a = z * 2
+            inner_b = inner_a * 2
+            return inner_b
+
+        def model_target(n):
+            mt_x = _helper(n)
+            return mt_x + 1
+    """)
+    ns: dict = {}
+    exec(compile(src, "<model_target_mod>", "exec"), ns, ns)
+    fn = ns["model_target"]
+    raw = driver.trace_call(fn, args=[3], kwargs={})
+    # No step's scope should ever contain the helper's locals (inner_a/inner_b).
+    leaked = {v["name"] for ev in raw["trace"] for v in ev["scope"]
+              if v["name"] in {"inner_a", "inner_b", "z"}}
+    assert not leaked, (
+        f"helper locals leaked into the target trace: {leaked!r}. "
+        "trace_call must anchor on func.__code__, not on the shared filename."
+    )
+
+
+def test_recursion_within_target_is_still_traced():
+    """Recursion re-enters the SAME code object, so it must STILL be traced
+    (frame-scoping anchors on the code object, which recursion shares)."""
+    src = dedent("""\
+        def fact(n):
+            if n <= 1:
+                return 1
+            return n * fact(n - 1)
+    """)
+    ns: dict = {}
+    exec(compile(src, "<fact_mod>", "exec"), ns, ns)
+    raw = driver.trace_call(ns["fact"], args=[3], kwargs={})
+    # Multiple 'call' events prove the recursive frames were traced (same code obj).
+    call_events = [ev for ev in raw["trace"] if ev["event"] == "call"]
+    assert len(call_events) >= 3, (
+        f"recursive calls into the SAME code object must be traced; "
+        f"got {len(call_events)} call events: {[e['line'] for e in raw['trace']]!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fix 1 (defense-in-depth): normalize_trace must DROP/mark any step whose `line`
+# falls outside the captured source_lines range, so a foreign frame can never
+# null the slab.
+# ---------------------------------------------------------------------------
+
+def test_normalize_drops_steps_outside_source_line_range():
+    """normalize_trace, given source_lines, must drop steps whose line is outside
+    the captured [min,max] range (a foreign frame leaking through)."""
+    raw = _raw([
+        {"line": 10, "event": "call", "scope": [{"name": "a", "kind": "scalar", "text": "1"}]},
+        {"line": 999, "event": "line", "scope": [{"name": "b", "kind": "scalar", "text": "2"}]},
+        {"line": 11, "event": "return", "scope": [{"name": "a", "kind": "scalar", "text": "1"}]},
+    ])
+    source_lines = [{"num": 10, "text": "def f(a):"}, {"num": 11, "text": "    return a"}]
+    steps = normalize_trace(raw, source_lines=source_lines)
+    lines = [s.line for s in steps]
+    assert 999 not in lines, (
+        f"step on line 999 (outside source range 10-11) must be dropped; got {lines!r}"
+    )
+    assert lines == [10, 11]
+
+
+def test_normalize_without_source_lines_keeps_all_steps():
+    """When source_lines is not supplied (back-compat), normalize_trace must not
+    drop anything — the defense-in-depth filter only engages with a known range."""
+    raw = _raw([
+        {"line": 10, "event": "line", "scope": []},
+        {"line": 999, "event": "line", "scope": []},
+    ])
+    steps = normalize_trace(raw)
+    assert [s.line for s in steps] == [10, 999]
+
+
+# ---------------------------------------------------------------------------
+# Fix 3: raise-line — trace_call and _trace_free_text must use the SAME source
+# for the terminal raise step's line (the last line the target frame executed).
+# ---------------------------------------------------------------------------
+
+def test_trace_call_raise_line_matches_last_executed_line():
+    """trace_call's terminal raise step line must be the last line the target
+    frame executed before the exception (unified with _trace_free_text)."""
+    src = dedent("""\
+        def boom_locals(x):
+            y = x + 1
+            raise ValueError('nope')
+    """)
+    ns: dict = {}
+    exec(compile(src, "<boom_mod>", "exec"), ns, ns)
+    raw = driver.trace_call(ns["boom_locals"], args=[7], kwargs={})
+    last = raw["trace"][-1]
+    assert last["event"] == "raise"
+    # The 'raise ValueError' statement is line 3 of the source above.
+    assert last["line"] == 3, (
+        f"raise step line was {last['line']}, expected 3 (the 'raise' statement line)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fix 5: truncated reason — split MAX_STEPS overflow ('steps') from WALL_CLOCK
+# overrun ('time'). The driver must carry a `truncated_reason` on the payload.
+# ---------------------------------------------------------------------------
+
+def test_truncated_reason_steps_on_max_steps(monkeypatch):
+    """A MAX_STEPS overflow must carry truncated_reason='steps'."""
+    monkeypatch.setattr(driver, "MAX_STEPS", 20)
+    def loopy(n):
+        total = 0
+        while True:
+            total += 1
+    raw = driver.trace_call(loopy, args=[0], kwargs={})
+    assert raw["truncated"] is True
+    assert raw["truncated_reason"] == "steps", (
+        f"MAX_STEPS overflow must report reason 'steps'; got {raw.get('truncated_reason')!r}"
+    )
+
+
+def test_truncated_reason_time_on_wall_clock(monkeypatch):
+    """A WALL_CLOCK overrun must carry truncated_reason='time'."""
+    monkeypatch.setattr(driver, "WALL_CLOCK_BUDGET_S", 0.05)
+    monkeypatch.setattr(driver, "MAX_STEPS", 10_000_000)
+    def slow_loop(n):
+        import time as _t
+        total = 0
+        for _ in range(10_000_000):
+            _t.sleep(0.001)
+            total += 1
+    raw = driver.trace_call(slow_loop, args=[0], kwargs={})
+    assert raw["truncated"] is True
+    assert raw["truncated_reason"] == "time", (
+        f"WALL_CLOCK overrun must report reason 'time'; got {raw.get('truncated_reason')!r}"
+    )
+
+
+def test_truncated_reason_none_when_not_truncated():
+    """A clean run carries truncated_reason=None (no conflation with a raise)."""
+    def ok(a):
+        b = a + 1
+        return b
+    raw = driver.trace_call(ok, args=[1], kwargs={})
+    assert raw["truncated"] is False
+    assert raw.get("truncated_reason") is None
+
+
+def test_truncated_reason_steps_free_text(tmp_path, monkeypatch):
+    """The USER free-text path must also carry truncated_reason='steps'."""
+    mod_name = _make_free_text_mod(tmp_path, "_tr_loopy", dedent("""\
+        def loopy():
+            total = 0
+            while True:
+                total += 1
+    """))
+    try:
+        monkeypatch.setattr(driver, "MAX_STEPS", 20)
+        spec = {"module": mod_name, "name": "loopy", "call_text": "loopy()"}
+        raw = driver._trace_free_text(spec)
+        assert raw["truncated"] is True
+        assert raw["truncated_reason"] == "steps"
+    finally:
+        sys.modules.pop(mod_name, None)
+
+
+def test_change_signature_flags_inplace_mutation_with_stable_summary():
+    """Fix 4: an in-place mutation of a large value with a STABLE (summary, meta)
+    must still flag as changed — fold a length/identity component into the
+    large-var change signature."""
+    # Same summary+meta both steps, but the list contents changed in place.
+    raw = _raw([
+        {"line": 1, "event": "line", "scope": [
+            {"name": "xs", "kind": "large", "summary": "list", "meta": "30 items",
+             "children": [{"name": "0", "text": "1"}]},
+        ]},
+        {"line": 2, "event": "line", "scope": [
+            {"name": "xs", "kind": "large", "summary": "list", "meta": "30 items",
+             "children": [{"name": "0", "text": "999"}]},
+        ]},
+    ])
+    steps = normalize_trace(raw)
+    assert "xs" in steps[1].changed, (
+        "an in-place mutation with stable summary/meta but changed children must "
+        f"still flag; got changed={steps[1].changed!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fix 2: decorated-target honesty — detect_kind must report a decorated target
+# so the eligibility gate can decline with an honest reason (the decorator makes
+# own_file the wrapper's file; the real body is never anchored).
+# ---------------------------------------------------------------------------
+
+def test_detect_kind_flags_decorated_target(tmp_path):
+    """A decorated target (functools.wraps so __wrapped__ is set, but co_name of
+    the visible function differs from name OR __wrapped__ exists) must report
+    is_decorated=True so the gate can decline honestly."""
+    mod_name = _make_free_text_mod(tmp_path, "_dec_target", dedent("""\
+        import functools
+
+        def deco(fn):
+            @functools.wraps(fn)
+            def wrapper(*a, **kw):
+                return fn(*a, **kw)
+            return wrapper
+
+        @deco
+        def work(x):
+            return x + 1
+    """))
+    try:
+        spec = {"module": mod_name, "name": "work"}
+        detect = driver.detect_kind(spec)
+        assert detect.get("is_decorated") is True, (
+            f"decorated target must report is_decorated=True; got {detect!r}"
+        )
+    finally:
+        sys.modules.pop(mod_name, None)
+
+
+def test_detect_kind_undecorated_target_is_not_flagged(tmp_path):
+    """An ordinary function must report is_decorated=False."""
+    mod_name = _make_free_text_mod(tmp_path, "_undec_target", dedent("""\
+        def plain(x):
+            return x + 1
+    """))
+    try:
+        detect = driver.detect_kind({"module": mod_name, "name": "plain"})
+        assert detect.get("is_decorated") is False
+    finally:
+        sys.modules.pop(mod_name, None)
