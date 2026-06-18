@@ -241,6 +241,18 @@ describe('PlaygroundWidget — nothing_ran state renders .playground-nothing-ran
     fireEvent.click(screen.getByRole('button', { name: '×' }))
     expect(close).toHaveBeenCalled()
   })
+
+  it('.playground-nothing-ran × button has no inline border or background (styled via CSS, not inline)', () => {
+    const { container } = render(
+      <PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />
+    )
+    const btn = container.querySelector('.playground-nothing-ran button')
+    expect(btn).not.toBeNull()
+    // The × button must NOT carry inline styles — its appearance comes from CSS.
+    // An inline style here would override the CSS rule and defeat the intent.
+    expect((btn as HTMLElement).style.border).toBe('')
+    expect((btn as HTMLElement).style.background).toBe('')
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -481,5 +493,39 @@ describe('PlaygroundWidget — previewing guard: stale preview clears when slot 
     fireEvent.click(screen.getByRole('button', { name: /step through/i }))
     // Slot is still empty — preview must remain
     expect(screen.getByText(/step through this call/i)).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// CSS Task 2 (PR #177): .playground-fallback-note class present in live state
+// ---------------------------------------------------------------------------
+
+describe('PlaygroundWidget — live state renders .playground-fallback-note when fallbackReason present', () => {
+  beforeEach(() => {
+    vi.mocked(getState).mockReturnValue({
+      kind: 'live',
+      widgetKey: MY_KEY,
+      playgroundId: 'pg-abc',
+      iframeUrl: '/playground/pg-abc',
+      fallbackReason: 'async function — nothing to step through',
+      token: 1,
+    })
+  })
+
+  it('renders the .playground-fallback-note CSS class when fallbackReason is set', () => {
+    const { container } = render(
+      <PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />
+    )
+    expect(container.querySelector('.playground-fallback-note')).not.toBeNull()
+  })
+
+  it('.playground-fallback-note carries no inline styles (styled via CSS)', () => {
+    const { container } = render(
+      <PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />
+    )
+    const note = container.querySelector<HTMLElement>('.playground-fallback-note')
+    expect(note).not.toBeNull()
+    // Must not carry inline styles — appearance comes from the CSS rule
+    expect(note!.getAttribute('style')).toBeNull()
   })
 })
