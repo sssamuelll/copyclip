@@ -324,9 +324,10 @@ def test_floor_emits_real_call_descriptor(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# ORCHESTRATION Fix 7: the floor must DECLINE a doomed bare-floor widget — a
-# method-without-ctor or an arity>0 function with no proposed args would render
-# `name()` and TypeError / fall back. Don't emit a widget we KNOW is doomed.
+# ORCHESTRATION Fix 7 (revised): arity>0 / method-without-ctor no longer declines —
+# the floor emits a needs_args=True template the user completes in the editable
+# preview before confirming. needs_args replaces the old decline so the user always
+# sees a widget (the off-target prose fallback was worse than an incomplete template).
 # ---------------------------------------------------------------------------
 
 
@@ -375,20 +376,30 @@ def test_floor_proposes_widget_for_arity0_function(tmp_path: Path):
     assert block.to_dict()["widget"]["call"]["function_ref"]["name"] == "boot"
 
 
-def test_floor_declines_arity_n_function_with_no_args(tmp_path: Path):
-    """An arity>0 function with no proposed args would render `name()` and
-    TypeError — the floor must DECLINE rather than emit a doomed widget."""
+def test_floor_emits_needs_args_widget_for_arity_n_function(tmp_path: Path):
+    """An arity>0 function with no proposed args emits a needs_args=True widget
+    (an editable template) instead of declining. The user supplies args in the
+    editable preview before confirming. The widget must be well-formed with an
+    empty-arg call descriptor and needs_args=True."""
     root = str(tmp_path)
     conn = sqlite3.connect(":memory:"); init_schema(conn)
     pid = _seed_arity_n_function(conn, root, tmp_path)
     block, reason = _construct_playground_floor(
         "run needs_arg", conn, pid, ledger=None, emitted=[], project_root=root)
-    assert block is None, "an arity>0 bare floor must be declined (doomed `name()` call)"
-    assert reason is not None and ("argument" in reason.lower() or "arity" in reason.lower())
+    assert block is not None, "arity>0 floor must emit a needs_args widget, not decline"
+    assert reason is None
+    w = block.to_dict()["widget"]
+    assert w.get("needs_args") is True, "arity>0 floor widget must carry needs_args=True"
+    assert w["call"]["function_ref"]["name"] == "needs_arg"
+    assert w["call"]["args"] == []
+    assert w["call"]["kwargs"] == {}
+    assert "call_text" in w
 
 
-def test_floor_declines_method_without_ctor(tmp_path: Path):
-    """A method-without-inferable-ctor bare floor would TypeError — decline it."""
+def test_floor_emits_needs_args_widget_for_method_without_ctor(tmp_path: Path):
+    """A method-without-inferable-ctor emits a needs_args=True widget (an editable
+    template) instead of declining. The widget must carry an empty ctor so call_text
+    renders 'Class().method()' giving the user a concrete template to complete."""
     root = str(tmp_path)
     conn = sqlite3.connect(":memory:"); init_schema(conn)
     conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root, "t"))
@@ -404,9 +415,18 @@ def test_floor_declines_method_without_ctor(tmp_path: Path):
     conn.commit()
     block, reason = _construct_playground_floor(
         "run run", conn, pid, ledger=None, emitted=[], project_root=root)
-    assert block is None, "a method-without-ctor bare floor must be declined"
-    assert reason is not None and ("ctor" in reason.lower() or "constructor" in reason.lower()
-                                   or "method" in reason.lower())
+    assert block is not None, "method-without-ctor floor must emit a needs_args widget, not decline"
+    assert reason is None
+    w = block.to_dict()["widget"]
+    assert w.get("needs_args") is True, "method floor widget must carry needs_args=True"
+    # The call_text must render a method-style invocation ("Class().method()") so the
+    # user sees a concrete template, not a bare "run()" that hides the class context.
+    assert "." in w.get("call_text", ""), (
+        f"method call_text must be 'Class().method()' form, got {w.get('call_text')!r}"
+    )
+    assert w["call"]["function_ref"]["name"] == "run"
+    # The call must carry an empty ctor so the structured path is well-formed.
+    assert "ctor" in w["call"], "method floor widget call must include an empty ctor"
 
 
 def test_floor_proceeds_when_arity_unknown(tmp_path: Path):

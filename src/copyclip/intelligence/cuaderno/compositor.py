@@ -188,13 +188,13 @@ def _floor_target_arity(resolved, project_root: Optional[str]) -> Optional[int]:
 
 
 def _doomed_floor_reason(resolved, project_root: Optional[str]) -> Optional[str]:
-    """Return why a BARE ``name()`` floor for ``resolved`` is doomed, or None.
+    """Return why a BARE ``name()`` floor for ``resolved`` needs user-supplied args,
+    or None when the bare call is self-sufficient.
 
-    PR #177 fix 7: the floor proposes ``call={function_ref}`` with no args/ctor →
-    the fold renders ``name()``. For a method-without-inferable-ctor or an arity>0
-    function that would TypeError / fall back at launch, so we decline the bare
-    FLOOR (the model-proposed-call path with real args is unaffected — this only
-    guards the no-args fallback)."""
+    Previously used to DECLINE the floor; now drives the ``needs_args`` flag instead
+    so the widget is still emitted as an editable template (the user completes the
+    call in the preview before confirming). The decline path is reserved ONLY for
+    genuinely unresolvable symbols (handled upstream in _resolve_floor_symbol)."""
     if resolved.kind == "method" or resolved.parent_class:
         return ("method needs constructor arguments the bare floor cannot infer "
                 "(name() would fail)")
@@ -221,11 +221,11 @@ def _construct_playground_floor(question: str, conn: Optional[sqlite3.Connection
                                      _candidate_symbol_names(question), ledger)
     if resolved is None:
         return None, "no candidate symbol resolved (unmatched or ambiguous across files)"
-    # Don't propose a bare floor we KNOW is doomed (PR #177 fix 7): a
-    # method-without-ctor or an arity>0 function would render `name()` and fail.
-    doomed = _doomed_floor_reason(resolved, project_root)
-    if doomed is not None:
-        return None, doomed
+    # _doomed_floor_reason now drives needs_args (not a decline): a method-without-ctor
+    # or arity>0 function emits a needs_args=True template the user completes in the
+    # editable preview — the decline path is reserved for genuinely unresolvable symbols.
+    doomed_reason = _doomed_floor_reason(resolved, project_root)
+    needs_args = doomed_reason is not None
     fr: dict[str, Any] = {"file": resolved.file, "name": resolved.name}
     if resolved.line_start is not None:
         fr["line"] = resolved.line_start
@@ -235,10 +235,35 @@ def _construct_playground_floor(question: str, conn: Optional[sqlite3.Connection
     _is_es = lang == "es" or any(t in question.lower() for t in _ES_RUN_TERMS)
     breadcrumb = (f"Recorre {resolved.name} paso a paso"
                   if _is_es else f"Step through {resolved.name}")
-    call = {"function_ref": fr}
-    raw_widget_dict = Widget.playground(function_ref=fr, breadcrumb=breadcrumb, call=call).to_dict()
+    # Build the widget data for methods: derive a best-effort class name from the
+    # qualname so fold_playground_widget renders "Class().method()" for call_text.
+    # The ctor is passed at the TOP LEVEL of the widget (matching model emission)
+    # so fold_playground_widget picks it up and folds it into call + call_text.
+    extra_widget_data: dict[str, Any] = {}
+    if resolved.kind == "method" or resolved.parent_class:
+        # Derive the class name from qualname ("ClassName.method") or fall back to
+        # "Object" so call_text gives the user a concrete template to edit.
+        if resolved.qualname and "." in resolved.qualname:
+            class_name = resolved.qualname.split(".")[0]
+        elif resolved.parent_class:
+            class_name = resolved.parent_class
+        else:
+            class_name = "Object"
+        # Embed a synthetic qualname so fold_playground_widget renders "Class().method()".
+        fr = {**fr, "qualname": f"{class_name}.{resolved.name}"}
+        # Pass top-level ctor so the fold picks it up (fold reads w.get("ctor")).
+        extra_widget_data["ctor"] = {"args": [], "kwargs": {}}
+    raw_widget: Widget = Widget.playground(
+        function_ref=fr, breadcrumb=breadcrumb,
+        needs_args=needs_args if needs_args else None,
+    )
+    # Merge extra fields (ctor for methods) into the widget data dict.
+    # We patch the raw dict rather than the dataclass (frozen) to keep it simple.
+    raw_widget_dict = raw_widget.to_dict()
+    raw_widget_dict.update(extra_widget_data)
     # Apply the emit-boundary fold so the floor widget also gets call_text
-    # (the function name with empty parens for a no-arg floor widget).
+    # (the function name with empty parens for a no-arg floor widget, or
+    # "Class().method()" for a method template).
     folded_block_dict = fold_playground_widget({"kind": "widget", "widget": raw_widget_dict})
     block = Block.from_dict(folded_block_dict)
     # Defensive: the floor must meet the same emit-time bar as a model widget.
