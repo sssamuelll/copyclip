@@ -24,12 +24,12 @@ describe('Stepper', () => {
   })
   it('advances with the next button', async () => {
     render(<Stepper response={resp} onClose={() => {}} />)
-    await userEvent.click(screen.getByRole('button', { name: '▶' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Next step' }))
     expect(screen.getByText('step 2 / 4')).toBeInTheDocument()
   })
   it('clamps at the last step', async () => {
     render(<Stepper response={resp} onClose={() => {}} />)
-    const next = screen.getByRole('button', { name: '▶' })
+    const next = screen.getByRole('button', { name: 'Next step' })
     for (let i = 0; i < 10; i++) await userEvent.click(next)
     expect(screen.getByText('step 4 / 4')).toBeInTheDocument()
   })
@@ -57,7 +57,7 @@ describe('Stepper', () => {
       { line: 263, event: 'raise', changed: [], scope: [v('qualname', 'scalar', { text: "'ghost'" })], raised: { type: 'KeyError', message: "'ghost'" } },
     ]
     render(<Stepper response={{ ...resp, trace: raisedTrace }} onClose={() => {}} lang="en" />)
-    const next = screen.getByRole('button', { name: '▶' })
+    const next = screen.getByRole('button', { name: 'Next step' })
     for (let i = 0; i < 10; i++) await userEvent.click(next)
     expect(screen.getByText('Raised — this is the final step.')).toBeInTheDocument()
     expect(screen.getByText("KeyError: 'ghost'")).toBeInTheDocument()
@@ -100,7 +100,7 @@ describe('Stepper', () => {
       { line: 11, event: 'raise', changed: [], scope: [], raised: { type: 'ValueError', message: 'end' } },
     ]
     render(<Stepper response={{ ...resp, trace: terminalRaiseTrace }} onClose={() => {}} lang="en" />)
-    const next = screen.getByRole('button', { name: '▶' })
+    const next = screen.getByRole('button', { name: 'Next step' })
     await userEvent.click(next)
     expect(screen.getByText('Raised — this is the final step.')).toBeInTheDocument()
   })
@@ -116,11 +116,11 @@ describe('Stepper', () => {
     const deepResp: StepThroughResponse = { ...resp, trace: deepTrace }
     const { rerender } = render(<Stepper response={deepResp} onClose={() => {}} />)
     // Advance to step 2
-    const next = screen.getByRole('button', { name: '▶' })
+    const next = screen.getByRole('button', { name: 'Next step' })
     await userEvent.click(next)
     expect(screen.getByText('step 2 / 3')).toBeInTheDocument()
     // Expand 'box' chip while still on step 1 (go back first so box is in scope)
-    await userEvent.click(screen.getByRole('button', { name: '◀' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Previous step' }))
     expect(screen.getByText('step 1 / 3')).toBeInTheDocument()
     await userEvent.click(screen.getByText('Wrapper'))
     // After expansion, the unique child text appears
@@ -192,7 +192,7 @@ describe('Stepper', () => {
       { line: 263, event: 'raise', changed: [], scope: [v('qualname', 'scalar', { text: "'ghost'" })], raised: { type: 'KeyError', message: "'ghost'" } },
     ]
     const { container } = render(<Stepper response={{ ...resp, trace: raisedTrace }} onClose={() => {}} lang="en" />)
-    const next = screen.getByRole('button', { name: '▶' })
+    const next = screen.getByRole('button', { name: 'Next step' })
     for (let i = 0; i < 10; i++) await userEvent.click(next)
     // The scrubber handle is a div with borderRadius=50%. JSDOM stores inline styles with
     // space after colon ("border-radius: 50%"), so we iterate all styled elements and
@@ -217,7 +217,7 @@ describe('Stepper', () => {
       { line: 263, event: 'raise', changed: [], scope: [], raised: { type: 'KeyError', message: "'ghost'" } },
     ]
     render(<Stepper response={{ ...resp, trace: raisedTrace }} onClose={() => {}} lang="en" />)
-    const next = screen.getByRole('button', { name: '▶' })
+    const next = screen.getByRole('button', { name: 'Next step' })
     for (let i = 0; i < 10; i++) await userEvent.click(next)
     expect(screen.queryByRole('button', { name: /next change/i })).toBeNull()
     expect(screen.queryByText(/library calls appear as one step/i)).toBeNull()
@@ -238,6 +238,35 @@ describe('Stepper', () => {
     expect(screen.queryByText(/step \d+ \/ \d+/)).toBeNull()
     // Must render the fallback message
     expect(screen.getByText(/no steps captured/i)).toBeInTheDocument()
+  })
+
+  // Fix 3: scrubber a11y — keyboard stepping via ArrowRight/ArrowLeft
+  it('scrubber has role=slider with aria-valuemin/max/now', () => {
+    render(<Stepper response={resp} onClose={() => {}} />)
+    const slider = screen.getByRole('slider')
+    expect(slider).toBeInTheDocument()
+    expect(slider.getAttribute('aria-valuemin')).toBe('1')
+    expect(slider.getAttribute('aria-valuemax')).toBe('4')
+    expect(slider.getAttribute('aria-valuenow')).toBe('1')
+  })
+
+  it('ArrowRight on the scrubber advances the step', async () => {
+    render(<Stepper response={resp} onClose={() => {}} />)
+    const slider = screen.getByRole('slider')
+    slider.focus()
+    await userEvent.keyboard('{ArrowRight}')
+    expect(screen.getByText('step 2 / 4')).toBeInTheDocument()
+  })
+
+  it('ArrowLeft on the scrubber retreats the step', async () => {
+    render(<Stepper response={resp} onClose={() => {}} />)
+    const slider = screen.getByRole('slider')
+    slider.focus()
+    // Advance twice, then retreat once
+    await userEvent.keyboard('{ArrowRight}{ArrowRight}')
+    expect(screen.getByText('step 3 / 4')).toBeInTheDocument()
+    await userEvent.keyboard('{ArrowLeft}')
+    expect(screen.getByText('step 2 / 4')).toBeInTheDocument()
   })
 
   it('fires onClose from the × button on the empty-trace fallback', async () => {

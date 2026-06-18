@@ -21,11 +21,12 @@ import type { PlaygroundWidgetData, Citation } from '../../../types/api'
 vi.mock('../playgroundSlot', () => ({
   subscribe: vi.fn(() => () => {}),
   getState: vi.fn(),
+  getToken: vi.fn(() => 0),
   launch: vi.fn(),
   close: vi.fn(),
 }))
 
-import { getState, launch, close } from '../playgroundSlot'
+import { getState, getToken, launch, close } from '../playgroundSlot'
 import { PlaygroundWidget } from './PlaygroundWidget'
 
 const WIDGET: PlaygroundWidgetData = {
@@ -200,6 +201,45 @@ describe('PlaygroundWidget — ended state delegates to EndedCards', () => {
       <PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />
     )
     expect(container.querySelector('.playground-status-note')).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// nothing_ran state — slot.kind === 'nothing_ran'
+// The .playground-nothing-ran class must be present (CSS was missing before fix 4).
+// ---------------------------------------------------------------------------
+
+describe('PlaygroundWidget — nothing_ran state renders .playground-nothing-ran', () => {
+  beforeEach(() => {
+    vi.mocked(getState).mockReturnValue({
+      kind: 'nothing_ran',
+      widgetKey: MY_KEY,
+      message: "that call didn't run the function",
+      token: 1,
+    })
+  })
+
+  it('renders the .playground-nothing-ran CSS class', () => {
+    const { container } = render(
+      <PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />
+    )
+    expect(container.querySelector('.playground-nothing-ran')).not.toBeNull()
+  })
+
+  it('renders the message text inside the nothing-ran container', () => {
+    render(<PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />)
+    expect(screen.getByText("that call didn't run the function")).toBeInTheDocument()
+  })
+
+  it('has a × dismiss button', () => {
+    render(<PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />)
+    expect(screen.getByRole('button', { name: '×' })).toBeInTheDocument()
+  })
+
+  it('calls close() when × is clicked', () => {
+    render(<PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />)
+    fireEvent.click(screen.getByRole('button', { name: '×' }))
+    expect(close).toHaveBeenCalled()
   })
 })
 
@@ -406,6 +446,30 @@ describe('PlaygroundWidget — previewing guard: stale preview clears when slot 
     // Without the fix, previewing is still true and slot.kind === 'empty' → PreviewCall re-appears.
     expect(screen.queryByText(/step through this call/i)).toBeNull()
     // Widget A should be in idle state, not preview
+    expect(screen.getByRole('button', { name: /step through/i })).toBeInTheDocument()
+  })
+
+  it('token guard: stale preview is suppressed even when slot snaps spawning→empty before the effect fires', () => {
+    // Reproduce the race: Widget A enters previewing (token=0). Widget B launches,
+    // increments token to 1, and completes so fast the slot is already empty again
+    // before any effect runs. Without the token guard, slot.kind==='empty' +
+    // previewing=true would re-show Widget A's PreviewCall.
+    // Start: token=0 so Widget A captures token=0 when entering previewing
+    vi.mocked(getState).mockReturnValue({ kind: 'empty' })
+    vi.mocked(getToken).mockReturnValue(0)
+    const { rerender } = render(
+      <PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />
+    )
+    fireEvent.click(screen.getByRole('button', { name: /step through/i }))
+    expect(screen.getByText(/step through this call/i)).toBeInTheDocument()
+
+    // Widget B launches and completes: slot is empty again but token advanced to 1
+    vi.mocked(getState).mockReturnValue({ kind: 'empty' })
+    vi.mocked(getToken).mockReturnValue(1)
+    rerender(<PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />)
+
+    // With the token guard, Widget A's stale preview must be suppressed
+    expect(screen.queryByText(/step through this call/i)).toBeNull()
     expect(screen.getByRole('button', { name: /step through/i })).toBeInTheDocument()
   })
 

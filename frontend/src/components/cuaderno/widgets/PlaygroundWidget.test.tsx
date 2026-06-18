@@ -223,6 +223,42 @@ describe('PlaygroundWidget — integration (real slot store)', () => {
     expect(await screen.findByText(/didn't run the function/)).toBeInTheDocument()
   })
 
+  // ---- callTextOf: ctor present renders Ctor(ctorArgs).method(args) ----
+
+  it('callTextOf renders Ctor(ctorArgs).method(args) when call.ctor is present', async () => {
+    const fnWithQualname = { ...fn, qualname: 'MyClass.resolve_function_ref' }
+    const widgetWithCtor: typeof widget = {
+      ...widget,
+      call_text: undefined,
+      call: {
+        function_ref: fnWithQualname,
+        args: [42],
+        ctor: { args: ['db'] },
+      },
+    }
+    render(<PlaygroundWidget widget={widgetWithCtor} onOpenCitation={() => {}} />)
+    await userEvent.click(screen.getByRole('button', { name: /step through/i }))
+    // Should render: MyClass('db').resolve_function_ref(42)
+    expect(screen.getByText("MyClass('db').resolve_function_ref(42)")).toBeInTheDocument()
+  })
+
+  it('callTextOf falls back to method(args) when ctor present but qualname absent', async () => {
+    const fnNoQualname = { file: fn.file, name: fn.name }  // no qualname
+    const widgetNoQualname: typeof widget = {
+      ...widget,
+      call_text: undefined,
+      call: {
+        function_ref: fnNoQualname,
+        args: [1],
+        ctor: { args: ['x'] },
+      },
+    }
+    render(<PlaygroundWidget widget={widgetNoQualname} onOpenCitation={() => {}} />)
+    await userEvent.click(screen.getByRole('button', { name: /step through/i }))
+    // Falls back to: resolve_function_ref(1)
+    expect(screen.getByText('resolve_function_ref(1)')).toBeInTheDocument()
+  })
+
   // ---- callTextOf fallback quotes string args (High #4) ----
 
   it('callTextOf fallback quotes string args — widget without call_text shows repr literals', async () => {

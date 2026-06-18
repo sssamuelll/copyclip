@@ -189,6 +189,43 @@ describe('playgroundSlot', () => {
     }
   })
 
+  it('close() while in ended state transitions slot to empty (not a no-op)', async () => {
+    // Reproduce the trap: after a trace run, × is clicked → slot goes ended.
+    // Clicking × again (or Widget B tries to launch) must NOT be blocked.
+    launchPlayground.mockResolvedValue(TRACE)
+    await launch('a.py:f:', req)
+    expect(getState().kind).toBe('trace')
+    // First close: trace → ended
+    close()
+    await Promise.resolve()
+    expect(getState().kind).toBe('ended')
+    // Second close (× on the EndedCard): ended → empty
+    close()
+    await Promise.resolve()
+    expect(getState().kind).toBe('empty')
+  })
+
+  it('after ended/evicted/error state, × returns to empty AND a second widget can then launch', async () => {
+    // Error path: launch fails → slot is ended with reason=error
+    launchPlayground.mockRejectedValue(new Error('port busy'))
+    await launch('a.py:f:', req)
+    expect(getState().kind).toBe('ended')
+    const s1 = getState()
+    if (s1.kind === 'ended') expect(s1.reason).toBe('error')
+
+    // User clicks × on the EndedCard → slot returns to empty
+    close()
+    await Promise.resolve()
+    expect(getState().kind).toBe('empty')
+
+    // Widget B can now launch without being blocked
+    launchPlayground.mockResolvedValue(TRACE)
+    await launch('b.py:g:', req)
+    expect(getState().kind).toBe('trace')
+    const s2 = getState()
+    if (s2.kind === 'trace') expect(s2.widgetKey).toBe('b.py:g:')
+  })
+
   it('close() on an empty slot does NOT abort an in-flight launch via token race', async () => {
     // Bug: close() increments the global token even when slot.kind === 'empty'.
     // Sequence: launch() captures myToken = N, awaits killCurrent (no-op for

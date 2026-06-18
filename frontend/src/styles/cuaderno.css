@@ -1241,3 +1241,31 @@
 @keyframes stepperPulse { 0%, 100% { opacity: .4; } 50% { opacity: .95; } }
 .stepper-sweep { animation: stepperSweep 1.25s cubic-bezier(.4, 0, .2, 1) infinite; }
 .stepper-pulse { animation: stepperPulse 1.5s ease-in-out infinite; }
+
+/* "nothing ran" dismissible note — shown when the trace is empty (the call
+   did not enter the target function). Uses owned tokens only; --neg is not
+   appropriate here (nothing went wrong, the function was simply not reached). */
+.playground-nothing-ran {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 14px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--ink-3);
+  background: var(--surface-2);
+  border-radius: 0;         /* inside .widget which already has border-radius */
+}
+.playground-nothing-ran button {
+  flex: none;
+  background: transparent;
+  border: 0;
+  font-size: 16px;
+  color: var(--ink-4);
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  line-height: 1;
+}
+.playground-nothing-ran button:hover { background: var(--surface); color: var(--ink); }

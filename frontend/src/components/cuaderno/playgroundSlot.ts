@@ -17,6 +17,8 @@ const listeners = new Set<() => void>()
 function set(next: SlotState) { state = next; listeners.forEach((l) => l()) }
 export function subscribe(l: () => void): () => void { listeners.add(l); return () => { listeners.delete(l) } }
 export function getState(): SlotState { return state }
+/** Expose the current launch token for ownership guards in UI components. */
+export function getToken(): number { return token }
 
 /** Recover the playground id from a fallback iframe_url ("/playground/<id>"). */
 export function idFromIframeUrl(url: string): string {
@@ -57,6 +59,11 @@ async function killCurrent(reason: 'closed' | 'evicted'): Promise<void> {
     set({ kind: 'ended', widgetKey: state.widgetKey, reason })
   } else if (state.kind === 'nothing_ran') {
     set({ kind: 'ended', widgetKey: state.widgetKey, reason })
+  } else if (state.kind === 'ended') {
+    // × on an EndedCard: dismiss the card by returning the slot to 'empty',
+    // so Widget B can start a fresh playground (the guard at PlaygroundWidget
+    // line 121 checks slot.kind !== 'ended' before allowing a new launch).
+    set({ kind: 'empty' })
   }
 }
 

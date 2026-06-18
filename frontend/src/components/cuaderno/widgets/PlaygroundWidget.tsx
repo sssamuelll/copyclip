@@ -1,7 +1,7 @@
 import { useState, useEffect, useSyncExternalStore } from 'react'
 import type { PlaygroundWidgetData, Citation, CallDescriptor } from '../../../types/api'
 import { CitationChip } from '../CitationChip'
-import { subscribe, getState, launch, close } from '../playgroundSlot'
+import { subscribe, getState, launch, close, getToken } from '../playgroundSlot'
 import { IdleInvitation } from '../stepper/IdleInvitation'
 import { PreviewCall } from '../stepper/PreviewCall'
 import { Spawning } from '../stepper/Spawning'
@@ -18,17 +18,40 @@ type Props = {
 // Build a faithful invocation string from the model's structured descriptor.
 // Prefer the pre-rendered call_text; this is the fallback when only `call` is present.
 // String args are repr-quoted (single quotes); other values use JSON.stringify.
+//
+// For method calls (call.ctor present): renders as `Ctor(ctorArgs).method(args)`.
+// The constructor class name is derived from function_ref.qualname (e.g. "Foo.method"
+// → "Foo"). When qualname is absent, falls back to rendering only the method call.
 function callTextOf(name: string, call?: CallDescriptor): string {
   if (!call) return `${name}()`
   const lit = (v: unknown) => (typeof v === 'string' ? `'${v}'` : JSON.stringify(v))
   const pos = (call.args ?? []).map(lit)
   const kw = Object.entries(call.kwargs ?? {}).map(([k, v]) => `${k}=${lit(v)}`)
-  return `${name}(${[...pos, ...kw].join(', ')})`
+  const methodArgs = [...pos, ...kw].join(', ')
+  if (call.ctor) {
+    // Method call: build Ctor(ctorArgs).method(args)
+    const ctorPos = (call.ctor.args ?? []).map(lit)
+    const ctorKw = Object.entries(call.ctor.kwargs ?? {}).map(([k, v]) => `${k}=${lit(v)}`)
+    const ctorArgs = [...ctorPos, ...ctorKw].join(', ')
+    // Derive class name from qualname (e.g. "Foo.method" → "Foo")
+    const qualname = call.function_ref.qualname
+    const ctorName = qualname?.includes('.') ? qualname.split('.')[0] : null
+    if (ctorName) {
+      return `${ctorName}(${ctorArgs}).${name}(${methodArgs})`
+    }
+  }
+  return `${name}(${methodArgs})`
 }
 
 export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
   const slot = useSyncExternalStore(subscribe, getState)
   const [previewing, setPreviewing] = useState(false)
+  // Token captured when this widget entered previewing mode. If the global token
+  // has advanced (another widget launched), the slot may have cycled spawning→empty
+  // so fast that the useEffect below never saw the non-empty state. The token
+  // comparison catches this race: if token changed since we entered preview mode,
+  // this widget's preview is stale even when slot.kind==='empty'.
+  const [previewToken, setPreviewToken] = useState<number>(-1)
 
   const fn = widget.function_ref
   const myKey = `${fn.file}:${fn.name}:${fn.line ?? ''}`
@@ -48,10 +71,17 @@ export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
     }
   }, [previewing, isMine, slot.kind])
 
+  // Token-based ownership guard: if the global token advanced past the value
+  // captured at preview-entry, another widget launched — clear our stale preview
+  // even if the slot has already returned to 'empty' (spawning→empty race).
+  const currentToken = getToken()
+  const previewIsStale = previewing && previewToken >= 0 && currentToken !== previewToken && !isMine
+
   // On confirm the (possibly edited) free text flows through as call_text (D2);
   // the structured descriptor rides along for the backend's repr-literal guard.
   const doLaunch = (callText: string) => {
     setPreviewing(false)
+    setPreviewToken(-1)
     void launch(myKey, {
       source: 'cuaderno',
       function_ref: fn,
@@ -118,13 +148,14 @@ export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
   // widget's `previewing` flag was still true (e.g. Widget B fired its own
   // step-through), clear the stale preview so this widget cannot call doLaunch
   // and evict Widget B's active playground.
-  if (previewing && (slot.kind === 'empty' || isMine)) {
+  // Token guard: also covers the spawning→empty race where the effect never fires.
+  if (previewing && !previewIsStale && (slot.kind === 'empty' || isMine)) {
     return (
       <PreviewCall
         funcName={fn.name}
         initialCall={proposedCall}
         onConfirm={doLaunch}
-        onCancel={() => setPreviewing(false)}
+        onCancel={() => { setPreviewing(false); setPreviewToken(-1) }}
         lang={lang}
       />
     )
@@ -151,7 +182,7 @@ export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
         funcName={fn.name}
         reason={slot.reason}
         message={slot.message}
-        onRetry={() => setPreviewing(true)}
+        onRetry={() => { setPreviewing(true); setPreviewToken(getToken()) }}
         onClose={close}
         citation={widget.citation}
         breadcrumb={widget.breadcrumb}
@@ -168,7 +199,7 @@ export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
     <IdleInvitation
       funcName={fn.name}
       fileLine={fileLine}
-      onStepThrough={() => setPreviewing(true)}
+      onStepThrough={() => { setPreviewing(true); setPreviewToken(getToken()) }}
       onClose={handleClose}
       citation={widget.citation}
       breadcrumb={widget.breadcrumb}

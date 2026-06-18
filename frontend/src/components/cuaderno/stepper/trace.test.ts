@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { Step, Var } from '../../../types/api'
-import { clampStep, nextChange, trackFraction, lineModels, buildRows, markerLefts } from './trace'
+import { clampStep, nextChange, trackFraction, lineModels, buildRows, markerLefts, sourceTranslateY, ROW_H } from './trace'
 
 const v = (name: string, kind: Var['kind'], extra: Partial<Var> = {}): Var => ({ name, kind, ...extra })
 
@@ -34,6 +34,17 @@ describe('nextChange', () => {
   it('skips no-change steps (258 has changed=[])', () => {
     // step 3 (line 257) -> step 5 (line 259), skipping step 4 (258, no change)
     expect(nextChange(3, TRACE)).toBe(5)
+  })
+  it('returns current step (no infinite loop) when ALL steps have empty changed arrays', () => {
+    // Trace where every step has changed:[] — nextChange must terminate and return cur
+    const allEmpty: Step[] = [
+      { line: 1, event: 'call',   changed: [], scope: [] },
+      { line: 2, event: 'line',   changed: [], scope: [] },
+      { line: 3, event: 'return', changed: [], scope: [] },
+    ]
+    expect(nextChange(1, allEmpty)).toBe(1)
+    expect(nextChange(2, allEmpty)).toBe(2)
+    expect(nextChange(3, allEmpty)).toBe(3)
   })
 })
 
@@ -86,6 +97,44 @@ describe('buildRows', () => {
     const rows = buildRows(TRACE[0], {})
     expect(rows[0].isOpaque).toBe(true)
     expect(rows[0].label).toBe('Connection')
+  })
+})
+
+describe('sourceTranslateY (source column scroll)', () => {
+  const VIS = 10 * ROW_H // 260px — 10 visible rows
+
+  it('returns 0 when all lines fit in the visible area', () => {
+    expect(sourceTranslateY(5, 8, VIS)).toBe(0)
+  })
+
+  it('returns 0 when curIdx < 0 (stale anchor)', () => {
+    expect(sourceTranslateY(-1, 30, VIS)).toBe(0)
+  })
+
+  it('returns 0 for the first line of a long source', () => {
+    // curIdx=0: ideal centres line 0. With clamping it cannot go positive → 0.
+    expect(sourceTranslateY(0, 25, VIS)).toBe(0)
+  })
+
+  it('scrolls so a late line in a >20-line source stays within the visible region', () => {
+    // 25-line source (25*ROW_H = 650px), visible = 260px, step to last line (idx 24)
+    const totalLines = 25
+    const curIdx = 24
+    const ty = sourceTranslateY(curIdx, totalLines, VIS)
+    // The highlighted line must be within [0, VIS) after applying translateY
+    const lineTop = curIdx * ROW_H + ty
+    expect(lineTop).toBeGreaterThanOrEqual(0)
+    expect(lineTop).toBeLessThan(VIS)
+  })
+
+  it('keeps curIdx line top within [0, visiblePx) for every step of a 22-line source', () => {
+    const totalLines = 22
+    for (let curIdx = 0; curIdx < totalLines; curIdx++) {
+      const ty = sourceTranslateY(curIdx, totalLines, VIS)
+      const lineTop = curIdx * ROW_H + ty
+      expect(lineTop, `curIdx=${curIdx} must be in view`).toBeGreaterThanOrEqual(0)
+      expect(lineTop, `curIdx=${curIdx} must be in view`).toBeLessThan(VIS)
+    }
   })
 })
 

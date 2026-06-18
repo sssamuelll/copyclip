@@ -1,8 +1,8 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useMemo } from 'react'
 import type { StepThroughResponse } from '../../../types/api'
 import { t } from '../strings'
 import {
-  ROW_H, clampStep, nextChange, trackFraction, lineModels, buildRows, markerLefts,
+  ROW_H, clampStep, nextChange, trackFraction, lineModels, buildRows, markerLefts, sourceTranslateY,
 } from './trace'
 import { StateRow, s } from './StateRow'
 
@@ -67,6 +67,14 @@ export function Stepper({ response, onClose, lang }: Props) {
       ? { tick: 'var(--neg-ink)', bg: 'var(--neg)', ink: 'var(--neg-ink)', text: t('playground_raised_final', lang) }
       : null
   const bodyHeight = banner ? 404 : 480
+  // terminal = the trace has reached a natural end: truncation cap or a raise at the last step.
+  // In these states the handoff omits "next change ◆" and the honesty note (pixel-fidelity).
+  const terminal = truncated || raised
+  // Compute the translateY so the highlighted line stays visible inside the
+  // clipped source column (overflow:hidden). The visible height estimate:
+  //   bodyHeight - body-padding(29px) - scrubber-strip(52px) - honesty-note(25px when !terminal)
+  const sourceVisibleH = bodyHeight - 29 - 52 - (terminal ? 0 : 25)
+  const srcTranslateY = sourceTranslateY(curIdx, source_lines.length, sourceVisibleH)
 
   const toggle = (name: string) =>
     setExpanded((e) => ({ ...e, [name]: !e[name] }))
@@ -78,9 +86,6 @@ export function Stepper({ response, onClose, lang }: Props) {
   }
   const onNextChange = () => setStep(nextChange(cur, trace))
   const atEnd = cur >= total
-  // terminal = the trace has reached a natural end: truncation cap or a raise at the last step.
-  // In these states the handoff omits "next change ◆" and the honesty note (pixel-fidelity).
-  const terminal = truncated || raised
 
   // Raised terminal handle: use --neg-ink instead of --accent (handoff state 07, line 521).
   // Respect truncated priority: when truncated=true the slab stays neutral, so the handle must too.
@@ -119,9 +124,12 @@ export function Stepper({ response, onClose, lang }: Props) {
           {/* source */}
           <div style={s('flex:1.55;position:relative;overflow:hidden;font-family:var(--font-mono);font-size:13px;line-height:26px;')}>
             {!staleAnchor && (
-              <div data-testid="hl-slab" style={{ ...s(`position:absolute;left:-16px;right:6px;height:26px;background:${slabBg};border-left:2px solid ${slabBorder};transition:top .22s cubic-bezier(.4,0,.2,1);`), top: hlTop }} />
+              <div data-testid="hl-slab" style={{ ...s(`position:absolute;left:-16px;right:6px;height:26px;background:${slabBg};border-left:2px solid ${slabBorder};transition:top .22s cubic-bezier(.4,0,.2,1);`), top: hlTop + srcTranslateY }} />
             )}
-            <div style={s('position:relative;')}>
+            <div
+              data-testid="source-lines"
+              style={{ ...s('position:relative;'), transform: `translateY(${srcTranslateY}px)`, transition: 'transform .22s cubic-bezier(.4,0,.2,1)' }}
+            >
               {lines.map((ln) => (
                 <div key={ln.num} style={s('display:flex;height:26px;')}>
                   <span style={s(ln.numStyle)}>{ln.num}</span>
@@ -151,8 +159,22 @@ export function Stepper({ response, onClose, lang }: Props) {
         </div>
         {/* scrubber */}
         <div style={s('display:flex;align-items:center;gap:11px;padding-top:13px;margin-top:11px;border-top:1px solid var(--hairline-soft);')}>
-          <button onClick={() => move(-1)} aria-label="◀" className="stepper-btn" style={s(btn)}>◀</button>
-          <div onClick={onTrack} style={s('position:relative;flex:1;height:26px;display:flex;align-items:center;cursor:pointer;')}>
+          <button onClick={() => move(-1)} aria-label="Previous step" className="stepper-btn" style={s(btn)}>◀</button>
+          <div
+            role="slider"
+            tabIndex={0}
+            aria-valuemin={1}
+            aria-valuemax={total}
+            aria-valuenow={cur}
+            onClick={onTrack}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowRight' || e.key === 'ArrowUp') { e.preventDefault(); move(1) }
+              else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') { e.preventDefault(); move(-1) }
+              else if (e.key === 'Home') { e.preventDefault(); setStep(1) }
+              else if (e.key === 'End') { e.preventDefault(); setStep(total) }
+            }}
+            style={s('position:relative;flex:1;height:26px;display:flex;align-items:center;cursor:pointer;')}
+          >
             <div style={s('position:absolute;left:0;right:0;height:3px;border-radius:2px;background:var(--hairline);')} />
             <div style={{ ...s('position:absolute;left:0;height:3px;border-radius:2px;background:var(--accent-line);transition:width .22s cubic-bezier(.4,0,.2,1);'), width: handleLeft }} />
             {markers.map((left, i) => (
@@ -160,7 +182,7 @@ export function Stepper({ response, onClose, lang }: Props) {
             ))}
             <div style={{ ...s(`position:absolute;width:13px;height:13px;border-radius:50%;background:${handleColor};border:2px solid var(--surface);transform:translateX(-50%);transition:left .22s cubic-bezier(.4,0,.2,1);box-shadow:0 1px 3px rgba(0,0,0,.3);`), left: handleLeft }} />
           </div>
-          <button onClick={() => move(1)} aria-label="▶" className="stepper-btn" style={{ ...s(btn), ...(atEnd ? s('color:var(--ink-4);') : {}) }}>▶</button>
+          <button onClick={() => move(1)} aria-label="Next step" className="stepper-btn" style={{ ...s(btn), ...(atEnd ? s('color:var(--ink-4);') : {}) }}>▶</button>
           {!terminal && (
             <button onClick={onNextChange} className="stepper-btn" style={s('flex:none;height:28px;border-radius:7px;border:1px solid var(--hairline);background:var(--paper);color:var(--ink-3);cursor:pointer;font-size:11px;padding:0 11px;white-space:nowrap;')}>{t('playground_next_change', lang)}</button>
           )}

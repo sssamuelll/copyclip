@@ -95,6 +95,27 @@ export function buildRows(step: Step, expanded: Record<string, boolean>): RowMod
   return out
 }
 
+/**
+ * Compute the translateY (in px, always <= 0) that keeps the highlighted line
+ * (at curIdx) fully visible inside a clipped source column of `visiblePx` height.
+ *
+ * Strategy: centre the line in the visible area, then clamp so we never scroll
+ * past the top (translateY > 0) or past the bottom (content end stays at bottom).
+ *
+ * When curIdx < 0 (stale anchor) the slab is suppressed; return 0.
+ */
+export function sourceTranslateY(curIdx: number, totalLines: number, visiblePx: number): number {
+  if (curIdx < 0 || totalLines === 0) return 0
+  const contentH = totalLines * ROW_H
+  // If all lines fit, no scroll needed
+  if (contentH <= visiblePx) return 0
+  // Ideal: centre the highlighted line in the visible area
+  const ideal = -(curIdx * ROW_H - (visiblePx / 2 - ROW_H / 2))
+  // Clamp: never scroll before the first line or past the last
+  const maxScroll = -(contentH - visiblePx)
+  return Math.min(0, Math.max(maxScroll, ideal))
+}
+
 // hero change-marker percents: i/(total-1)*100 for steps where changed.length>0 (handoff 862–864)
 // guard: when total===1 the denominator is 0 (NaN); clamp to 50 (center of the track).
 export function markerLefts(trace: Step[]): number[] {
