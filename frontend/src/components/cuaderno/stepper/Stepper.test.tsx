@@ -264,8 +264,8 @@ describe('Stepper', () => {
     render(<Stepper response={emptyResp} onClose={() => {}} />)
     // Must NOT show a step counter (would require trace[0])
     expect(screen.queryByText(/step \d+ \/ \d+/)).toBeNull()
-    // Must render the fallback message
-    expect(screen.getByText(/no steps captured/i)).toBeInTheDocument()
+    // Must render the aligned nothing_ran wording (defense-in-depth guard, kept but wording unified)
+    expect(screen.getByText(/call did not enter this function/i)).toBeInTheDocument()
   })
 
   // Fix 3: scrubber a11y — keyboard stepping via ArrowRight/ArrowLeft
