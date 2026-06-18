@@ -1032,9 +1032,10 @@ def test_subprocess_kill_group_on_timeout(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_fallback_response_playground_id_has_no_default():
-    """FallbackResponse.playground_id must have NO default (inspect.Parameter.empty)
-    so omitting it raises TypeError. Currently it defaults to '' — this test
-    pins the contract to 'required field' not 'optional with empty default'."""
+    """Regression guard: FallbackResponse.playground_id must remain a required field
+    with NO default (inspect.Parameter.empty). The field was previously optional with
+    an empty-string default; this test ensures it is never silently made optional
+    again — omitting it must raise TypeError."""
     import inspect as _i
     sig = _i.signature(FallbackResponse)
     param = sig.parameters.get("playground_id")
@@ -1112,9 +1113,11 @@ def test_assert_json_serializable_accepts_normal_float():
 # Outer.Inner.method → must render Inner(ctor).method(args), NOT method(args).
 # ---------------------------------------------------------------------------
 
-def test_emit_fold_nested_class_method_uses_innermost_class_for_ctor():
-    """For a qualname like 'Outer.Inner.method', the ctor must use the innermost
-    class 'Inner' — not 'Outer' (first segment) or nothing (current bug)."""
+def test_emit_fold_nested_class_qualname_falls_back_to_plain_call():
+    """FunctionRef (the v1 gate) rejects qualnames with >2 segments, so emit_fold
+    must NOT emit a nested-class ctor form that the validator would 400.  A
+    3-segment qualname like 'Outer.Inner.method' must produce a plain call (no
+    ctor prefix) so the fold output is always valid at the v1 gate."""
     emit_block = {
         "kind": "widget",
         "widget": {
@@ -1132,10 +1135,10 @@ def test_emit_fold_nested_class_method_uses_innermost_class_for_ctor():
     }
     result = fold_playground_widget(emit_block)
     w = result["widget"]
-    # Must use "Inner" (the class immediately containing the method)
-    assert w["call_text"] == "Inner(99).method(1)", (
-        f"Nested qualname must use innermost class; got {w['call_text']!r}. "
-        "Fix: extract the second-to-last segment of the qualname as the ctor class."
+    # 3-segment qualname → no parent_class → plain call, never the validator-400 form
+    assert w["call_text"] == "method(1)", (
+        f"A 3-segment qualname must fall back to a plain call (no ctor prefix), "
+        f"not the nested-class form that FunctionRef would 400; got {w['call_text']!r}."
     )
 
 
@@ -1714,4 +1717,129 @@ def test_kill_group_gives_ctrl_break_grace_before_kill_on_windows(monkeypatch):
     proc.send_signal.assert_any_call(_cap_mod.signal.CTRL_BREAK_EVENT)
     assert proc.wait.called, (
         "_kill_group must wait for a CTRL_BREAK grace before escalating to kill"
+    )
+
+
+# ---------------------------------------------------------------------------
+# PR #177 staff review — new test 5a: in-driver caps CANNOT fire; outer
+# subprocess timeout is the SOLE hard bound.
+#
+# A single blocking call (threading.Event().wait()) never returns a trace-event
+# boundary, so MAX_STEPS / WALL_CLOCK_BUDGET_S (inside the tracer callback)
+# never get a chance to fire.  The ONLY thing that can terminate the capture is
+# the outer communicate(timeout=WALL_CLOCK_BUDGET_S + 4.0) backstop in
+# _run_driver.  We shrink WALL_CLOCK_BUDGET_S via monkeypatch on the _capture_driver
+# module (the single owner after item 1) and assert CaptureError arrives before
+# the backstop window elapses.
+# ---------------------------------------------------------------------------
+
+import time as _time
+
+
+def test_outer_subprocess_timeout_is_sole_defense_against_blocking_call(
+    tmp_path, monkeypatch
+):
+    """A single blocking C call (threading.Event().wait()) holds the interpreter
+    inside one trace-event window: in-driver MAX_STEPS and WALL_CLOCK_BUDGET_S
+    never fire (they only check at trace-event boundaries). The OUTER subprocess
+    communicate(timeout=...) backstop in _run_driver is the SOLE hard defence.
+
+    Regression guard: if the outer backstop is ever removed or broken, this
+    test hangs rather than fails — which is itself a signal.  On a healthy
+    implementation it must complete well within the backstop window.
+    """
+    import copyclip.intelligence.capture as _cap_mod
+    import copyclip.intelligence._capture_driver as _drv_mod
+    from copyclip.intelligence.capture import CaptureError
+
+    # Shrink the budgets so the test completes quickly.
+    # The driver module is the single cap owner (item 1); patching it also
+    # updates what capture.py sees (it imported the names from there).
+    SHRUNKEN_BUDGET = 1.0  # seconds
+    monkeypatch.setattr(_drv_mod, "WALL_CLOCK_BUDGET_S", SHRUNKEN_BUDGET)
+    monkeypatch.setattr(_cap_mod, "WALL_CLOCK_BUDGET_S", SHRUNKEN_BUDGET)
+
+    root = _write_user_module(tmp_path, """
+        import threading
+
+        def blocker():
+            # A single blocking wait: the tracer callback never fires again
+            # after the 'call' event, so no in-driver cap can interrupt it.
+            threading.Event().wait()
+    """)
+    resolved = ResolvedFunction(
+        file="usermod.py", name="blocker", qualname="blocker",
+        kind="function", module="usermod", line_start=1, parent_class=None,
+    )
+    cd = CallDescriptor.from_dict(
+        {"function_ref": {"file": "usermod.py", "name": "blocker"}}
+    )
+
+    backstop = SHRUNKEN_BUDGET + 4.0 + 2.0  # generous outer deadline for the test
+    t0 = _time.monotonic()
+    with pytest.raises(CaptureError, match="wall-clock"):
+        run_capture(cd, resolved, project_root=str(tmp_path))
+    elapsed = _time.monotonic() - t0
+
+    assert elapsed < backstop, (
+        f"CaptureError must arrive before the backstop window ({backstop}s); "
+        f"actual elapsed: {elapsed:.2f}s. If this hangs, the outer subprocess "
+        "timeout was removed or broken."
+    )
+
+
+# ---------------------------------------------------------------------------
+# PR #177 staff review — new test 5b: dedicated test for the 2-second post-kill
+# communicate(timeout=2.0) drain in _run_driver.
+#
+# After _kill_group is called on a timeout, _run_driver calls
+# proc.communicate(timeout=2.0) to drain any pipe-holding grandchild.  This
+# second communicate must itself timeout gracefully (not hang) when the grandchild
+# is still holding the pipe — that timeout is swallowed with a bare `except`.
+# ---------------------------------------------------------------------------
+
+def test_post_kill_communicate_drain_timeouts_gracefully(tmp_path, monkeypatch):
+    """After the outer communicate(timeout=...) expires and _kill_group is called,
+    the post-kill drain communicate(timeout=2.0) must handle TimeoutExpired
+    gracefully — a still-running grandchild must not hang the HTTP worker.
+
+    Verifies: the second communicate() call is made with timeout=2.0, and a
+    TimeoutExpired from it is swallowed (no exception propagates past _run_driver
+    beyond the expected CaptureError for the original timeout)."""
+    from copyclip.intelligence.capture import CaptureError, _run_driver
+    import copyclip.intelligence.capture as _cap_mod
+
+    communicate_calls: list[dict] = []
+
+    class _FakePopen:
+        def __init__(self, *a, **kw):
+            self.returncode = 0
+            self.pid = 99998
+
+        def communicate(self, timeout=None):
+            communicate_calls.append({"timeout": timeout})
+            if len(communicate_calls) == 1:
+                # First call: simulate the outer backstop firing
+                raise _cap_mod.subprocess.TimeoutExpired(cmd="fake", timeout=timeout)
+            # Second call (the drain): also times out — must be swallowed
+            raise _cap_mod.subprocess.TimeoutExpired(cmd="fake", timeout=timeout)
+
+    monkeypatch.setattr(_cap_mod, "_kill_group", lambda proc: None)
+    monkeypatch.setattr(_cap_mod.subprocess, "Popen", _FakePopen)
+
+    spec = {
+        "module": "os", "name": "getpid", "parent_class": None,
+        "args": [], "kwargs": {}, "probe": False,
+    }
+
+    with pytest.raises(CaptureError, match="wall-clock"):
+        _run_driver(spec, str(tmp_path))
+
+    assert len(communicate_calls) == 2, (
+        f"_run_driver must call communicate() exactly twice on timeout "
+        f"(outer backstop + post-kill drain); got {len(communicate_calls)} call(s)"
+    )
+    drain_call = communicate_calls[1]
+    assert drain_call["timeout"] == 2.0, (
+        f"post-kill drain must use timeout=2.0; got timeout={drain_call['timeout']!r}"
     )
