@@ -531,6 +531,79 @@ describe('PlaygroundWidget — live state renders .playground-fallback-note when
 })
 
 // ---------------------------------------------------------------------------
+// FIX 2: re-edit / re-run loop from the Stepper (trace/raise state).
+//
+// A trace (including a raise trace) is a terminal state whose only action used
+// to be "close". The user had no way back to the call to fix arguments and
+// re-run. The Stepper now exposes an "edit the call" control that returns the
+// widget to the editable PreviewCall interstitial — mirroring EndedCards.onRetry.
+//
+// The render-order also matters: the `previewing` block must be checked BEFORE
+// the `slot.kind==='trace'` return, otherwise clicking edit while the slot is
+// still 'trace' would re-render straight back into the Stepper.
+// ---------------------------------------------------------------------------
+
+describe('PlaygroundWidget — trace/raise state: edit-the-call loop back to PreviewCall', () => {
+  const RAISE_RESPONSE = {
+    kind: 'trace' as const,
+    func_name: 'my_func',
+    file_line: 'demo.py:1',
+    truncated: false,
+    source_lines: [{ num: 1, text: 'def my_func():' }],
+    trace: [
+      {
+        line: 1,
+        event: 'raise' as const,
+        changed: [],
+        scope: [],
+        raised: { type: 'TypeError', message: 'missing 1 required positional argument' },
+      },
+    ],
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(getToken).mockReturnValue(0)
+    vi.mocked(getState).mockReturnValue({
+      kind: 'trace',
+      widgetKey: MY_KEY,
+      token: 1,
+      response: RAISE_RESPONSE,
+    })
+  })
+
+  it('renders the Stepper for a trace owned by this widget', () => {
+    const { container } = render(
+      <PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />
+    )
+    // The Stepper renders the step counter "step 1 / 1"
+    expect(screen.getByText(/step 1 \/ 1/i)).toBeInTheDocument()
+    expect(container.querySelector('.stepper-widget')).not.toBeNull()
+  })
+
+  it('exposes an edit-the-call control in the Stepper head strip', () => {
+    render(<PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />)
+    expect(screen.getByRole('button', { name: /edit call/i })).toBeInTheDocument()
+  })
+
+  it('clicking the edit control transitions to the editable PreviewCall (NOT the Stepper)', () => {
+    render(<PlaygroundWidget widget={WIDGET} onOpenCitation={noopCitation} lang="en" />)
+    // Sanity: we start in the Stepper
+    expect(screen.getByText(/step 1 \/ 1/i)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /edit call/i }))
+
+    // After edit: the PreviewCall interstitial must be shown (its lead text),
+    // and the Stepper's step counter must be gone. Crucially, the `previewing`
+    // block must win over the `slot.kind==='trace'` early return.
+    expect(screen.getByText(/step through this call/i)).toBeInTheDocument()
+    expect(screen.queryByText(/step 1 \/ 1/i)).toBeNull()
+    // No launch happens yet — the user is back in the editable preview.
+    expect(launch).not.toHaveBeenCalled()
+  })
+})
+
+// ---------------------------------------------------------------------------
 // needs_args affordance: floor widget with incomplete call template
 // ---------------------------------------------------------------------------
 

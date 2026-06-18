@@ -16,6 +16,13 @@ export function PreviewCall({ funcName, initialCall, onConfirm, onCancel, needsA
   const [editing, setEditing] = useState(needsArgs === true)
   const [callText, setCallText] = useState(initialCall)
   const [dirty, setDirty] = useState(false)
+  // needs_args widgets carry a bare incomplete template (e.g. `f()`). Confirming
+  // it as-is launches an empty-args call that is doomed to a TypeError raise.
+  // Gate the confirm: a needs_args call can only be stepped through once the user
+  // has actually changed the template to supply arguments. The normal (non-needsArgs)
+  // path is unchanged — its button is always enabled.
+  const completed = callText.trim() !== initialCall.trim()
+  const canConfirm = !needsArgs || completed
   return (
     <div className="widget stepper-widget">
       <div style={s('display:flex;align-items:center;gap:9px;padding:9px 14px;border-bottom:1px solid var(--hairline-soft);')}>
@@ -55,7 +62,12 @@ export function PreviewCall({ funcName, initialCall, onConfirm, onCancel, needsA
           </div>
         </div>
         <div style={s('display:flex;align-items:center;gap:10px;padding-top:13px;border-top:1px solid var(--hairline-soft);')}>
-          <button onClick={() => onConfirm(callText, dirty)} className="stepper-primary" style={s('border:1px solid var(--accent-line);background:var(--accent-soft);color:var(--accent-ink);border-radius:8px;padding:9px 18px;font-size:13.5px;font-weight:500;font-family:var(--font-ui);cursor:pointer;')}>{t('playground_step_through', lang)}</button>
+          <button
+            onClick={() => { if (canConfirm) onConfirm(callText, dirty) }}
+            disabled={!canConfirm}
+            className="stepper-primary"
+            style={s(`border:1px solid var(--accent-line);background:var(--accent-soft);color:var(--accent-ink);border-radius:8px;padding:9px 18px;font-size:13.5px;font-weight:500;font-family:var(--font-ui);${canConfirm ? 'cursor:pointer;' : 'cursor:not-allowed;opacity:.5;'}`)}
+          >{t('playground_step_through', lang)}</button>
           {!needsArgs ? (
             <button onClick={() => setEditing((val) => !val)} style={s('border:1px solid var(--hairline);background:var(--paper);color:var(--ink-3);border-radius:8px;padding:9px 16px;font-size:13.5px;font-family:var(--font-ui);cursor:pointer;')}>{t('playground_edit_call', lang)}</button>
           ) : null}

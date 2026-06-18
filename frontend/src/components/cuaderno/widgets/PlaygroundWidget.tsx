@@ -68,10 +68,44 @@ export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
     })
   }
 
+  // preview-call: shown before any real code runs (or after retry/edit) — user can edit.
+  // Checked BEFORE the trace/nothing_ran/live/spawning/ended returns so that
+  // onEdit/onRetry → setPreviewing(true) wins over the stale slot state (the slot
+  // won't clear until the next launch resolves). If this lived AFTER the trace
+  // return, clicking "edit the call" from a trace would re-render straight back
+  // into the Stepper and the user could never get back to the editable call.
+  // Slot-ownership guard: if the slot was taken by a DIFFERENT widget while this
+  // widget's `previewing` flag was still true (e.g. Widget B fired its own
+  // step-through), clear the stale preview so this widget cannot call doLaunch
+  // and evict Widget B's active playground.
+  // Token guard: also covers the spawning→empty race where the effect never fires.
+  if (previewing && !previewIsStale && (slot.kind === 'empty' || isMine)) {
+    return (
+      <PreviewCall
+        funcName={fn.name}
+        initialCall={proposedCall}
+        onConfirm={doLaunch}
+        onCancel={() => { setPreviewing(false); setPreviewToken(-1) }}
+        needsArgs={widget.needs_args}
+        lang={lang}
+      />
+    )
+  }
+
   // trace: the React stepper (guarded: empty trace should never reach here since
-  // the slot converts trace.length===0 to nothing_ran, but belt-and-suspenders)
+  // the slot converts trace.length===0 to nothing_ran, but belt-and-suspenders).
+  // onEdit returns to the editable PreviewCall so the user can fix the call and
+  // re-run (mirrors EndedCards.onRetry). The previewing block above wins on the
+  // next render because previewing is now true.
   if (isMine && slot.kind === 'trace') {
-    return <Stepper response={slot.response} onClose={close} lang={lang} />
+    return (
+      <Stepper
+        response={slot.response}
+        onClose={close}
+        onEdit={() => { setPreviewing(true); setPreviewToken(getToken()) }}
+        lang={lang}
+      />
+    )
   }
 
   // nothing_ran: the call didn't enter the target function — show a dismissible note
@@ -114,27 +148,6 @@ export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
           />
         </div>
       </div>
-    )
-  }
-
-  // preview-call: shown before any real code runs (or after retry) — user can edit
-  // Check this BEFORE ended so that onRetry → setPreviewing(true) wins over the
-  // stale 'ended' slot state (the slot won't clear until the next launch resolves).
-  // Slot-ownership guard: if the slot was taken by a DIFFERENT widget while this
-  // widget's `previewing` flag was still true (e.g. Widget B fired its own
-  // step-through), clear the stale preview so this widget cannot call doLaunch
-  // and evict Widget B's active playground.
-  // Token guard: also covers the spawning→empty race where the effect never fires.
-  if (previewing && !previewIsStale && (slot.kind === 'empty' || isMine)) {
-    return (
-      <PreviewCall
-        funcName={fn.name}
-        initialCall={proposedCall}
-        onConfirm={doLaunch}
-        onCancel={() => { setPreviewing(false); setPreviewToken(-1) }}
-        needsArgs={widget.needs_args}
-        lang={lang}
-      />
     )
   }
 

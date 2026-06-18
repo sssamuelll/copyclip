@@ -9,10 +9,14 @@ import { StateRow, s } from './StateRow'
 type Props = {
   response: StepThroughResponse
   onClose: () => void
+  // Optional: return to the editable PreviewCall so the user can fix the call
+  // and re-run (e.g. after a raise). Mirrors EndedCards.onRetry. When absent,
+  // the edit control is not rendered.
+  onEdit?: () => void
   lang?: string | null
 }
 
-export function Stepper({ response, onClose, lang }: Props) {
+export function Stepper({ response, onClose, onEdit, lang }: Props) {
   const { trace, source_lines, func_name, file_line, truncated, truncated_reason } = response
   const total = trace.length
   const [step, setStep] = useState(1)
@@ -114,6 +118,9 @@ export function Stepper({ response, onClose, lang }: Props) {
         <span style={s('font-family:var(--font-mono);font-size:12px;color:var(--accent-ink);')}>{func_name}</span>
         <span style={s('flex:1;')} />
         <span style={s('font-family:var(--font-mono);font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums;')}>step {cur} / {total}</span>
+        {onEdit ? (
+          <button onClick={onEdit} className="stepper-ghost" style={s('border:1px solid var(--hairline);background:var(--paper);color:var(--accent-ink);border-radius:7px;padding:4px 10px;font-size:12px;font-family:var(--font-ui);cursor:pointer;line-height:1;')}>{t('playground_edit_call', lang)}</button>
+        ) : null}
         <button onClick={onClose} aria-label="×" style={s('border:none;background:none;color:var(--ink-4);cursor:pointer;font-size:16px;line-height:1;padding:0 2px;')}>×</button>
       </div>
       {/* breadcrumb */}

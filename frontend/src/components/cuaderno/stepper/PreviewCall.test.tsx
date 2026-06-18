@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi } from 'vitest'
 import { PreviewCall } from './PreviewCall'
@@ -138,5 +138,73 @@ describe('PreviewCall', () => {
     await userEvent.type(ta, 'f(2)')
     await userEvent.click(screen.getByRole('button', { name: /^step through$/i }))
     expect(onConfirm).toHaveBeenCalledWith('f(2)', true)
+  })
+
+  // ---- FIX 1: gate the confirm for needs_args (cannot step through a bare template) ----
+
+  it('needs_args=true with bare template: Step-through button is DISABLED and clicking does not fire onConfirm', async () => {
+    const onConfirm = vi.fn()
+    render(
+      <PreviewCall
+        funcName="f"
+        initialCall="f()"
+        onConfirm={onConfirm}
+        onCancel={() => {}}
+        needsArgs={true}
+        lang="en"
+      />
+    )
+    const step = screen.getByRole('button', { name: /^step through$/i })
+    // Button must be visibly disabled while the call is still the bare template
+    expect(step).toBeDisabled()
+    // Clicking the disabled button must NOT fire onConfirm
+    await userEvent.click(step)
+    expect(onConfirm).not.toHaveBeenCalled()
+  })
+
+  it('needs_args=true: editing the textarea away from the bare template enables Step-through and clicking fires onConfirm(dirty=true)', async () => {
+    const onConfirm = vi.fn()
+    render(
+      <PreviewCall
+        funcName="f"
+        initialCall="f()"
+        onConfirm={onConfirm}
+        onCancel={() => {}}
+        needsArgs={true}
+        lang="en"
+      />
+    )
+    const ta = screen.getByRole('textbox')
+    // Simulate a change event that supplies arguments
+    fireEvent.change(ta, { target: { value: "f('x')" } })
+    const step = screen.getByRole('button', { name: /^step through$/i })
+    expect(step).toBeEnabled()
+    await userEvent.click(step)
+    expect(onConfirm).toHaveBeenCalledWith("f('x')", true)
+  })
+
+  it('needs_args=true: typing then clearing back to the bare template re-disables Step-through', async () => {
+    const onConfirm = vi.fn()
+    render(
+      <PreviewCall
+        funcName="f"
+        initialCall="f()"
+        onConfirm={onConfirm}
+        onCancel={() => {}}
+        needsArgs={true}
+        lang="en"
+      />
+    )
+    const ta = screen.getByRole('textbox')
+    fireEvent.change(ta, { target: { value: "f('x')" } })
+    expect(screen.getByRole('button', { name: /^step through$/i })).toBeEnabled()
+    // Back to the bare template (with surrounding whitespace, still incomplete)
+    fireEvent.change(ta, { target: { value: '  f()  ' } })
+    expect(screen.getByRole('button', { name: /^step through$/i })).toBeDisabled()
+  })
+
+  it('non-needsArgs PreviewCall: Step-through button is enabled from the start', () => {
+    render(<PreviewCall funcName="f" initialCall="f(1)" onConfirm={() => {}} onCancel={() => {}} />)
+    expect(screen.getByRole('button', { name: /^step through$/i })).toBeEnabled()
   })
 })
