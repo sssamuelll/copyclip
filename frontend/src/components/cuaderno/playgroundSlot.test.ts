@@ -257,4 +257,65 @@ describe('playgroundSlot', () => {
     // With the fix: close() is a no-op on empty slot, launch() completes.
     expect(s.getState().kind).toBe('trace')
   })
+
+  it('aborts the in-flight launchPlayground fetch when a second launch supersedes it', async () => {
+    // The first launch hangs until its signal is aborted.
+    // When a second launch fires (token advances), killCurrent() aborts the first signal.
+    let capturedSignal: AbortSignal | undefined
+    launchPlayground.mockImplementationOnce((_req: unknown, signal?: AbortSignal) => {
+      capturedSignal = signal
+      // Settle the promise when the signal aborts (simulates fetch aborting on AbortSignal)
+      return new Promise<never>((_, reject) => {
+        signal?.addEventListener('abort', () => {
+          const err = new Error('The operation was aborted')
+          err.name = 'AbortError'
+          reject(err)
+        })
+      })
+    })
+    launchPlayground.mockResolvedValueOnce(TRACE)
+
+    const p1 = launch('a.py:f:', req)
+    await Promise.resolve() // yield so p1 reaches launchPlayground
+    // The signal must be captured now
+    expect(capturedSignal).toBeDefined()
+    expect(capturedSignal!.aborted).toBe(false)
+
+    // Second launch supersedes the first — should abort p1's signal
+    const p2 = launch('a.py:f:', req)
+    await p2
+
+    // The first launch's signal must be aborted after supersession
+    expect(capturedSignal!.aborted).toBe(true)
+    // p1 should now resolve (AbortError is caught silently in launch()'s catch block)
+    await p1
+  })
+
+  it('aborts the in-flight launchPlayground fetch when close() is called during spawning', async () => {
+    let capturedSignal: AbortSignal | undefined
+    let launchP: Promise<never>
+    launchPlayground.mockImplementation((_req: unknown, signal?: AbortSignal) => {
+      capturedSignal = signal
+      launchP = new Promise<never>((_, reject) => {
+        signal?.addEventListener('abort', () => {
+          const err = new Error('The operation was aborted')
+          err.name = 'AbortError'
+          reject(err)
+        })
+      })
+      return launchP
+    })
+
+    const p = launch('a.py:f:', req)
+    await Promise.resolve() // yield so launch reaches launchPlayground
+    expect(capturedSignal).toBeDefined()
+    expect(capturedSignal!.aborted).toBe(false)
+
+    close() // should abort the in-flight fetch
+    await Promise.resolve()
+
+    expect(capturedSignal!.aborted).toBe(true)
+    // p resolves after abort (AbortError caught silently)
+    await p
+  })
 })

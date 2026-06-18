@@ -173,6 +173,7 @@ describe('PlaygroundWidget — integration (real slot store)', () => {
     await act(async () => { await userEvent.click(screen.getByRole('button', { name: /^step through$/i })) })
     expect(launchPlayground).toHaveBeenCalledWith(
       expect.objectContaining({ call_text: 'resolve_function_ref(conn, 99, ref)' }),
+      expect.any(AbortSignal),
     )
   })
 
@@ -186,6 +187,7 @@ describe('PlaygroundWidget — integration (real slot store)', () => {
     await act(async () => { await userEvent.click(screen.getByRole('button', { name: /^step through$/i })) })
     expect(launchPlayground).toHaveBeenCalledWith(
       expect.objectContaining({ call: widget.call }),
+      expect.any(AbortSignal),
     )
     // call_text must NOT be present when unedited
     const callArg = launchPlayground.mock.calls[0][0]
@@ -203,6 +205,7 @@ describe('PlaygroundWidget — integration (real slot store)', () => {
     await act(async () => { await userEvent.click(screen.getByRole('button', { name: /^step through$/i })) })
     expect(launchPlayground).toHaveBeenCalledWith(
       expect.objectContaining({ call_text: 'resolve_function_ref(conn, 0, ref)' }),
+      expect.any(AbortSignal),
     )
   })
 

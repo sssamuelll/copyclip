@@ -12,6 +12,7 @@ export type SlotState =
 let state: SlotState = { kind: 'empty' }
 let token = 0
 let pollTimer: ReturnType<typeof setInterval> | null = null
+let activeAbort: AbortController | null = null
 const listeners = new Set<() => void>()
 
 function set(next: SlotState) { state = next; listeners.forEach((l) => l()) }
@@ -46,6 +47,8 @@ function startPoll(id: string, widgetKey: string, myToken: number) {
 }
 
 async function killCurrent(reason: 'closed' | 'evicted'): Promise<void> {
+  // Abort any in-flight launchPlayground fetch so a hung capture releases the connection.
+  if (activeAbort) { activeAbort.abort(); activeAbort = null }
   stopPoll()
   if (state.kind === 'live') {
     const { playgroundId, widgetKey } = state
@@ -72,11 +75,18 @@ export async function launch(widgetKey: string, req: PlaygroundLaunchRequest): P
   await killCurrent('evicted')          // awaited DELETE BEFORE the new POST
   if (token !== myToken) return
   set({ kind: 'spawning', widgetKey, token: myToken })
+  // Attach an AbortController so a hung capture is cancelled on close()/eviction.
+  // 13s is just above the server's ~12s wall-clock budget.
+  const ac = new AbortController()
+  activeAbort = ac
+  const abortTimer = setTimeout(() => ac.abort(new Error('client timeout')), 13_000)
   try {
-    const res = await api.launchPlayground(req)
+    const res = await api.launchPlayground(req, ac.signal)
+    clearTimeout(abortTimer)
     if (token !== myToken) {
       // late result for a superseded launch: a fallback spawned a real
       // playground we must reap; a trace has no subprocess.
+      ac.abort()
       if (res.kind === 'fallback') {
         const id = res.playground_id ?? idFromIframeUrl(res.iframe_url)
         api.closePlayground(id).catch(() => {})
@@ -109,7 +119,10 @@ export async function launch(widgetKey: string, req: PlaygroundLaunchRequest): P
       startPoll(playgroundId, widgetKey, myToken)
     }
   } catch (e) {
+    clearTimeout(abortTimer)
     if (token !== myToken) return
+    // Aborted (close/eviction/timeout) — slot is already in ended/empty via killCurrent, no-op silently.
+    if (e instanceof Error && e.name === 'AbortError') return
     set({ kind: 'ended', widgetKey, reason: 'error', message: e instanceof Error ? e.message : String(e) })
   }
 }
@@ -140,6 +153,7 @@ export async function reconcileOnMount(): Promise<void> {
  * NOT intended for production code paths.
  */
 export function _resetForTests(): void {
+  if (activeAbort) { activeAbort.abort(); activeAbort = null }
   stopPoll()
   token = 0
   state = { kind: 'empty' }
