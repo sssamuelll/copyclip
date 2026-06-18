@@ -69,12 +69,19 @@ def fold_playground_widget(block: dict) -> dict:
     fr = w.get("function_ref") or {}
     func_name: str = fr.get("name") or ""
     qualname: str | None = fr.get("qualname")
-    # Derive parent_class from qualname (e.g. "MyClass.process" → "MyClass")
+    # Derive parent_class from qualname — use the INNERMOST class (the one
+    # immediately containing the method), not the outermost.
+    #   "MyClass.method"        → parent_class = "MyClass"
+    #   "Outer.Inner.method"    → parent_class = "Inner"   (innermost, not Outer)
+    #   "foo" (no dot)          → parent_class = None
+    # Split on "." and take the second-to-last segment when there are at least
+    # two segments (i.e. at least one class before the method name).
     parent_class: str | None = None
     if qualname and "." in qualname:
-        head, _, tail = qualname.partition(".")
-        if head and tail and "." not in tail:
-            parent_class = head
+        parts = qualname.split(".")
+        # parts[-1] is the method name; parts[-2] is the immediate enclosing class
+        if len(parts) >= 2 and parts[-2]:
+            parent_class = parts[-2]
 
     # Extract top-level args/kwargs/ctor — may be absent (None means empty)
     args: list = list(w.get("args") or [])

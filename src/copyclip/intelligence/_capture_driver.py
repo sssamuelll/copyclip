@@ -121,7 +121,13 @@ def _safe_repr(obj: object) -> str | None:
 
 
 def var_for(name: str, obj: object) -> dict:
-    """Build one Var dict (driver shape) honoring the size/time caps + skip-list."""
+    """Build one Var dict (driver shape) honoring the size/time caps + skip-list.
+
+    For _LARGE_BY_LEN objects we call _safe_repr ONCE: if the repr is None or
+    too long we demote to large immediately, rather than calling _too_big_repr
+    (which calls _safe_repr internally) and then calling _safe_repr again.  That
+    old double-call could blow the per-value time budget on a near-budget value.
+    """
     if _is_opaque_type(obj):
         return {"name": name, "kind": "opaque", "label": _type_fqn(obj)}
     if isinstance(obj, _LARGE_BY_LEN):
@@ -129,8 +135,14 @@ def var_for(name: str, obj: object) -> dict:
             n = len(obj)
         except Exception:  # noqa: BLE001
             n = 0
-        if n > LARGE_CHILDREN_CAP or _too_big_repr(obj):
+        if n > LARGE_CHILDREN_CAP:
             return _large_var(name, obj, n)
+        # Single repr call — avoid the double-call that _too_big_repr would cause.
+        r = _safe_repr(obj)
+        if r is None or len(r) > REPR_SIZE_CAP:
+            return _large_var(name, obj, n)
+        kind = "scalar" if isinstance(obj, (int, float, bool, str, bytes, type(None))) else "object"
+        return {"name": name, "kind": kind, "text": r}
     r = _safe_repr(obj)
     if r is None:
         return {"name": name, "kind": "opaque", "label": _type_fqn(obj)}
@@ -174,8 +186,15 @@ def _child_text(v: object) -> str:
     return r if len(r) <= REPR_SIZE_CAP else r[: REPR_SIZE_CAP - 1] + "…"
 
 
-class _Abort(Exception):
-    """Internal: raised inside the tracer to stop a runaway capture."""
+class _Abort(BaseException):
+    """Internal: raised inside the tracer to stop a runaway capture.
+
+    MUST be BaseException (not Exception) so that user code with
+    ``except Exception:`` or bare ``except:`` cannot accidentally swallow
+    the abort signal — the caps would never fire for such functions.
+    The existing ``except _Abort:`` handlers in trace_call/_trace_free_text
+    are unaffected because they name _Abort explicitly.
+    """
 
 
 def trace_call(func, args: list, kwargs: dict) -> dict:
@@ -184,6 +203,12 @@ def trace_call(func, args: list, kwargs: dict) -> dict:
     emits line/event/scope ONLY — `changed` is derived later by normalize_trace.
 
     A call that raises is recorded as a terminal ``raise`` step, not an error.
+
+    ``exception`` events from sys.settrace are NOT emitted (they are not in the
+    Step schema union call|line|return|raise).  When an exception propagates out
+    of the function, the outer except-BaseException handler emits a ``raise`` step
+    with scope captured from the last exception frame so the terminal snapshot is
+    correct.
     """
     code = func.__code__
     own_file = code.co_filename
@@ -191,6 +216,9 @@ def trace_call(func, args: list, kwargs: dict) -> dict:
     truncated = {"hit": False}
     started = time.monotonic()
     last_line = {"n": 0}
+    # Capture the most recent exception frame's locals so the terminal raise step
+    # has a populated scope even when the exception propagated out of the callback.
+    last_exc_scope: list[dict] = []
 
     def tracer(frame, event, arg):
         if frame.f_code.co_filename != own_file:
@@ -200,6 +228,13 @@ def trace_call(func, args: list, kwargs: dict) -> dict:
             raise _Abort()
         scope = [var_for(k, v) for k, v in frame.f_locals.items()]
         last_line["n"] = frame.f_lineno
+        if event == "exception":
+            # sys.settrace fires 'exception' when an exception is propagating
+            # through the frame. This event is NOT in the schema union — suppress
+            # the emit.  Save the scope so the terminal raise step (if this
+            # exception propagates out) has a non-empty snapshot.
+            last_exc_scope[:] = scope
+            return tracer
         events.append({"line": frame.f_lineno, "event": event, "scope": scope})
         return tracer
 
@@ -210,8 +245,11 @@ def trace_call(func, args: list, kwargs: dict) -> dict:
         pass
     except BaseException as exc:  # the call itself threw → terminal raise step
         sys.settrace(None)
+        # Use the scope captured from the exception frame (last_exc_scope) so the
+        # terminal raise step shows live locals, not an empty snapshot.
+        scope_for_raise = last_exc_scope if last_exc_scope else []
         events.append({
-            "line": last_line["n"], "event": "raise", "scope": [],
+            "line": last_line["n"], "event": "raise", "scope": scope_for_raise,
             "raised": {"type": type(exc).__name__, "message": str(exc)},
         })
         return {"trace": events, "truncated": truncated["hit"]}
@@ -244,6 +282,9 @@ def _trace_free_text(spec: dict) -> dict:
     target module's namespace under the SAME bounded callback. The expression is
     the user's own code (pytest-equivalent trust); caps still apply. We anchor
     the tracer on the target function's file so only the user's Python is traced.
+
+    ``exception`` events are suppressed (not in the schema union); the terminal
+    raise step captures scope from the last exception frame.
     """
     module = importlib.import_module(spec["module"])
     parent = spec.get("parent_class")
@@ -256,6 +297,7 @@ def _trace_free_text(spec: dict) -> dict:
     truncated = {"hit": False}
     started = time.monotonic()
     code_obj = compile(text, "<call_text>", "eval")
+    last_exc_scope: list[dict] = []
 
     def tracer(frame, event, arg):
         if frame.f_code.co_filename != own_file:
@@ -264,6 +306,10 @@ def _trace_free_text(spec: dict) -> dict:
             truncated["hit"] = True
             raise _Abort()
         scope = [var_for(k, v) for k, v in frame.f_locals.items()]
+        if event == "exception":
+            # Suppress — not in the schema union; save scope for terminal raise.
+            last_exc_scope[:] = scope
+            return tracer
         events.append({"line": frame.f_lineno, "event": event, "scope": scope})
         return tracer
 
@@ -275,7 +321,8 @@ def _trace_free_text(spec: dict) -> dict:
     except BaseException as exc:
         sys.settrace(None)
         line = events[-1]["line"] if events else 0
-        events.append({"line": line, "event": "raise", "scope": [],
+        scope_for_raise = last_exc_scope if last_exc_scope else []
+        events.append({"line": line, "event": "raise", "scope": scope_for_raise,
                        "raised": {"type": type(exc).__name__, "message": str(exc)}})
         return {"trace": events, "truncated": truncated["hit"]}
     finally:

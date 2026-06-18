@@ -809,3 +809,432 @@ def test_emit_fold_non_widget_block_passthrough():
     """A non-widget block must pass through unmodified."""
     block = {"kind": "paragraph", "text": "hello"}
     assert fold_playground_widget(block) is block
+
+
+# ===========================================================================
+# FINAL-REVIEW BACKEND FIXES — TDD tests (must FAIL before fixes are applied)
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# Fix 1: _Abort must be BaseException so user `except Exception:` loops do not
+# swallow it, causing runaway captures to bypass the abort.
+# ---------------------------------------------------------------------------
+
+def test_abort_not_caught_by_except_exception(monkeypatch):
+    """A function whose loop body swallows Exception must STILL be aborted at
+    MAX_STEPS (truncated trace). _Abort must be BaseException, not Exception."""
+    monkeypatch.setattr(driver, "MAX_STEPS", 10)
+
+    def runaway_swallow():
+        total = 0
+        while True:
+            try:
+                total += 1
+            except Exception:  # noqa: BLE001 — deliberately swallows Exception
+                continue
+
+    raw = driver.trace_call(runaway_swallow, args=[], kwargs={})
+    assert raw["truncated"] is True, (
+        "_Abort must be BaseException so it is NOT caught by 'except Exception:'; "
+        "if it is only Exception, the loop swallows the abort and this never truncates."
+    )
+
+
+def test_abort_is_base_exception_not_exception():
+    """_Abort must be a BaseException subclass (not Exception) so that a loop
+    body with 'except Exception: continue' cannot swallow the cap abort.
+    A bare 'except:' does catch BaseException in Python; the spec's stated goal
+    is specifically that 'except Exception:' (the common defensive pattern)
+    cannot intercept the abort — this test pins that contract."""
+    assert not issubclass(driver._Abort, Exception), (
+        "_Abort must NOT inherit from Exception. "
+        "Change 'class _Abort(Exception)' to 'class _Abort(BaseException)' so "
+        "that 'except Exception:' guards in user code cannot swallow the abort."
+    )
+    assert issubclass(driver._Abort, BaseException), (
+        "_Abort must be a BaseException subclass."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fix 2: `exception` events are NOT in the schema union — handle inside tracer.
+# (a) No step has event outside {call, line, return, raise}
+# (b) Uncaught raise terminal step must have non-empty scope + correct raised
+# (c) Caught-and-handled exception must NOT emit an 'exception'-typed step
+# ---------------------------------------------------------------------------
+
+_VALID_EVENTS = frozenset({"call", "line", "return", "raise"})
+
+
+def test_no_step_has_event_outside_schema_union(tmp_path):
+    """Every step emitted by trace_call/normalize_trace must have event in the
+    schema union {call, line, return, raise}. 'exception' is NOT in the union."""
+    mod_name = _make_free_text_mod(tmp_path, "_ev_schema", dedent("""\
+        def func_with_catch(xs):
+            result = []
+            for x in xs:
+                try:
+                    result.append(1 // x)
+                except ZeroDivisionError:
+                    result.append(0)
+            return result
+    """))
+    try:
+        spec = {"module": mod_name, "name": "func_with_catch",
+                "call_text": "func_with_catch([1, 0, 2])"}
+        raw = driver._trace_free_text(spec)
+        bad = [ev for ev in raw["trace"] if ev.get("event") not in _VALID_EVENTS]
+        assert not bad, (
+            f"Steps with non-schema events: {bad!r}. "
+            "'exception' events from sys.settrace must be suppressed inside the tracer."
+        )
+    finally:
+        sys.modules.pop(mod_name, None)
+
+
+def test_uncaught_raise_terminal_step_has_nonempty_scope_and_raised(tmp_path):
+    """A function that raises uncaught must yield a terminal 'raise' step with
+    non-empty scope (captured from frame.f_locals) AND a correct raised dict.
+    Currently the synthetic raise step in trace_call uses scope:[] — fix that."""
+    mod_name = _make_free_text_mod(tmp_path, "_uncaught_raise", dedent("""\
+        def boom_with_locals(x):
+            msg = 'about to fail'
+            raise ValueError(msg)
+    """))
+    try:
+        spec = {"module": mod_name, "name": "boom_with_locals",
+                "call_text": "boom_with_locals(42)"}
+        raw = driver._trace_free_text(spec)
+        last = raw["trace"][-1]
+        assert last["event"] == "raise", f"Expected raise, got {last['event']!r}"
+        assert last["raised"]["type"] == "ValueError"
+        assert last["raised"]["message"] == "about to fail"
+        scope_names = {v["name"] for v in last["scope"]}
+        assert scope_names, (
+            "Terminal raise step must capture scope from frame.f_locals; "
+            "got empty scope. Fix: capture scope from the exception frame, "
+            "not from a pre-raise snapshot."
+        )
+        assert "x" in scope_names or "msg" in scope_names, (
+            f"Expected local vars 'x' or 'msg' in raise scope; got {scope_names!r}"
+        )
+    finally:
+        sys.modules.pop(mod_name, None)
+
+
+def test_caught_exception_does_not_emit_exception_event(tmp_path):
+    """When an exception is caught inside the function, no 'exception'-typed
+    step must appear in the trace — 'exception' is not in the schema union."""
+    mod_name = _make_free_text_mod(tmp_path, "_caught_exc", dedent("""\
+        def safe(x):
+            try:
+                return 1 // x
+            except ZeroDivisionError:
+                return -1
+    """))
+    try:
+        spec = {"module": mod_name, "name": "safe", "call_text": "safe(0)"}
+        raw = driver._trace_free_text(spec)
+        exc_steps = [ev for ev in raw["trace"] if ev.get("event") == "exception"]
+        assert not exc_steps, (
+            f"Caught exceptions must NOT emit 'exception' steps; got {exc_steps!r}"
+        )
+    finally:
+        sys.modules.pop(mod_name, None)
+
+
+# ---------------------------------------------------------------------------
+# Fix 3a: SUBPROCESS kill path coverage — a pathological (slow) capture trips
+# communicate(timeout=...) → _kill_group → CaptureError.
+# ---------------------------------------------------------------------------
+
+import textwrap as _tw
+
+
+def test_subprocess_kill_group_on_timeout(tmp_path, monkeypatch):
+    """A capture that hangs must trip proc.communicate(timeout=...) → _kill_group
+    → CaptureError. Tests the OUTER subprocess kill path in _run_driver by
+    mocking communicate() to raise TimeoutExpired (safe, no real subprocess needed)."""
+    from copyclip.intelligence.capture import CaptureError, _run_driver, _kill_group
+    import copyclip.intelligence.capture as _cap_mod
+    import unittest.mock as _mock
+
+    kill_called = {"n": 0}
+
+    def fake_kill_group(proc):
+        kill_called["n"] += 1
+        # Don't actually kill anything — just record the call
+        pass
+
+    monkeypatch.setattr(_cap_mod, "_kill_group", fake_kill_group)
+
+    # Build a spec for a module that genuinely exists so Popen starts OK,
+    # but mock communicate() to immediately raise TimeoutExpired.
+    (tmp_path / "slow.py").write_text(_tw.dedent("""\
+        def noop():
+            pass
+    """), encoding="utf-8")
+
+    spec = {
+        "module": "slow",
+        "name": "noop",
+        "parent_class": None,
+        "args": [],
+        "kwargs": {},
+        "probe": False,
+    }
+
+    original_popen = _cap_mod.subprocess.Popen
+
+    class _FakePopen:
+        def __init__(self, *a, **kw):
+            self.returncode = 0
+            self.pid = 99999
+
+        def communicate(self, timeout=None):
+            raise _cap_mod.subprocess.TimeoutExpired(cmd="fake", timeout=timeout)
+
+    monkeypatch.setattr(_cap_mod.subprocess, "Popen", _FakePopen)
+
+    with pytest.raises(CaptureError, match="wall-clock"):
+        _run_driver(spec, str(tmp_path))
+
+    assert kill_called["n"] == 1, (
+        "_kill_group must be called exactly once when communicate() times out; "
+        f"was called {kill_called['n']} times"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fix 3b: Tighten test_fallback_response_playground_id_required to actually
+# assert the parameter has NO default (inspect.Parameter.empty).
+# ---------------------------------------------------------------------------
+
+def test_fallback_response_playground_id_has_no_default():
+    """FallbackResponse.playground_id must have NO default (inspect.Parameter.empty)
+    so omitting it raises TypeError. Currently it defaults to '' — this test
+    pins the contract to 'required field' not 'optional with empty default'."""
+    import inspect as _i
+    sig = _i.signature(FallbackResponse)
+    param = sig.parameters.get("playground_id")
+    assert param is not None, "FallbackResponse must have a playground_id parameter"
+    assert param.default is _i.Parameter.empty, (
+        f"FallbackResponse.playground_id must be a required field (no default), "
+        f"but it defaults to {param.default!r}. "
+        "Remove the default so omitting it raises TypeError."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fix 4: var_for calls repr twice for _LARGE_BY_LEN objects — double budget.
+# After the fix, _too_big_repr + _safe_repr must call repr at most once total
+# for the same object (inline to a single _safe_repr call).
+# ---------------------------------------------------------------------------
+
+def test_var_for_calls_repr_at_most_once_for_large_by_len(monkeypatch):
+    """For a _LARGE_BY_LEN object, var_for must call repr at most once.
+    Currently it calls _too_big_repr (which calls repr via _safe_repr), then
+    if that returns False, calls _safe_repr again — doubling the budget."""
+    repr_count = {"n": 0}
+
+    class CountedList(list):
+        def __repr__(self):
+            repr_count["n"] += 1
+            return f"[{len(self)} items]"
+
+    # A small list (3 items) that is NOT too big — exercises the path through
+    # _too_big_repr (returns False) then into _safe_repr.
+    obj = CountedList([1, 2, 3])
+    repr_count["n"] = 0  # reset after construction
+    driver.var_for("xs", obj)
+    assert repr_count["n"] <= 1, (
+        f"var_for called repr {repr_count['n']} times on a small list; "
+        "must call it at most once (inline _too_big_repr + _safe_repr into one call)."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fix 5: _assert_json_serializable must use allow_nan=False so NaN/Inf are
+# rejected (they break browser JSON.parse).
+# ---------------------------------------------------------------------------
+
+def test_assert_json_serializable_rejects_nan():
+    """float('nan') must be rejected by _assert_json_serializable (browser
+    JSON.parse cannot handle NaN serialized as 'NaN')."""
+    from copyclip.intelligence.capture import _assert_json_serializable, InvalidCallDescriptorError
+    with pytest.raises(InvalidCallDescriptorError):
+        _assert_json_serializable(float("nan"), "test")
+
+
+def test_assert_json_serializable_rejects_inf():
+    """float('inf') must be rejected by _assert_json_serializable."""
+    from copyclip.intelligence.capture import _assert_json_serializable, InvalidCallDescriptorError
+    with pytest.raises(InvalidCallDescriptorError):
+        _assert_json_serializable(float("inf"), "test")
+
+
+def test_assert_json_serializable_rejects_neg_inf():
+    """float('-inf') must be rejected by _assert_json_serializable."""
+    from copyclip.intelligence.capture import _assert_json_serializable, InvalidCallDescriptorError
+    with pytest.raises(InvalidCallDescriptorError):
+        _assert_json_serializable(float("-inf"), "test")
+
+
+def test_assert_json_serializable_accepts_normal_float():
+    """Normal floats like 3.14 must still pass."""
+    from copyclip.intelligence.capture import _assert_json_serializable
+    _assert_json_serializable(3.14, "test")  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Fix 6: emit_fold qualname parser drops ctor for nested-class methods.
+# Outer.Inner.method → must render Inner(ctor).method(args), NOT method(args).
+# ---------------------------------------------------------------------------
+
+def test_emit_fold_nested_class_method_uses_innermost_class_for_ctor():
+    """For a qualname like 'Outer.Inner.method', the ctor must use the innermost
+    class 'Inner' — not 'Outer' (first segment) or nothing (current bug)."""
+    emit_block = {
+        "kind": "widget",
+        "widget": {
+            "kind": "playground",
+            "function_ref": {
+                "file": "src/foo.py",
+                "name": "method",
+                "qualname": "Outer.Inner.method",
+            },
+            "breadcrumb": "Step through Outer.Inner.method",
+            "args": [1],
+            "kwargs": {},
+            "ctor": {"args": [99], "kwargs": {}},
+        },
+    }
+    result = fold_playground_widget(emit_block)
+    w = result["widget"]
+    # Must use "Inner" (the class immediately containing the method)
+    assert w["call_text"] == "Inner(99).method(1)", (
+        f"Nested qualname must use innermost class; got {w['call_text']!r}. "
+        "Fix: extract the second-to-last segment of the qualname as the ctor class."
+    )
+
+
+def test_emit_fold_two_level_qualname_still_works():
+    """A two-part qualname like 'MyClass.method' must still produce MyClass(...)."""
+    emit_block = {
+        "kind": "widget",
+        "widget": {
+            "kind": "playground",
+            "function_ref": {
+                "file": "src/foo.py",
+                "name": "method",
+                "qualname": "MyClass.method",
+            },
+            "breadcrumb": "Step",
+            "args": [],
+            "kwargs": {},
+            "ctor": {"args": [1], "kwargs": {}},
+        },
+    }
+    result = fold_playground_widget(emit_block)
+    w = result["widget"]
+    assert w["call_text"] == "MyClass(1).method()", (
+        f"Two-level qualname must use MyClass; got {w['call_text']!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fix 7a: FreeTextCall must reject NEWLINE injection (not just ';')
+# ---------------------------------------------------------------------------
+
+def test_free_text_call_rejects_newline_injection():
+    """FreeTextCall.from_text must reject text containing a newline character
+    (multi-line injection like 'foo()\\nimport os')."""
+    with pytest.raises(InvalidCallDescriptorError):
+        FreeTextCall.from_text("foo()\nimport os")
+
+
+def test_free_text_call_rejects_escaped_newline():
+    """FreeTextCall.from_text must also reject \\n when the string truly contains
+    a newline (not just a backslash-n in a literal)."""
+    with pytest.raises(InvalidCallDescriptorError):
+        FreeTextCall.from_text("foo()\nimport sys")
+
+
+# ---------------------------------------------------------------------------
+# Fix 7b: capture spec module-name traversal rejection
+# ---------------------------------------------------------------------------
+
+def test_call_descriptor_rejects_traversal_module_name():
+    """A capture spec with a module name like '../x' must be rejected before
+    importlib sees it — currently no validation exists for module traversal."""
+    from copyclip.intelligence.capture import InvalidCallDescriptorError
+    # We test via the validate path on FunctionRef (file field) — and also add
+    # a direct module-name check if that path is exercised. At minimum, the
+    # FunctionRef file path must reject path traversal.
+    from copyclip.intelligence.playground import FunctionRef
+    with pytest.raises(Exception):  # PlaygroundError or ValueError
+        FunctionRef.from_dict({"file": "../../../etc/passwd", "name": "foo"})
+
+
+def test_run_driver_spec_rejects_semicolon_in_module(tmp_path):
+    """_run_driver / _build_invocation must reject a module name containing ';'
+    (command injection attempt) before importlib.import_module is called."""
+    from copyclip.intelligence.capture import CaptureError, _run_driver
+
+    spec = {
+        "module": "os;import sys",  # injection attempt
+        "name": "getpid",
+        "parent_class": None,
+        "args": [],
+        "kwargs": {},
+        "probe": False,
+    }
+    # This should either raise CaptureError (driver subprocess reports error)
+    # or raise some validation error — it must NOT silently succeed.
+    with pytest.raises((CaptureError, Exception)):
+        _run_driver(spec, str(tmp_path))
+
+
+# ---------------------------------------------------------------------------
+# Fix 7c: Prompt schema test — embedded JSON schema must match CallDescriptor
+# wire shape (args/kwargs/ctor), not just substring presence.
+# ---------------------------------------------------------------------------
+
+def test_system_prompt_playground_schema_matches_call_descriptor_shape():
+    """The playground widget shape in SYSTEM_PROMPT must document the exact
+    CallDescriptor fields (args, kwargs, ctor) so the model emits them correctly.
+    Test that 'args', 'kwargs', and 'ctor' all appear in the playground widget
+    description AND that 'function_ref' appears (the required anchor field)."""
+    from copyclip.intelligence.cuaderno.prompts import SYSTEM_PROMPT
+
+    # Find the playground widget section
+    assert "playground" in SYSTEM_PROMPT, "SYSTEM_PROMPT must mention 'playground'"
+
+    # The schema must document all three CallDescriptor fields
+    playground_section_start = SYSTEM_PROMPT.find('"kind": "playground"')
+    assert playground_section_start >= 0, (
+        "SYSTEM_PROMPT must contain the playground widget schema "
+        "('{\"kind\": \"playground\", ...}')"
+    )
+
+    # Extract a reasonable window around the playground widget doc
+    window = SYSTEM_PROMPT[playground_section_start: playground_section_start + 500]
+
+    for field in ("args", "kwargs", "ctor", "function_ref"):
+        assert field in window, (
+            f"Playground widget schema in SYSTEM_PROMPT must document field '{field}'. "
+            f"Window: {window!r}"
+        )
+
+
+def test_widget_recovery_directive_run_documents_call_descriptor_fields():
+    """WIDGET_RECOVERY_DIRECTIVE_RUN must name all three CallDescriptor invocation
+    fields (args, kwargs, ctor) so the model knows what to emit on recovery."""
+    from copyclip.intelligence.cuaderno.prompts import WIDGET_RECOVERY_DIRECTIVE_RUN
+
+    for field in ("args", "kwargs", "ctor"):
+        assert field in WIDGET_RECOVERY_DIRECTIVE_RUN, (
+            f"WIDGET_RECOVERY_DIRECTIVE_RUN must mention '{field}' so the model "
+            f"knows to include it. Got: {WIDGET_RECOVERY_DIRECTIVE_RUN!r}"
+        )

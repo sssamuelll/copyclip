@@ -57,8 +57,11 @@ class CaptureError(PlaygroundError):
 
 def _assert_json_serializable(value: object, where: str) -> None:
     try:
-        json.dumps(value)
+        json.dumps(value, allow_nan=False)
     except (TypeError, ValueError) as exc:
+        # Raised for non-serializable types AND for NaN/Inf (which browser
+        # JSON.parse cannot handle — json.dumps accepts them by default as
+        # 'NaN'/'Infinity', which is non-standard and breaks in the browser).
         raise InvalidCallDescriptorError(
             f"{where} must be JSON-serializable, got {type(value).__name__}: {exc}"
         ) from exc
@@ -222,7 +225,7 @@ class StepThroughResponse:
 class FallbackResponse:
     reason: str
     iframe_url: str
-    playground_id: str = ""  # set from inner.playground_id in _cuaderno_fallback (spec §8)
+    playground_id: str  # required — set from inner.playground_id in _cuaderno_fallback (spec §8)
 
     def to_dict(self) -> dict[str, Any]:
         return {"kind": "fallback", "reason": self.reason,
