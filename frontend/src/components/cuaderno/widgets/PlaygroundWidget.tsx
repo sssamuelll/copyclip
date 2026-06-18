@@ -1,5 +1,5 @@
 import { useState, useEffect, useSyncExternalStore } from 'react'
-import type { PlaygroundWidgetData, Citation, CallDescriptor } from '../../../types/api'
+import type { PlaygroundWidgetData, Citation } from '../../../types/api'
 import { CitationChip } from '../CitationChip'
 import { subscribe, getState, launch, close, getToken } from '../playgroundSlot'
 import { IdleInvitation } from '../stepper/IdleInvitation'
@@ -15,33 +15,6 @@ type Props = {
   lang?: string | null
 }
 
-// Build a faithful invocation string from the model's structured descriptor.
-// Prefer the pre-rendered call_text; this is the fallback when only `call` is present.
-// String args are repr-quoted (single quotes); other values use JSON.stringify.
-//
-// For method calls (call.ctor present): renders as `Ctor(ctorArgs).method(args)`.
-// The constructor class name is derived from function_ref.qualname (e.g. "Foo.method"
-// → "Foo"). When qualname is absent, falls back to rendering only the method call.
-function callTextOf(name: string, call?: CallDescriptor): string {
-  if (!call) return `${name}()`
-  const lit = (v: unknown) => (typeof v === 'string' ? `'${v}'` : JSON.stringify(v))
-  const pos = (call.args ?? []).map(lit)
-  const kw = Object.entries(call.kwargs ?? {}).map(([k, v]) => `${k}=${lit(v)}`)
-  const methodArgs = [...pos, ...kw].join(', ')
-  if (call.ctor) {
-    // Method call: build Ctor(ctorArgs).method(args)
-    const ctorPos = (call.ctor.args ?? []).map(lit)
-    const ctorKw = Object.entries(call.ctor.kwargs ?? {}).map(([k, v]) => `${k}=${lit(v)}`)
-    const ctorArgs = [...ctorPos, ...ctorKw].join(', ')
-    // Derive class name from qualname (e.g. "Foo.method" → "Foo")
-    const qualname = call.function_ref.qualname
-    const ctorName = qualname?.includes('.') ? qualname.split('.')[0] : null
-    if (ctorName) {
-      return `${ctorName}(${ctorArgs}).${name}(${methodArgs})`
-    }
-  }
-  return `${name}(${methodArgs})`
-}
 
 export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
   const slot = useSyncExternalStore(subscribe, getState)
@@ -57,9 +30,9 @@ export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
   const myKey = `${fn.file}:${fn.name}:${fn.line ?? ''}`
   const isMine = slot.kind !== 'empty' && 'widgetKey' in slot && slot.widgetKey === myKey
   const fileLine = fn.line != null ? `${fn.file}:${fn.line}` : fn.file
-  // The REAL model-proposed invocation (D2): the pre-rendered text if the floor
-  // emitted it, else built from the structured descriptor. Never a fake "name(…)".
-  const proposedCall = widget.call_text ?? callTextOf(fn.name, widget.call)
+  // Honest fallback: use the pre-rendered call_text if the backend provided it,
+  // otherwise fall back to fn.name + '()'. Repr-generation belongs to the backend.
+  const proposedCall = widget.call_text ?? `${fn.name}()`
 
   // When Widget B takes the slot (isMine becomes false and slot is non-empty),
   // reset our previewing flag so the stale preview cannot resurface later when

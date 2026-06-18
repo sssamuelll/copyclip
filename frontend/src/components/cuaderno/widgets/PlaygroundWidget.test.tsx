@@ -253,9 +253,30 @@ describe('PlaygroundWidget — integration (real slot store)', () => {
     expect(await screen.findByText(/didn't run the function/)).toBeInTheDocument()
   })
 
-  // ---- callTextOf: ctor present renders Ctor(ctorArgs).method(args) ----
+  // ---- Honest bare fallback when call_text absent (SHOULD — callTextOf deleted) ----
+  // proposedCall = widget.call_text ?? fn.name + '()'
+  // When call_text is absent, the preview shows fn.name + '()' — no repr generation.
 
-  it('callTextOf renders Ctor(ctorArgs).method(args) when call.ctor is present', async () => {
+  it('shows bare fn.name() when call_text is absent (honest fallback, no repr generation)', async () => {
+    const widgetNoCallText: typeof widget = {
+      ...widget,
+      call_text: undefined,
+      call: { function_ref: fn, args: ['hello', 42] },
+    }
+    render(<PlaygroundWidget widget={widgetNoCallText} onOpenCitation={() => {}} />)
+    await userEvent.click(screen.getByRole('button', { name: /step through/i }))
+    // Bare fallback: fn.name + '()'
+    expect(screen.getByText('resolve_function_ref()')).toBeInTheDocument()
+  })
+
+  it('shows widget.call_text when present, ignoring call descriptor', async () => {
+    render(<PlaygroundWidget widget={widget} onOpenCitation={() => {}} />)
+    await userEvent.click(screen.getByRole('button', { name: /step through/i }))
+    // call_text takes priority
+    expect(screen.getByText('resolve_function_ref(conn, 42, ref)')).toBeInTheDocument()
+  })
+
+  it('bare fallback when call_text absent and ctor present (no Ctor.method rendering)', async () => {
     const fnWithQualname = { ...fn, qualname: 'MyClass.resolve_function_ref' }
     const widgetWithCtor: typeof widget = {
       ...widget,
@@ -268,40 +289,7 @@ describe('PlaygroundWidget — integration (real slot store)', () => {
     }
     render(<PlaygroundWidget widget={widgetWithCtor} onOpenCitation={() => {}} />)
     await userEvent.click(screen.getByRole('button', { name: /step through/i }))
-    // Should render: MyClass('db').resolve_function_ref(42)
-    expect(screen.getByText("MyClass('db').resolve_function_ref(42)")).toBeInTheDocument()
-  })
-
-  it('callTextOf falls back to method(args) when ctor present but qualname absent', async () => {
-    const fnNoQualname = { file: fn.file, name: fn.name }  // no qualname
-    const widgetNoQualname: typeof widget = {
-      ...widget,
-      call_text: undefined,
-      call: {
-        function_ref: fnNoQualname,
-        args: [1],
-        ctor: { args: ['x'] },
-      },
-    }
-    render(<PlaygroundWidget widget={widgetNoQualname} onOpenCitation={() => {}} />)
-    await userEvent.click(screen.getByRole('button', { name: /step through/i }))
-    // Falls back to: resolve_function_ref(1)
-    expect(screen.getByText('resolve_function_ref(1)')).toBeInTheDocument()
-  })
-
-  // ---- callTextOf fallback quotes string args (High #4) ----
-
-  it('callTextOf fallback quotes string args — widget without call_text shows repr literals', async () => {
-    const widgetNoCallText: typeof widget = {
-      ...widget,
-      call_text: undefined,
-      call: { function_ref: fn, args: ['hello', 42] },
-    }
-    render(<PlaygroundWidget widget={widgetNoCallText} onOpenCitation={() => {}} />)
-    await userEvent.click(screen.getByRole('button', { name: /step through/i }))
-    // String arg 'hello' must be repr-quoted, not raw 'hello'
-    expect(screen.getByText("resolve_function_ref('hello', 42)")).toBeInTheDocument()
-    // Must NOT show the unquoted version
-    expect(screen.queryByText('resolve_function_ref(hello, 42)')).not.toBeInTheDocument()
+    // Honest bare fallback: fn.name + '()' — no ctor rendering
+    expect(screen.getByText('resolve_function_ref()')).toBeInTheDocument()
   })
 })
