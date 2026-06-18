@@ -34,15 +34,17 @@ from .playground import (
     _is_identifier,  # reuse the existing identifier check
 )
 
-# Caps — enforced INSIDE the capture callback (spec §5). Defaults chosen to
-# abort well under any launch window and to never OOM the subprocess. These
-# mirror the driver's module-level caps (Task 5); the orchestrator reads them
-# here only for the outer wall-clock backstop timeout.
-MAX_STEPS = 1000
-REPR_SIZE_CAP = 1000          # chars; longer values surface as kind:"large"
-REPR_TIME_BUDGET_S = 0.05     # per-value __repr__ time cap
-WALL_CLOCK_BUDGET_S = 8.0     # whole-capture guard
-LARGE_CHILDREN_CAP = 20       # first-N children captured for a large value
+# Caps — single source of truth lives in _capture_driver (which is import-safe
+# per its own docstring).  Import them here so the outer wall-clock backstop
+# (communicate timeout = WALL_CLOCK_BUDGET_S + 4.0) always references the same
+# value as the in-driver guard, with no risk of the two drifting.
+from ._capture_driver import (  # noqa: E402
+    MAX_STEPS,
+    REPR_SIZE_CAP,
+    REPR_TIME_BUDGET_S,
+    WALL_CLOCK_BUDGET_S,
+    LARGE_CHILDREN_CAP,
+)
 
 # Concurrency ceiling — each capture is a real interpreter subprocess (PR #177
 # safety fix 2). Marimo iframe playgrounds cap at MAX_CONCURRENT_PLAYGROUNDS=5
@@ -142,8 +144,9 @@ class CallDescriptor:
 class FreeTextCall:
     """The USER's edited free-text call (consent path 2). NOT repr-guarded:
     it is the user's own expression, exec'd in the module namespace on confirm
-    (spec §6/§10). We constrain it to a SINGLE expression so the confirm gesture
-    stays 'run this call', not 'run a script' — the caps still bound execution."""
+    (spec §6/§10). We constrain it to a SINGLE Python expression (which may have
+    side effects) so the confirm gesture stays scoped to one expression, not a
+    script — the caps still bound execution time."""
     text: str
 
     @classmethod
@@ -155,12 +158,19 @@ class FreeTextCall:
             raise InvalidCallDescriptorError(
                 "call_text must be a single expression (no ';' or newlines)"
             )
+        import ast as _ast
         try:
-            compile(text, "<call_text>", "eval")
+            parsed = _ast.parse(text, mode="eval")
         except SyntaxError as exc:
             raise InvalidCallDescriptorError(
                 f"call_text must be a valid Python expression: {exc}"
             ) from exc
+        # Constrain to a Call node so the confirm gesture is always "run a call",
+        # not an arbitrary expression with unrelated side-effects.
+        if not isinstance(parsed.body, _ast.Call):
+            raise InvalidCallDescriptorError(
+                "call_text must be a function-call expression (e.g. 'foo(1, x=2)')"
+            )
         return cls(text=text)
 
 

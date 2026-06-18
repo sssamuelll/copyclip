@@ -70,8 +70,10 @@ _RUN_REQUEST_TERMS = (
 )
 
 # Spanish-only subset of _RUN_REQUEST_TERMS used for language-branch breadcrumbs.
-# Defined here (colocated with its parent) so the two never drift independently.
-_ES_RUN_TERMS = ("ejecut", "córre", "corre ", "prueba", "pruéba")
+# Derived from _RUN_REQUEST_TERMS by excluding the English-only prefixes so the
+# two never drift independently (no hand-maintained copy).
+_EN_ONLY_RUN_TERMS = frozenset({"run ", "runnable", "execute", "executable"})
+_ES_RUN_TERMS = tuple(t for t in _RUN_REQUEST_TERMS if t not in _EN_ONLY_RUN_TERMS)
 
 
 def _is_visual_request(question: str) -> bool:

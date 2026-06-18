@@ -36,12 +36,9 @@ def _render_args(args: list, kwargs: dict, ctor: dict | None,
 
     All values are repr()'d — strings get quoted, numbers stay bare, etc.
     """
-    def _repr_arg(v: Any) -> str:
-        return repr(v)
-
     def _args_str(a: list, kw: dict) -> str:
-        parts: list[str] = [_repr_arg(v) for v in a]
-        parts += [f"{k}={_repr_arg(v)}" for k, v in kw.items()]
+        parts: list[str] = [repr(v) for v in a]
+        parts += [f"{k}={repr(v)}" for k, v in kw.items()]
         return ", ".join(parts)
 
     call_args = _args_str(args, kwargs)
@@ -79,9 +76,10 @@ def fold_playground_widget(block: dict) -> dict:
     parent_class: str | None = None
     if qualname and "." in qualname:
         parts = qualname.split(".")
-        # parts[-1] is the method name; parts[-2] is the immediate enclosing class
-        if len(parts) >= 2 and parts[-2]:
-            parent_class = parts[-2]
+        # FunctionRef (the v1 gate) rejects qualnames with >2 segments; only
+        # emit a parent_class for exactly 2-segment qualnames ("Class.method").
+        if len(parts) == 2 and parts[0]:
+            parent_class = parts[0]
 
     # Extract top-level args/kwargs/ctor — may be absent (None means empty)
     args: list = list(w.get("args") or [])
