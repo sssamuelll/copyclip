@@ -13,7 +13,7 @@ type Props = {
 }
 
 export function Stepper({ response, onClose, lang }: Props) {
-  const { trace, source_lines, func_name, file_line, truncated } = response
+  const { trace, source_lines, func_name, file_line, truncated, truncated_reason } = response
   const total = trace.length
   const [step, setStep] = useState(1)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
@@ -58,13 +58,19 @@ export function Stepper({ response, onClose, lang }: Props) {
 
   // raised: only treated as terminal if it's also the last step (cur === total)
   const raised = (tr.event === 'raise' || !!tr.raised) && cur === total
-  // slabBg/slabBorder follow truncated priority: stay neutral if truncated, red only when raised and not truncated
-  const slabBg = raised && !truncated ? 'var(--neg)' : 'var(--accent-soft)'
-  const slabBorder = raised && !truncated ? 'var(--neg-ink)' : 'var(--accent)'
-  const banner = truncated
-    ? { tick: 'var(--accent)', bg: 'var(--surface-2)', ink: 'var(--ink-2)', text: t('playground_truncated', lang, { n: String(total) }) }
-    : raised
-      ? { tick: 'var(--neg-ink)', bg: 'var(--neg)', ink: 'var(--neg-ink)', text: t('playground_raised_final', lang) }
+  // raised wins over truncated: a terminal throw always shows the red band,
+  // even if the trace was also cut short by the step cap or a time limit.
+  const slabBg = raised ? 'var(--neg)' : 'var(--accent-soft)'
+  const slabBorder = raised ? 'var(--neg-ink)' : 'var(--accent)'
+  const truncatedText = truncated_reason === 'steps'
+    ? t('playground_truncated_steps', lang, { n: String(total) })
+    : truncated_reason === 'time'
+      ? t('playground_truncated_time', lang, { n: String(total) })
+      : t('playground_truncated', lang, { n: String(total) })
+  const banner = raised
+    ? { tick: 'var(--neg-ink)', bg: 'var(--neg)', ink: 'var(--neg-ink)', text: t('playground_raised_final', lang) }
+    : truncated
+      ? { tick: 'var(--accent)', bg: 'var(--surface-2)', ink: 'var(--ink-2)', text: truncatedText }
       : null
   const bodyHeight = banner ? 404 : 480
   // terminal = the trace has reached a natural end: truncation cap or a raise at the last step.
@@ -88,8 +94,8 @@ export function Stepper({ response, onClose, lang }: Props) {
   const atEnd = cur >= total
 
   // Raised terminal handle: use --neg-ink instead of --accent (handoff state 07, line 521).
-  // Respect truncated priority: when truncated=true the slab stays neutral, so the handle must too.
-  const handleColor = raised && !truncated ? 'var(--neg-ink)' : 'var(--accent)'
+  // raised wins over truncated: if the last step threw, the handle is red regardless.
+  const handleColor = raised ? 'var(--neg-ink)' : 'var(--accent)'
 
   const btn = 'width:28px;height:28px;flex:none;border-radius:7px;border:1px solid var(--hairline);background:var(--paper);color:var(--ink-2);cursor:pointer;font-size:9px;display:flex;align-items:center;justify-content:center;'
 

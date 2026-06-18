@@ -143,8 +143,8 @@ describe('Stepper', () => {
     expect(screen.queryByText('__UNIQUE_CHILD__')).not.toBeInTheDocument()
   })
 
-  // Issue 4: slabBg/slabBorder must be neutral (accent) when truncated=true, even if raised flag is set
-  it('uses accent slab colours (not red) on the current step when truncated=true, even when the step is a raise', () => {
+  // Issue 4 (PR #177 fix): raised wins over truncated — slab must be red when both are set
+  it('uses NEG slab colours (red) when raise is terminal even when truncated=true (raised wins over truncated)', () => {
     // Use line 255 which IS in resp.source_lines so the slab renders (curIdx >= 0)
     const raisedTruncTrace: Step[] = [
       { line: 255, event: 'raise', changed: [], scope: [], raised: { type: 'RuntimeError', message: 'cut' } },
@@ -154,20 +154,12 @@ describe('Stepper', () => {
     )
     const slab = container.querySelector<HTMLElement>('[data-testid="hl-slab"]')
     expect(slab).not.toBeNull()
-    // slabBg must NOT be the negative (red) token when truncated=true
-    const bg = slab!.style.background
-    expect(bg).not.toBe('var(--neg)')
-    // The slab renders with `border-left:2px solid ${slabBorder}` (shorthand).
-    // JSDOM stores this on el.style.borderLeft, NOT on el.style.borderLeftColor.
-    // Asserting borderLeftColor would always be '' — vacuous.  Check borderLeft instead.
-    const borderLeft = slab!.style.borderLeft
-    expect(borderLeft, 'slabBorder must not use the --neg-ink token when truncated').not.toContain('var(--neg-ink)')
-    // The expected accent token must be present
-    expect(borderLeft, 'slabBorder must use var(--accent) token when truncated').toContain('var(--accent)')
+    // raised wins: slab must use var(--neg) even when truncated
+    expect(slab!.style.background).toBe('var(--neg)')
   })
 
-  // Issue 5: handleColor must respect truncated priority — accent handle on truncated+raise step
-  it('uses --accent handle colour (not --neg-ink) when truncated=true even on a raise step', () => {
+  // Issue 5 (PR #177 fix): raised wins over truncated — handle must be red when both are set
+  it('uses --neg-ink handle colour when raise is terminal even when truncated=true (raised wins)', () => {
     // Use line 255 which IS in resp.source_lines so the slab renders
     const raisedTruncTrace: Step[] = [
       { line: 255, event: 'raise', changed: [], scope: [], raised: { type: 'RuntimeError', message: 'cut' } },
@@ -176,13 +168,49 @@ describe('Stepper', () => {
       <Stepper response={{ ...resp, trace: raisedTruncTrace, truncated: true }} onClose={() => {}} lang="en" />
     )
     const allEls = container.querySelectorAll<HTMLElement>('[style]')
-    const handle = Array.from(allEls).find(
-      (el) => el.style.borderRadius === '50%',
-    )
+    const handle = Array.from(allEls).find((el) => el.style.borderRadius === '50%')
     expect(handle, 'scrubber handle element must exist').toBeTruthy()
-    // When truncated=true, handle must stay neutral (accent), NOT turn red
-    expect(handle!.style.background, 'handle must use var(--accent) when truncated').toBe('var(--accent)')
-    expect(handle!.style.background, 'handle must NOT use var(--neg-ink) when truncated').not.toBe('var(--neg-ink)')
+    // raised wins: handle must use var(--neg-ink) when raised is terminal, even if truncated
+    expect(handle!.style.background).toBe('var(--neg-ink)')
+  })
+
+  // Task 4 (PR #177 fix): raised banner wins over truncated — both set
+  it('shows raised banner (not truncated) when BOTH raised=true AND truncated=true at the last step', async () => {
+    const raisedTruncTrace: Step[] = [
+      ...trace,
+      { line: 263, event: 'raise', changed: [], scope: [v('qualname', 'scalar', { text: "'ghost'" })], raised: { type: 'KeyError', message: "'ghost'" } },
+    ]
+    render(<Stepper response={{ ...resp, trace: raisedTruncTrace, truncated: true }} onClose={() => {}} lang="en" />)
+    const next = screen.getByRole('button', { name: 'Next step' })
+    for (let i = 0; i < 10; i++) await userEvent.click(next)
+    // raised banner must win
+    expect(screen.getByText('Raised — this is the final step.')).toBeInTheDocument()
+    // truncated banner must NOT appear
+    expect(screen.queryByText(/Stopped at step/)).toBeNull()
+  })
+
+  // Task 4 (PR #177 fix): truncated_reason='steps' uses playground_truncated_steps copy
+  it('truncated_reason="steps" shows step-cap message (en)', () => {
+    render(<Stepper response={{ ...resp, truncated: true, truncated_reason: 'steps' }} onClose={() => {}} lang="en" />)
+    expect(screen.getByText('Stopped at step 4 — hit the step cap.')).toBeInTheDocument()
+  })
+
+  // Task 4 (PR #177 fix): truncated_reason='time' uses playground_truncated_time copy
+  it('truncated_reason="time" shows time-limit message (en)', () => {
+    render(<Stepper response={{ ...resp, truncated: true, truncated_reason: 'time' }} onClose={() => {}} lang="en" />)
+    expect(screen.getByText('Stopped at step 4 — ran out of time.')).toBeInTheDocument()
+  })
+
+  // Task 4 (PR #177 fix): truncated_reason=null falls back to generic playground_truncated
+  it('truncated_reason=null falls back to generic truncated message (en)', () => {
+    render(<Stepper response={{ ...resp, truncated: true, truncated_reason: null }} onClose={() => {}} lang="en" />)
+    expect(screen.getByText('Stopped at step 4 — trace truncated.')).toBeInTheDocument()
+  })
+
+  // Task 4 (PR #177 fix): truncated_reason absent (undefined) falls back to generic
+  it('truncated_reason absent falls back to generic truncated message (en)', () => {
+    render(<Stepper response={{ ...resp, truncated: true }} onClose={() => {}} lang="en" />)
+    expect(screen.getByText('Stopped at step 4 — trace truncated.')).toBeInTheDocument()
   })
 
   // Task 11 pixel-fidelity: raised terminal handle uses --neg-ink, not --accent (handoff §07 line 521)

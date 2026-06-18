@@ -682,6 +682,7 @@ export type StepThroughResponse = {
   func_name: string
   file_line: string                   // e.g. "intelligence/symbols.py:255"
   truncated: boolean
+  truncated_reason?: 'steps' | 'time' | null
 }
 
 export type FallbackResponse = {

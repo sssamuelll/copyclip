@@ -96,15 +96,14 @@ describe('Stepper — --neg token contract (highlight slab)', () => {
     expect(slab!.style.background).toBe('var(--neg)')
   })
 
-  it('slab uses accent (NOT --neg) background when truncated=true even on a raise step', () => {
+  it('slab uses --neg background when raise is terminal even when truncated=true (raised wins over truncated)', () => {
     const { container } = render(
       <Stepper response={raisedResp({ truncated: true })} onClose={() => {}} />,
     )
     const slab = container.querySelector<HTMLElement>('[data-testid="hl-slab"]')
     expect(slab, 'slab must render when line is in source_lines').not.toBeNull()
-    expect(slab!.style.background).not.toBe('var(--neg)')
-    // Must be the accent-soft token instead
-    expect(slab!.style.background).toBe('var(--accent-soft)')
+    // After the fix: raised wins over truncated — slab IS red
+    expect(slab!.style.background).toBe('var(--neg)')
   })
 
   it('slab uses accent background on a normal line step', () => {
