@@ -125,6 +125,7 @@ The step-through renders in the **React frontend**, pixel-perfect against `2026-
 - **State panel** — every in-scope variable at the current step; *changed-this-step* gets `--accent` ink + a ◆ marker, *unchanged* dims to `--ink-4` (exact treatment in the handoff's `mkRow`).
 - **Large-value chips** — type+shape (`dict · 3 keys`, `DataFrame · 1000×12`), expand-on-demand; **opaque** types render as a dashed `‹Type›` tag, never expanded.
 - **Scrubber** — track with change-markers, prev/next, **"next change"** (jump to the next step where `changed` is non-empty), and folded loop-iteration bands for long traces.
+  *(Note: the handoff's '⊟ folded iterations' chip (handoff §4) is deferred to v1.1 per §0 decision 3 — the flat `Step[]` carries no iteration identity, so the fold-bands have no data producer in v1. The pixel source-of-truth (the `.dc.html` handoff) and the v1 implementation are reconciled here: the chip is correct in the handoff as a v1.1 feature placeholder, not a v1 omission.)*
 - **Step counter** — "step N / M" (tabular-nums) in the widget head.
 - **All states** from the handoff: Idle, Preview-call (editable), Spawning, Stepping, Truncated, Raised, Fallback, Ended/Evicted/Spawn-error.
 
