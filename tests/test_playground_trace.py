@@ -678,3 +678,98 @@ def test_func_name_uses_qualname_when_method(tmp_path, monkeypatch):
     assert resp.func_name == "MyClass.process", (
         f"func_name must be qualname when parent_class is set; got {resp.func_name!r}"
     )
+
+
+# ===========================================================================
+# ORCHESTRATION Fix 1: BOTH dispatch paths must run the SAME eligibility gate
+# (async/generator/decorated decline + eligibility_reason) BEFORE spawning.
+# Today the free-text branch skips eligibility_reason — unify via one helper.
+# ===========================================================================
+
+
+def test_free_text_path_declines_async_target(tmp_path, monkeypatch):
+    """The free-text (USER) path must decline an async target via the SAME gate
+    the structured path uses — async functions step as one frame."""
+    monkeypatch.setattr(
+        "copyclip.intelligence.capture.probe_target",
+        lambda *a, **kw: ({"is_async": True, "is_generator": False, "is_decorated": False},
+                          _FAKE_SOURCE_LINES),
+    )
+    monkeypatch.setattr(
+        "copyclip.intelligence.playground.generate_marimo_notebook",
+        lambda *a, **k: os.path.join(str(tmp_path), "ft_async", "playground.py"),
+    )
+    os.makedirs(os.path.join(str(tmp_path), "ft_async"), exist_ok=True)
+
+    from copyclip.intelligence.capture import FallbackResponse
+    resp = launch_playground(_req(call_text="foo(1)"), str(tmp_path),
+                             _conn_with_symbol(), 1, FakeRunner())
+    assert isinstance(resp, FallbackResponse)
+    assert "async" in resp.reason.lower()
+
+
+def test_free_text_path_declines_generator_target(tmp_path, monkeypatch):
+    """The free-text path must decline a generator target via the SAME gate."""
+    monkeypatch.setattr(
+        "copyclip.intelligence.capture.probe_target",
+        lambda *a, **kw: ({"is_async": False, "is_generator": True, "is_decorated": False},
+                          _FAKE_SOURCE_LINES),
+    )
+    monkeypatch.setattr(
+        "copyclip.intelligence.playground.generate_marimo_notebook",
+        lambda *a, **k: os.path.join(str(tmp_path), "ft_gen", "playground.py"),
+    )
+    os.makedirs(os.path.join(str(tmp_path), "ft_gen"), exist_ok=True)
+
+    from copyclip.intelligence.capture import FallbackResponse
+    resp = launch_playground(_req(call_text="foo(1)"), str(tmp_path),
+                             _conn_with_symbol(), 1, FakeRunner())
+    assert isinstance(resp, FallbackResponse)
+    assert "generator" in resp.reason.lower()
+
+
+def test_free_text_path_declines_decorated_target(tmp_path, monkeypatch):
+    """The free-text path must decline a decorated target via the SAME gate —
+    the wrapper's file is not the body's anchor."""
+    monkeypatch.setattr(
+        "copyclip.intelligence.capture.probe_target",
+        lambda *a, **kw: ({"is_async": False, "is_generator": False, "is_decorated": True},
+                          _FAKE_SOURCE_LINES),
+    )
+    monkeypatch.setattr(
+        "copyclip.intelligence.playground.generate_marimo_notebook",
+        lambda *a, **k: os.path.join(str(tmp_path), "ft_dec", "playground.py"),
+    )
+    os.makedirs(os.path.join(str(tmp_path), "ft_dec"), exist_ok=True)
+
+    from copyclip.intelligence.capture import FallbackResponse
+    resp = launch_playground(_req(call_text="foo(1)"), str(tmp_path),
+                             _conn_with_symbol(), 1, FakeRunner())
+    assert isinstance(resp, FallbackResponse)
+    assert "decorat" in resp.reason.lower()
+
+
+def test_free_text_path_runs_when_eligible(tmp_path, monkeypatch):
+    """An eligible target on the free-text path still runs the capture (the gate
+    must not over-decline a plain function)."""
+    _stub_probe(monkeypatch)
+    _stub_run_free_text_capture(monkeypatch)
+    from copyclip.intelligence.capture import StepThroughResponse
+    resp = launch_playground(_req(call_text="foo(1)"), str(tmp_path),
+                             _conn_with_symbol(), 1, FakeRunner())
+    assert isinstance(resp, StepThroughResponse)
+
+
+def test_free_text_method_target_runs_user_supplied_ctor(tmp_path, monkeypatch):
+    """For a METHOD target on the free-text path, the user types the whole call
+    (ctor included), so the method-without-ctor decline must NOT fire — the gate
+    treats the user's text as supplying the constructor."""
+    _stub_probe(monkeypatch)
+    _stub_run_free_text_capture(monkeypatch)
+    conn = _conn_with_symbol(kind="method", name="meth")
+    req = _req(name="meth", qualname="MyClass.meth", call_text="MyClass(1).meth(2)")
+    from copyclip.intelligence.capture import StepThroughResponse
+    resp = launch_playground(req, str(tmp_path), conn, 1, FakeRunner())
+    assert isinstance(resp, StepThroughResponse), (
+        "a method on the free-text path supplies its ctor by text and must run"
+    )

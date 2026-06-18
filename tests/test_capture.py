@@ -1535,3 +1535,183 @@ def test_detect_kind_undecorated_target_is_not_flagged(tmp_path):
         assert detect.get("is_decorated") is False
     finally:
         sys.modules.pop(mod_name, None)
+
+
+# ===========================================================================
+# ORCHESTRATION / SAFETY — PR #177 staff review, TDD (fail-first)
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# SAFETY Fix 2: capture.py must cap concurrent captures (mirror marimo_runner's
+# MAX_CONCURRENT_PLAYGROUNDS=5). A saturated capture pool returns a stable
+# error_code, not an unbounded fan-out of subprocesses.
+# ---------------------------------------------------------------------------
+
+import copyclip.intelligence.capture as _cap
+
+
+def test_capture_concurrency_cap_constant_mirrors_runner():
+    """capture.py must expose a concurrency ceiling equal to the runner's."""
+    from copyclip.intelligence.marimo_runner import MAX_CONCURRENT_PLAYGROUNDS
+    assert _cap.MAX_CONCURRENT_CAPTURES == MAX_CONCURRENT_PLAYGROUNDS
+
+
+def test_capture_saturation_returns_stable_error_code(tmp_path, monkeypatch):
+    """When the capture semaphore is saturated, _run_driver must raise a
+    PlaygroundError subclass with a STABLE error_code (HTTP 503), never spawn an
+    unbounded number of subprocesses or block forever."""
+    from copyclip.intelligence.capture import CaptureBusyError, _run_driver
+
+    # Drain every permit so the next acquire fails immediately.
+    sem = _cap._CAPTURE_SEMAPHORE
+    acquired = 0
+    while sem.acquire(blocking=False):
+        acquired += 1
+    try:
+        spec = {"module": "os", "name": "getpid", "parent_class": None,
+                "args": [], "kwargs": {}, "probe": False}
+        with pytest.raises(CaptureBusyError) as ei:
+            _run_driver(spec, str(tmp_path))
+        assert ei.value.error_code == "capture_busy"
+        assert ei.value.http_status == 503
+    finally:
+        for _ in range(acquired):
+            sem.release()
+
+
+def test_capture_busy_error_is_playground_error():
+    """CaptureBusyError must be a PlaygroundError so the endpoint catches it and
+    emits stable JSON instead of a traceback."""
+    from copyclip.intelligence.capture import CaptureBusyError
+    from copyclip.intelligence.playground import PlaygroundError
+    assert issubclass(CaptureBusyError, PlaygroundError)
+
+
+def test_capture_semaphore_released_after_successful_run(tmp_path):
+    """A normal capture must release its permit so the pool does not leak slots."""
+    root = _write_user_module(tmp_path, """
+        def addup(a):
+            return a + 1
+    """)
+    resolved = ResolvedFunction(file="usermod.py", name="addup", qualname="addup",
+                                kind="function", module="usermod", line_start=1,
+                                parent_class=None)
+    cd = CallDescriptor.from_dict({"function_ref": {"file": "usermod.py", "name": "addup"},
+                                   "args": [3]})
+    before = _cap._CAPTURE_SEMAPHORE._value
+    run_capture(cd, resolved, project_root=str(root))
+    assert _cap._CAPTURE_SEMAPHORE._value == before, (
+        "the capture semaphore permit must be released after a successful run"
+    )
+
+
+def test_capture_semaphore_released_after_failed_run(tmp_path, monkeypatch):
+    """Even when the subprocess times out, the permit must be released (finally)."""
+    from copyclip.intelligence.capture import CaptureError, _run_driver
+    import copyclip.intelligence.capture as _cap_mod
+
+    monkeypatch.setattr(_cap_mod, "_kill_group", lambda proc: None)
+
+    class _FakePopen:
+        def __init__(self, *a, **kw):
+            self.returncode = 0
+            self.pid = 1
+
+        def communicate(self, timeout=None):
+            raise _cap_mod.subprocess.TimeoutExpired(cmd="x", timeout=timeout)
+
+    monkeypatch.setattr(_cap_mod.subprocess, "Popen", _FakePopen)
+    spec = {"module": "os", "name": "getpid", "parent_class": None,
+            "args": [], "kwargs": {}, "probe": False}
+    before = _cap_mod._CAPTURE_SEMAPHORE._value
+    with pytest.raises(CaptureError):
+        _run_driver(spec, str(tmp_path))
+    assert _cap_mod._CAPTURE_SEMAPHORE._value == before, (
+        "the permit must be released even when the capture fails"
+    )
+
+
+# ---------------------------------------------------------------------------
+# SAFETY Fix 4: stdout demux — the driver shares stdout between the user's real
+# code and the trace payload. A user print() must not corrupt the parse.
+# ---------------------------------------------------------------------------
+
+def test_traced_function_that_prints_still_yields_clean_trace(tmp_path):
+    """A function that prints to stdout must still produce a parseable trace —
+    the user's stdout must be redirected away from the trace channel."""
+    root = _write_user_module(tmp_path, """
+        def chatty(a):
+            print("hello from user code")
+            print("a second line, with a closing brace } and a [")
+            b = a + 1
+            return b
+    """)
+    resolved = ResolvedFunction(file="usermod.py", name="chatty", qualname="chatty",
+                                kind="function", module="usermod", line_start=1,
+                                parent_class=None)
+    cd = CallDescriptor.from_dict({"function_ref": {"file": "usermod.py", "name": "chatty"},
+                                   "args": [3]})
+    steps, truncated, _reason = run_capture(cd, resolved, project_root=str(root))
+    assert steps[-1].event == "return", (
+        "a function that prints must still yield a clean return trace; "
+        "user stdout must not corrupt the JSON trace payload"
+    )
+    names = {v.name for s in steps for v in s.scope}
+    assert {"a", "b"} <= names
+
+
+def test_driver_does_not_parse_stdout_when_rc_nonzero(tmp_path, monkeypatch):
+    """When the subprocess exits non-zero, _run_driver must NOT attempt to parse
+    stdout as a trace payload — a crash with stray stdout must surface as a clean
+    CaptureError, not a wrong-cause parse error."""
+    from copyclip.intelligence.capture import CaptureError, _run_driver
+    import copyclip.intelligence.capture as _cap_mod
+
+    class _FakePopen:
+        def __init__(self, *a, **kw):
+            self.returncode = 3
+            self.pid = 1
+
+        def communicate(self, timeout=None):
+            # Non-zero rc but stray stdout present (a user print before a crash).
+            return ("hello from user code\nnot json at all", "Traceback: boom")
+
+    monkeypatch.setattr(_cap_mod.subprocess, "Popen", _FakePopen)
+    spec = {"module": "os", "name": "getpid", "parent_class": None,
+            "args": [], "kwargs": {}, "probe": False}
+    with pytest.raises(CaptureError) as ei:
+        _run_driver(spec, str(tmp_path))
+    # Must be the rc!=0 branch (names the rc / stderr), NOT the "no parseable
+    # trace" branch that would mis-attribute the failure to the user's print.
+    assert "no parseable trace" not in str(ei.value), (
+        "rc!=0 must short-circuit to the subprocess-failed error, not a parse error"
+    )
+
+
+# ---------------------------------------------------------------------------
+# SAFETY Fix 6: _kill_group must reclaim the process TREE (grandchildren), not
+# just the immediate target. On Windows, CTRL_BREAK must get a grace before the
+# tree is reclaimed; TerminateProcess alone leaks grandchildren.
+# ---------------------------------------------------------------------------
+
+def test_kill_group_gives_ctrl_break_grace_before_kill_on_windows(monkeypatch):
+    """On Windows, _kill_group must give CTRL_BREAK a grace window (proc.wait)
+    before escalating to kill — an immediate proc.kill() leaks grandchildren."""
+    import copyclip.intelligence.capture as _cap_mod
+    from unittest.mock import MagicMock
+    monkeypatch.setattr(_cap_mod.sys, "platform", "win32")
+
+    proc = MagicMock()
+    proc.pid = 4321
+    # First wait times out (grace expires) → escalate to kill.
+    proc.wait.side_effect = [_cap_mod.subprocess.TimeoutExpired("x", 1), None]
+    # Avoid touching real psutil in the unit test.
+    monkeypatch.setattr(_cap_mod, "_reclaim_tree", lambda pid: None)
+
+    _cap_mod._kill_group(proc)
+
+    proc.send_signal.assert_any_call(_cap_mod.signal.CTRL_BREAK_EVENT)
+    assert proc.wait.called, (
+        "_kill_group must wait for a CTRL_BREAK grace before escalating to kill"
+    )

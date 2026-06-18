@@ -1653,6 +1653,17 @@ def run_server(
                             payload["install_hint"] = "pip install copyclip[playground]"
                         self._json(payload, e.http_status)
                         ltrace.close(outcome="error")
+                    except Exception as e:  # noqa: BLE001 — catch-all keeps the wire JSON
+                        # A non-PlaygroundError (OSError from tempfile/open, a
+                        # malformed driver payload in normalize_trace/probe_target,
+                        # etc.) would otherwise escape into BaseHTTPRequestHandler →
+                        # traceback + dropped connection. Emit a stable 500 JSON so
+                        # the client always sees a structured error (PR #177 fix 3).
+                        ltrace.event("launch.error", stage="internal",
+                                     error=f"{type(e).__name__}: {e}")
+                        self._json({"error": "internal_error", "message": str(e)
+                                    or type(e).__name__}, 500)
+                        ltrace.close(outcome="error")
                     finally:
                         # Idempotent: a no-op when ready/error already sealed it; on a
                         # propagating crash it writes the footer and frees the handle.

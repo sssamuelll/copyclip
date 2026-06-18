@@ -343,9 +343,15 @@ class MarimoRunner:
             return
         except subprocess.TimeoutExpired:
             pass
+        # Grace expired → force-reclaim the whole TREE (PR #177 safety fix 6).
+        # On POSIX, killpg(SIGKILL) reaps the session group. On Windows,
+        # TerminateProcess (process.kill) kills ONLY the target — grandchildren a
+        # hung notebook spawned would leak — so walk the live tree with psutil.
         try:
             if sys.platform != "win32":
                 os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            else:
+                _reclaim_tree(process.pid)
             process.kill()
         except Exception:
             pass
@@ -396,6 +402,30 @@ class MarimoRunner:
             except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
                 continue
         return False
+
+
+def _reclaim_tree(pid: int) -> None:
+    """Force-kill a process AND every descendant by pid (PR #177 safety fix 6).
+
+    On Windows, TerminateProcess kills only the target — grandchildren a hung
+    notebook spawned would leak. psutil (already a dep) walks the live tree and
+    kills each member. Best-effort: an already-exited or unsignalable process is
+    skipped."""
+    try:
+        parent = psutil.Process(pid)
+    except Exception:  # noqa: BLE001 — process gone
+        return
+    procs = []
+    try:
+        procs = parent.children(recursive=True)
+    except Exception:  # noqa: BLE001
+        pass
+    procs.append(parent)
+    for p in procs:
+        try:
+            p.kill()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def create_runner() -> MarimoRunner:

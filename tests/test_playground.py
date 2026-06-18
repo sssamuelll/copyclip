@@ -962,6 +962,38 @@ def test_launch_endpoint_rejects_path_traversal():
 
 
 # ---------------------------------------------------------------------------
+# ORCHESTRATION Fix 3: a non-PlaygroundError escaping launch_playground (OSError
+# from tempfile/open, a malformed driver payload, etc.) must surface as a generic
+# 500 JSON — never a dropped connection / raw traceback.
+# ---------------------------------------------------------------------------
+
+
+def test_launch_endpoint_unexpected_exception_returns_500_json():
+    """When the runner raises a NON-PlaygroundError (e.g. OSError from tempfile),
+    the endpoint must emit a stable 500 JSON body, not drop the connection."""
+    mock_runner = Mock()
+    mock_runner.launch.side_effect = OSError("no space left on device")
+    _, port = _start_server_with_runner(mock_runner)
+
+    status, body = _post_json(
+        f"http://127.0.0.1:{port}/api/playground/launch",
+        {
+            "source": "atlas",
+            "function_ref": {
+                "file": "src/copyclip/intelligence/reacquaintance.py",
+                "name": "build_reacquaintance_briefing",
+            },
+            "breadcrumb": "test",
+        },
+    )
+    assert status == 500, f"unexpected exception must yield 500, got {status}"
+    assert body.get("error") == "internal_error", (
+        f"must carry a stable error code; got {body!r}"
+    )
+    assert "message" in body
+
+
+# ---------------------------------------------------------------------------
 # Wave-3: cuaderno source + run mode + list route
 # ---------------------------------------------------------------------------
 

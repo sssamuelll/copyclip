@@ -4,9 +4,21 @@ Run as ``python -m copyclip.intelligence._capture_driver <spec.json>``: it
 imports the user's module, builds the invocation from repr-literal args (the
 MODEL path) OR exec's the user's edited free-text call in the module namespace
 (the USER path, spec §10), installs a BOUNDED ``sys.settrace`` callback, runs
-the call ONCE, and prints the raw trace JSON to stdout. All bounds (MAX_STEPS,
-per-value repr size/time, the dangerous-type skip-list, the wall-clock guard)
-are enforced HERE, inside the frame callback.
+the call ONCE, and writes the raw trace JSON to the ``trace_path`` named in the
+spec (NOT stdout — see below).
+
+stdout demux (PR #177 safety fix 4): the user's real code runs in THIS process,
+so its ``print`` / C ``flush`` / ``atexit`` output would corrupt a stdout-parsed
+trace. We therefore (a) write the trace JSON to a known file, and (b) redirect
+the user's own stdout to stderr while the call runs, so the trace channel is
+never polluted by user output. stdout stays clean for the orchestrator.
+
+Bounds: the in-callback caps (MAX_STEPS, per-value repr size/time, the
+dangerous-type skip-list, the wall-clock guard) are BEST-EFFORT — they only fire
+at trace-event boundaries, so a single blocking C call or a hostile ``__repr__``
+is NOT interrupted by them (PR #177 safety fix 5). The SOLE HARD bound on total
+wall time is the OUTER subprocess timeout in capture._run_driver; these caps
+trim a well-behaved-but-large capture, they do not guarantee termination.
 
 This is our OWN tracer — no third-party tracer is imported (spec §0 decision 1
 dropped json-tracer). The license rule (never copy Online Python Tutor source)
@@ -109,7 +121,14 @@ def _is_opaque_type(obj: object) -> bool:
 
 
 def _safe_repr(obj: object) -> str | None:
-    """repr() under a wall-clock budget; None if it raises or overruns."""
+    """repr() with a BEST-EFFORT time budget; None if it raises or overran.
+
+    PR #177 safety fix 5: the budget is measured AFTER ``repr()`` returns, so a
+    ``__repr__`` that blocks (a network call, a C extension, a sleep) is NOT
+    interrupted here — it runs to completion and is only then discarded as
+    over-budget. The sole HARD bound on total wall time is the OUTER subprocess
+    timeout in capture._run_driver (communicate(timeout=...)); this in-driver cap
+    is best-effort and only trims values whose repr happened to be slow."""
     start = time.monotonic()
     try:
         r = repr(obj)
@@ -421,25 +440,55 @@ def source_lines_for(spec: dict) -> list[dict]:
     return [{"num": start + i, "text": line.rstrip("\n")} for i, line in enumerate(src)]
 
 
+def _emit(payload: dict, trace_path: str | None) -> None:
+    """Write the trace/probe/error payload to the trace channel.
+
+    stdout demux (PR #177 safety fix 4): when ``trace_path`` is set we write the
+    JSON to that file so the user's own stdout (which we redirect to stderr while
+    the call runs) can never corrupt the trace. Back-compat: with no ``trace_path``
+    (older caller / in-process unit test) we fall back to stdout."""
+    blob = json.dumps(payload)
+    if trace_path:
+        with open(trace_path, "w", encoding="utf-8") as fh:
+            fh.write(blob)
+    else:
+        print(blob)
+
+
 def main(argv: list[str]) -> int:
     with open(argv[1], encoding="utf-8") as fh:
         spec = json.loads(fh.read())
+    trace_path = spec.get("trace_path")
     if spec.get("probe"):  # eligibility/source probe — never runs user logic
         out = {"detect": detect_kind(spec), "source_lines": source_lines_for(spec)}
-        print(json.dumps(out))
+        _emit(out, trace_path)
         return 0
-    if spec.get("call_text"):  # USER free-text path (spec §6/§10)
-        raw = _trace_free_text(spec)
-    else:  # MODEL structured-descriptor path
-        callable_, args, kwargs = _build_invocation(spec)
-        raw = trace_call(callable_, args, kwargs)
-    print(json.dumps(raw))
+    # Redirect the user's stdout to stderr for the duration of the run so a user
+    # print / C flush / atexit line stays OFF the trace channel (fix 4). stderr is
+    # already a diagnostics-only sink for us (we never parse it as a trace).
+    saved_stdout = sys.stdout
+    try:
+        sys.stdout = sys.stderr
+        if spec.get("call_text"):  # USER free-text path (spec §6/§10)
+            raw = _trace_free_text(spec)
+        else:  # MODEL structured-descriptor path
+            callable_, args, kwargs = _build_invocation(spec)
+            raw = trace_call(callable_, args, kwargs)
+    finally:
+        sys.stdout = saved_stdout
+    _emit(raw, trace_path)
     return 0
 
 
 if __name__ == "__main__":
+    _trace_path = None
+    try:
+        with open(sys.argv[1], encoding="utf-8") as _fh:
+            _trace_path = json.loads(_fh.read()).get("trace_path")
+    except Exception:  # noqa: BLE001 — argv/spec unreadable; fall back to stdout
+        _trace_path = None
     try:
         sys.exit(main(sys.argv))
     except Exception:  # noqa: BLE001 — surface import/build errors as a clean payload
-        print(json.dumps({"error": traceback.format_exc()}))
+        _emit({"error": traceback.format_exc()}, _trace_path)
         sys.exit(3)

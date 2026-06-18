@@ -44,6 +44,13 @@ REPR_TIME_BUDGET_S = 0.05     # per-value __repr__ time cap
 WALL_CLOCK_BUDGET_S = 8.0     # whole-capture guard
 LARGE_CHILDREN_CAP = 20       # first-N children captured for a large value
 
+# Concurrency ceiling — each capture is a real interpreter subprocess (PR #177
+# safety fix 2). Marimo iframe playgrounds cap at MAX_CONCURRENT_PLAYGROUNDS=5
+# in marimo_runner; the capture pool MUST mirror that so a burst of run-requests
+# cannot fan out an unbounded number of subprocesses. A saturated pool returns
+# CaptureBusyError (503), never blocks the HTTP worker waiting for a permit.
+MAX_CONCURRENT_CAPTURES = 5
+
 
 class InvalidCallDescriptorError(PlaygroundError):
     error_code = "invalid_call_descriptor"
@@ -53,6 +60,16 @@ class InvalidCallDescriptorError(PlaygroundError):
 class CaptureError(PlaygroundError):
     error_code = "capture_failed"
     http_status = 500
+
+
+class CaptureBusyError(PlaygroundError):
+    """The capture pool is saturated (mirrors marimo_runner's playground cap).
+
+    Raised when MAX_CONCURRENT_CAPTURES subprocesses are already in flight so the
+    endpoint can return a stable 503 instead of fanning out unbounded subprocesses
+    (each capture is a real Python interpreter spawn)."""
+    error_code = "capture_busy"
+    http_status = 503
 
 
 def _assert_json_serializable(value: object, where: str) -> None:
@@ -394,6 +411,13 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
+
+# Bounded permit pool for in-flight capture subprocesses (PR #177 safety fix 2).
+# A non-blocking acquire keeps a saturated pool from parking the HTTP worker; the
+# caller raises CaptureBusyError (503) instead. Bounded at MAX_CONCURRENT_CAPTURES
+# to mirror marimo_runner.MAX_CONCURRENT_PLAYGROUNDS.
+_CAPTURE_SEMAPHORE = threading.BoundedSemaphore(MAX_CONCURRENT_CAPTURES)
 
 
 def _spec_for(cd: CallDescriptor, resolved: ResolvedFunction, *, probe: bool) -> dict:
@@ -420,14 +444,44 @@ def _free_text_spec(ft: FreeTextCall, resolved: ResolvedFunction) -> dict:
     }
 
 
+_TRACE_FILE_NAME = "trace.json"
+
+
 def _run_driver(spec: dict, project_root: str) -> dict:
-    """Spawn the driver in the user's env. NEW PROCESS GROUP so a hung capture
-    (and any tree it spawned) dies cleanly: CREATE_NEW_PROCESS_GROUP on Windows /
-    start_new_session on POSIX (spec §10). The wall-clock guard lives in the
-    driver; this is the OUTER backstop in case import itself hangs."""
+    """Spawn the driver in the user's env and return the parsed trace payload.
+
+    NEW PROCESS GROUP so a hung capture (and any tree it spawned) dies cleanly:
+    CREATE_NEW_PROCESS_GROUP on Windows / start_new_session on POSIX (spec §10).
+
+    Timeout discipline (PR #177 safety fix 5): the in-driver MAX_STEPS / WALL_CLOCK
+    / per-value caps are BEST-EFFORT — they only fire at trace-event boundaries, so
+    a single blocking C call or a hostile ``__repr__`` is NOT bounded by them. The
+    SOLE HARD bound on total wall time is THIS function's
+    ``communicate(timeout=WALL_CLOCK_BUDGET_S + 4.0)`` outer subprocess timeout: on
+    overrun we reclaim the whole process tree and raise CaptureError.
+
+    stdout demux (PR #177 safety fix 4): the user's real code shares the
+    subprocess's stdout with us, so a user ``print`` / C flush / atexit line would
+    corrupt a stdout-parsed trace. The driver instead writes the trace JSON to a
+    KNOWN file (``trace.json`` in the spec temp dir) and redirects the user's own
+    stdout to stderr; we read the trace from that file and never parse stdout. When
+    the subprocess exits non-zero we do NOT attempt any parse — a crash surfaces as
+    a clean subprocess-failed CaptureError, not a wrong-cause parse error.
+
+    Concurrency (PR #177 safety fix 2): a non-blocking semaphore acquire bounds the
+    number of in-flight captures to MAX_CONCURRENT_CAPTURES; a saturated pool raises
+    CaptureBusyError (503) rather than blocking the HTTP worker or fanning out.
+    """
+    if not _CAPTURE_SEMAPHORE.acquire(blocking=False):
+        raise CaptureBusyError(
+            f"max {MAX_CONCURRENT_CAPTURES} captures already running; "
+            "wait for one to finish before launching another"
+        )
     td = tempfile.mkdtemp(prefix="copyclip-capture-")
     try:
         spec_path = os.path.join(td, "spec.json")
+        trace_path = os.path.join(td, _TRACE_FILE_NAME)
+        spec = {**spec, "trace_path": trace_path}
         with open(spec_path, "w", encoding="utf-8") as fh:
             json.dump(spec, fh)
         cmd = [sys.executable, "-m", "copyclip.intelligence._capture_driver", spec_path]
@@ -452,38 +506,100 @@ def _run_driver(spec: dict, project_root: str) -> dict:
             # grandchild (e.g. a spawned subprocess the user's code started)
             # cannot hang the HTTP worker forever (spec §10 process-group kill).
             try:
-                out, err = proc.communicate(timeout=2.0)
+                proc.communicate(timeout=2.0)
             except subprocess.TimeoutExpired:
-                out, err = "", ""
+                pass
             raise CaptureError("capture exceeded the wall-clock budget and was killed")
-        if proc.returncode != 0 and not out.strip():
-            raise CaptureError(f"capture subprocess failed (rc={proc.returncode}): {err[-500:]}")
+        # A non-zero rc is an infra/crash failure: do NOT try to parse anything as a
+        # trace (the user's stdout is NOT the trace channel — fix 4). Surface the rc
+        # and a stderr tail directly so the cause is honest.
+        if proc.returncode != 0:
+            raise CaptureError(
+                f"capture subprocess failed (rc={proc.returncode}): {err[-500:]}")
+        # Trace lives in a known file, never stdout. A missing/empty file means the
+        # driver produced nothing parseable (distinct from a crash above).
         try:
-            payload = json.loads(out.strip().splitlines()[-1]) if out.strip() else {}
+            with open(trace_path, encoding="utf-8") as fh:
+                raw = fh.read()
+        except OSError as exc:
+            raise CaptureError(
+                f"capture produced no trace file: {exc}; stderr={err[-300:]}")
+        try:
+            payload = json.loads(raw) if raw.strip() else {}
         except json.JSONDecodeError as exc:
-            raise CaptureError(f"capture produced no parseable trace: {exc}; stderr={err[-300:]}")
+            raise CaptureError(
+                f"capture produced no parseable trace: {exc}; stderr={err[-300:]}")
         if "error" in payload:
             raise CaptureError(f"capture driver error: {payload['error'][-500:]}")
         return payload
     finally:
         shutil.rmtree(td, ignore_errors=True)
+        _CAPTURE_SEMAPHORE.release()
+
+
+# Short grace between the cooperative CTRL_BREAK / SIGTERM signal and the
+# forced tree reclaim, so a child that handles the signal can exit cleanly.
+_KILL_GRACE_S = 1.5
+
+
+def _reclaim_tree(pid: int) -> None:
+    """Force-kill a process AND every descendant by pid (PR #177 safety fix 6).
+
+    On Windows, TerminateProcess (proc.kill) kills only the target — grandchildren
+    a hung capture spawned would leak. psutil (already a marimo_runner dep) walks
+    the live tree and kills each member, so a spawned subprocess the user's code
+    started is reclaimed too. Best-effort: a process that already exited or that we
+    cannot signal is skipped."""
+    try:
+        import psutil  # local import — only needed on the kill path
+        parent = psutil.Process(pid)
+    except Exception:  # noqa: BLE001 — process gone / psutil unavailable
+        return
+    procs = []
+    try:
+        procs = parent.children(recursive=True)
+    except Exception:  # noqa: BLE001
+        pass
+    procs.append(parent)
+    for p in procs:
+        try:
+            p.kill()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _kill_group(proc: subprocess.Popen) -> None:
-    """Reclaim the whole process group (spec §10). Uses signal.CTRL_BREAK_EVENT
-    on Windows (NOT the non-existent subprocess.signal.CTRL_BREAK_EVENT) and
-    os.killpg on POSIX, falling back to proc.kill()."""
+    """Reclaim the whole process TREE (spec §10 + PR #177 safety fix 6).
+
+    First send the cooperative group signal — CTRL_BREAK_EVENT on Windows (NOT the
+    non-existent subprocess.signal.CTRL_BREAK_EVENT), SIGTERM to the group on POSIX
+    — then give it a short grace (proc.wait) so a child that handles the signal can
+    exit on its own. On overrun we reclaim the tree: psutil children().kill() on
+    Windows (TerminateProcess alone leaks grandchildren), os.killpg(SIGKILL) on
+    POSIX. proc.kill() is the final fallback."""
     try:
         if sys.platform == "win32":
             proc.send_signal(signal.CTRL_BREAK_EVENT)
-            proc.kill()
+        else:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        proc.wait(timeout=_KILL_GRACE_S)
+        return  # exited within the grace window — nothing left to reclaim
+    except Exception:  # noqa: BLE001 — TimeoutExpired or a non-waitable mock
+        pass
+    try:
+        if sys.platform == "win32":
+            _reclaim_tree(proc.pid)
         else:
             os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
     except Exception:  # noqa: BLE001
-        try:
-            proc.kill()
-        except Exception:  # noqa: BLE001
-            pass
+        pass
+    try:
+        proc.kill()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def resolved_to_ref(resolved: ResolvedFunction) -> FunctionRef:

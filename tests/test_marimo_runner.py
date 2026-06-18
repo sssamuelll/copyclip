@@ -770,6 +770,27 @@ def test_best_effort_kill_uses_process_group_on_windows(monkeypatch):
     proc.send_signal.assert_any_call(signal.CTRL_BREAK_EVENT)
 
 
+def test_best_effort_kill_reclaims_tree_on_windows_after_grace(monkeypatch):
+    """PR #177 safety fix 6: on Windows, when the CTRL_BREAK + terminate grace
+    expires, _best_effort_kill must reclaim the whole TREE (psutil children) — not
+    just TerminateProcess the target, which leaks grandchildren."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    reclaimed = {"pid": None}
+    monkeypatch.setattr(
+        "copyclip.intelligence.marimo_runner._reclaim_tree",
+        lambda pid: reclaimed.__setitem__("pid", pid),
+    )
+    proc = MagicMock()
+    proc.poll.return_value = None
+    proc.pid = 7777
+    # First wait (terminate grace) times out → escalate to tree reclaim + kill.
+    proc.wait.side_effect = [__import__("subprocess").TimeoutExpired("x", 1), None]
+    MarimoRunner()._best_effort_kill(proc)
+    assert reclaimed["pid"] == 7777, (
+        "after the grace expires, the whole process tree must be reclaimed on Windows"
+    )
+
+
 def test_popen_sets_process_group_flag_for_platform(monkeypatch, tmp_path):
     """subprocess.Popen must receive the platform-correct process-group flag so
     that _best_effort_kill can signal the whole process tree.

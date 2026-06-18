@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ast
 import json
+import os
 import re
 import sqlite3
 import time
@@ -143,9 +145,68 @@ def _has_playground(emitted: list[Block]) -> bool:
     return False
 
 
+def _floor_target_arity(resolved, project_root: Optional[str]) -> Optional[int]:
+    """Best-effort: count the target def's positional/keyword params (excluding
+    ``self``/``cls``) by reading + AST-parsing the resolved source. Returns the
+    arity, or None when the source can't be read/parsed (arity unknown).
+
+    Used by the doomed-floor guard (PR #177 fix 7): a bare floor builds ``name()``
+    with no args, so an arity>0 target would TypeError. We only have file +
+    line_start in the symbols table — no signature column — so we read the source."""
+    if not project_root or not resolved.file or not resolved.line_start:
+        return None
+    path = os.path.join(project_root, resolved.file)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            src = fh.read()
+        tree = ast.parse(src)
+    except (OSError, SyntaxError, ValueError):
+        return None
+    best = None
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.name != resolved.name:
+            continue
+        # Prefer the def whose line matches the resolved line_start (handles a name
+        # that appears as both a method and a module function in the same file).
+        if best is None or node.lineno == resolved.line_start:
+            a = node.args
+            params = list(a.posonlyargs) + list(a.args) + list(a.kwonlyargs)
+            names = [p.arg for p in params]
+            is_method = resolved.kind == "method" or bool(resolved.parent_class)
+            if is_method and names and names[0] in ("self", "cls"):
+                names = names[1:]
+            # Params WITHOUT a default are the ones a bare name() call would miss.
+            n_required = len(names) - len(a.defaults) - len(a.kw_defaults or [])
+            best = max(0, n_required)
+            if node.lineno == resolved.line_start:
+                break
+    return best
+
+
+def _doomed_floor_reason(resolved, project_root: Optional[str]) -> Optional[str]:
+    """Return why a BARE ``name()`` floor for ``resolved`` is doomed, or None.
+
+    PR #177 fix 7: the floor proposes ``call={function_ref}`` with no args/ctor →
+    the fold renders ``name()``. For a method-without-inferable-ctor or an arity>0
+    function that would TypeError / fall back at launch, so we decline the bare
+    FLOOR (the model-proposed-call path with real args is unaffected — this only
+    guards the no-args fallback)."""
+    if resolved.kind == "method" or resolved.parent_class:
+        return ("method needs constructor arguments the bare floor cannot infer "
+                "(name() would fail)")
+    arity = _floor_target_arity(resolved, project_root)
+    if arity is not None and arity > 0:
+        return (f"target requires {arity} argument(s) the bare floor cannot supply "
+                "(name() would fail)")
+    return None
+
+
 def _construct_playground_floor(question: str, conn: Optional[sqlite3.Connection],
                                 project_id: Optional[int], ledger: Optional[ReadLedger],
-                                emitted: list[Block]) -> tuple[Optional[Block], Optional[str]]:
+                                emitted: list[Block],
+                                project_root: Optional[str] = None) -> tuple[Optional[Block], Optional[str]]:
     """Build the playground Block for a run-request from a resolved symbol, or
     (None, reason) when nothing resolves (then the honest off_target stands)."""
     if conn is None or project_id is None:
@@ -158,6 +219,11 @@ def _construct_playground_floor(question: str, conn: Optional[sqlite3.Connection
                                      _candidate_symbol_names(question), ledger)
     if resolved is None:
         return None, "no candidate symbol resolved (unmatched or ambiguous across files)"
+    # Don't propose a bare floor we KNOW is doomed (PR #177 fix 7): a
+    # method-without-ctor or an arity>0 function would render `name()` and fail.
+    doomed = _doomed_floor_reason(resolved, project_root)
+    if doomed is not None:
+        return None, doomed
     fr: dict[str, Any] = {"file": resolved.file, "name": resolved.name}
     if resolved.line_start is not None:
         fr["line"] = resolved.line_start
@@ -197,7 +263,8 @@ def _floor_verdict_dict(prior_status: str) -> dict[str, Any]:
 
 def _floored_frame(frame_dict: dict[str, Any], question: str,
                    conn: Optional[sqlite3.Connection], project_id: Optional[int],
-                   ledger: Optional[ReadLedger], trace: Any = NULL_TRACE) -> dict[str, Any]:
+                   ledger: Optional[ReadLedger], trace: Any = NULL_TRACE,
+                   project_root: Optional[str] = None) -> dict[str, Any]:
     """Apply the playground floor to a sealed terminal frame: a run-request that
     would seal `off_target` (prose, not a runnable artifact) or `fallback` (no
     answer at all) is upgraded to an `answer` carrying a system-constructed
@@ -223,7 +290,8 @@ def _floored_frame(frame_dict: dict[str, Any], question: str,
         return _seal(question, blocks, FRAME_STATUS_ANSWER, _floor_verdict_dict(status))
     # fallback's only block is a system 'couldn't finish' message — drop it.
     base: list[Block] = [] if status == FRAME_STATUS_FALLBACK else blocks
-    floor, decline = _construct_playground_floor(question, conn, project_id, ledger, base)
+    floor, decline = _construct_playground_floor(question, conn, project_id, ledger, base,
+                                                 project_root=project_root)
     if floor is None:
         trace.event("floor", attempted=True, reclassified=False, symbol=None,
                     decline_reason=decline)
@@ -530,7 +598,8 @@ def iter_compose_events(
                            "frame": _floored_frame(
                                _seal(question, emitted, _judge_status(jv),
                                      judge_verdict_dict(jv)),
-                               question, conn, project_id, ledger, trace=trace)}
+                               question, conn, project_id, ledger, trace=trace,
+                               project_root=project_root)}
                     return
                 yield {"type": "frame",
                        "frame": _seal(question, emitted, FRAME_STATUS_ANSWER,
@@ -541,7 +610,8 @@ def iter_compose_events(
                        "frame": _floored_frame(
                            frame_to_dict(
                                _fallback_frame(question, "the model produced no answer blocks")),
-                           question, conn, project_id, ledger, trace=trace)}
+                           question, conn, project_id, ledger, trace=trace,
+                           project_root=project_root)}
             return
 
         # Continue: ack every tool_use block. Dispatch read tools (with events);
@@ -632,12 +702,14 @@ def iter_compose_events(
         yield {"type": "frame",
                "frame": _floored_frame(
                    _sealed_frame(question, emitted, ledger, judge=judge, trace=trace),
-                   question, conn, project_id, ledger, trace=trace)}
+                   question, conn, project_id, ledger, trace=trace,
+                   project_root=project_root)}
     else:
         yield {"type": "frame",
                "frame": _floored_frame(
                    frame_to_dict(_fallback_frame(question, "tool-call budget exhausted")),
-                   question, conn, project_id, ledger, trace=trace)}
+                   question, conn, project_id, ledger, trace=trace,
+                   project_root=project_root)}
 
 
 def compose_frame(

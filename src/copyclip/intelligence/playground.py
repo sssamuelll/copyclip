@@ -536,7 +536,6 @@ def launch_playground(
         FreeTextCall,
         StepThroughResponse,
         FallbackResponse,
-        eligibility_reason,
         run_capture,
         run_free_text_capture,
         probe_target,
@@ -563,11 +562,12 @@ def launch_playground(
                 trace.event("launch.error", stage="call_text", error=str(exc))
                 raise
             detect, source_lines = probe_target(resolved, project_root=project_root)
-            # The free-text path declines the same un-representable targets as the
-            # eligibility gate EXCEPT the method-ctor check (the user types the
-            # whole call, so the ctor is theirs to supply): async / generator /
-            # decorated. A decorated target anchors on the wrapper, not the body.
-            reason = _free_text_decline_reason(detect)
+            # SAME eligibility gate as the structured path (PR #177 fix 1): async /
+            # generator / decorated decline identically. The method-without-ctor
+            # check does NOT fire here because the user types the WHOLE call (ctor
+            # included), which the synthetic descriptor records as ctor-supplied.
+            cd = _free_text_descriptor(req.function_ref, resolved)
+            reason = _eligibility_gate(cd, resolved, detect)
             if reason is not None:
                 trace.event("launch.capture", outcome="fallback", reason=reason)
                 return _cuaderno_fallback(req, project_root, resolved, runner, reason, trace)
@@ -586,15 +586,15 @@ def launch_playground(
                 trace.event("launch.error", stage="descriptor", error=str(exc))
                 raise
             # Cheap ctor eligibility short-circuit: method with no proposed ctor
-            # declines without any subprocess spawn. Defer probe until this passes.
+            # declines without any subprocess spawn (the probe is deferred until
+            # this passes). This is the SAME method-ctor rule eligibility_reason
+            # enforces below — checked early here only to skip a doomed probe.
             if (resolved.kind == "method" or resolved.parent_class) and cd.ctor is None:
                 reason = "this method needs constructor arguments the example did not supply"
                 trace.event("launch.capture", outcome="fallback", reason=reason)
                 return _cuaderno_fallback(req, project_root, resolved, runner, reason, trace)
             detect, source_lines = probe_target(resolved, project_root=project_root)
-            reason = eligibility_reason(cd, resolved, is_async=detect["is_async"],
-                                        is_generator=detect["is_generator"],
-                                        is_decorated=detect.get("is_decorated", False))
+            reason = _eligibility_gate(cd, resolved, detect)
             if reason is not None:
                 trace.event("launch.capture", outcome="fallback", reason=reason)
                 return _cuaderno_fallback(req, project_root, resolved, runner, reason, trace)
@@ -662,19 +662,35 @@ def _launch_marimo(
     )
 
 
-def _free_text_decline_reason(detect: dict) -> str | None:
-    """The free-text path's decline check (PR #177 fix 2): async / generator /
-    decorated are un-representable on a linear scrubber or un-anchorable; the
-    method-ctor gate does NOT apply here because the user types the whole call.
-    Returns the honest reason copy, or None if the target can be stepped."""
-    if detect.get("is_async"):
-        return "async functions step through as one frame; using the input box instead"
-    if detect.get("is_generator"):
-        return "generator functions step through as one frame; using the input box instead"
-    if detect.get("is_decorated"):
-        return ("this function is decorated, so the step-through can't anchor on its "
-                "body; using the input box instead")
-    return None
+def _free_text_descriptor(function_ref: "FunctionRef", resolved: ResolvedFunction):
+    """Synthesize a CallDescriptor for the free-text (USER) path so it routes
+    through the SAME eligibility gate as the model path (PR #177 fix 1).
+
+    The user types the WHOLE call expression — constructor included — so a method
+    target's ctor IS supplied (by the text). We record that as a non-None ``ctor``
+    so eligibility_reason's method-without-ctor branch does NOT fire, while every
+    other check (async / generator / decorated) runs identically to the model
+    path. For a plain function the ctor stays None (no method-ctor branch reached).
+    """
+    from .capture import CallDescriptor
+    is_method = resolved.kind == "method" or bool(resolved.parent_class)
+    ctor = {"args": [], "kwargs": {}} if is_method else None
+    return CallDescriptor(function_ref=function_ref, ctor=ctor)
+
+
+def _eligibility_gate(cd, resolved: ResolvedFunction, detect: dict) -> str | None:
+    """THE single eligibility gate both dispatch paths share (PR #177 fix 1).
+
+    Routes through ``eligibility_reason`` so async / generator / decorated /
+    method-without-ctor all decline with the SAME honest copy regardless of path.
+    Returns the decline reason, or None when the target can be stepped."""
+    from .capture import eligibility_reason
+    return eligibility_reason(
+        cd, resolved,
+        is_async=detect.get("is_async", False),
+        is_generator=detect.get("is_generator", False),
+        is_decorated=detect.get("is_decorated", False),
+    )
 
 
 def _cuaderno_fallback(
