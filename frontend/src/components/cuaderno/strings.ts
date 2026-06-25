@@ -63,6 +63,8 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     playground_spawn_error_body: "The playground didn't start. Nothing ran — your code wasn't touched.",
     playground_try_again: 'Try again',
     playground_complete_call: "Complete the call's arguments before stepping through.",
+    playground_chip_tests: 'from a test',
+    playground_chip_manual: 'complete the call',
   },
   es: {
     answercheck_prompt: '¿esto responde tu pregunta?',
@@ -124,6 +126,8 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     playground_spawn_error_body: 'El playground no arrancó. Nada corrió — tu código no se tocó.',
     playground_try_again: 'Reintentar',
     playground_complete_call: 'Completa los argumentos de la llamada antes de recorrer.',
+    playground_chip_tests: 'args de un test',
+    playground_chip_manual: 'completa la llamada',
   },
 }
 

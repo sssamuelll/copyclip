@@ -8,10 +8,11 @@ type Props = {
   onConfirm: (callText: string, dirty: boolean) => void
   onCancel: () => void
   needsArgs?: boolean             // floor widget: open directly into editing with a completion hint
+  argSource?: 'tests' | 'manual'  // provenance chip: trustworthy test-lifted args vs manual template
   lang?: string | null
 }
 
-export function PreviewCall({ funcName, initialCall, onConfirm, onCancel, needsArgs, lang }: Props) {
+export function PreviewCall({ funcName, initialCall, onConfirm, onCancel, needsArgs, argSource, lang }: Props) {
   // needs_args widgets open directly into edit mode so the user can complete the call
   const [editing, setEditing] = useState(needsArgs === true)
   const [callText, setCallText] = useState(initialCall)
@@ -35,6 +36,14 @@ export function PreviewCall({ funcName, initialCall, onConfirm, onCancel, needsA
       <div style={{ ...s('display:flex;flex-direction:column;padding:18px 16px 13px;'), height: 'var(--stepper-preview-h)' }}>
         <div style={s('flex:1;display:flex;flex-direction:column;justify-content:center;')}>
           <div style={s('font-family:var(--font-body);font-size:15px;color:var(--ink-2);margin-bottom:13px;')}>{t('playground_preview_lead', lang)}</div>
+          {argSource ? (
+            <div
+              data-testid="arg-source-chip"
+              style={s('display:inline-flex;align-self:flex-start;align-items:baseline;gap:6px;font-family:var(--font-mono);font-size:12.5px;color:var(--accent-ink);background:var(--accent-soft);border:1px solid var(--accent-line);padding:2px 8px 3px;border-radius:999px;letter-spacing:-0.01em;margin-bottom:10px;')}
+            >
+              {t(argSource === 'tests' ? 'playground_chip_tests' : 'playground_chip_manual', lang)}
+            </div>
+          ) : null}
           {needsArgs ? (
             <div
               data-testid="needs-args-hint"
