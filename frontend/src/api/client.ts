@@ -1,4 +1,4 @@
-import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, RiskTrends, AnalyzeJob, ArchaeologyResponse, StoryTimelineResponse, AdvisorCheckResponse, DecisionLinkItem, CognitiveLoadResponse, ModuleSourceResponse, ModuleSymbolsResponse, TreeNode, ReacquaintanceResponse, HandoffPacket, HandoffPacketListResponse, HandoffPacketState, HandoffReviewSummary, DebtBreakdown, RemediationPlan, DebtScopeKind, PlaygroundLaunchRequest, PlaygroundLaunchResponse, PlaygroundStatus } from '../types/api'
+import type { ArchEdge, ArchNode, ChangeItem, DecisionHistoryItem, DecisionItem, IssueItem, Overview, RiskItem, HeatmapItem, FileItem, ContextPayload, ImpactResult, RiskTrends, AnalyzeJob, ArchaeologyResponse, StoryTimelineResponse, AdvisorCheckResponse, DecisionLinkItem, CognitiveLoadResponse, ModuleSourceResponse, ModuleSymbolsResponse, TreeNode, ReacquaintanceResponse, HandoffPacket, HandoffPacketListResponse, HandoffPacketState, HandoffReviewSummary, DebtBreakdown, RemediationPlan, DebtScopeKind, PlaygroundLaunchRequest, PlaygroundLaunchResponse, PlaygroundLaunchResult, PlaygroundStatus } from '../types/api'
 
 // --- Debugging Suite Helpers ---
 const logAPI = (method: string, url: string, start: number, payload?: any, response?: any, error?: any) => {
@@ -47,13 +47,14 @@ async function getJSON<T>(url: string): Promise<T> {
   }
 }
 
-async function postJSON<T>(url: string, data: any): Promise<T> {
+async function postJSON<T>(url: string, data: any, signal?: AbortSignal): Promise<T> {
   const start = Date.now()
   try {
     const r = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
+      body: JSON.stringify(data),
+      signal,
     })
     const resData = await readJSONSafely(r)
     if (!r.ok) throw toAPIError(resData, r.status)
@@ -177,8 +178,8 @@ export const api = {
   assembleContext: (p: ContextPayload) => postJSON<{ context: string; warnings: string[] }>('/api/assemble-context', p),
   moduleSource: (module: string) => getJSON<ModuleSourceResponse>(`/api/module/source?module=${encodeURIComponent(module)}`),
   moduleSymbols: (module: string) => getJSON<ModuleSymbolsResponse>(`/api/module/symbols?module=${encodeURIComponent(module)}`),
-  launchPlayground: (req: PlaygroundLaunchRequest) =>
-    postJSON<PlaygroundLaunchResponse>('/api/playground/launch', req),
+  launchPlayground: (req: PlaygroundLaunchRequest, signal?: AbortSignal) =>
+    postJSON<PlaygroundLaunchResult>('/api/playground/launch', req, signal),
   closePlayground: (id: string) =>
     deleteJSON<{ ok: boolean }>(`/api/playground/${encodeURIComponent(id)}`),
   playgroundStatus: (id: string) =>

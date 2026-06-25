@@ -24,6 +24,7 @@ from __future__ import annotations
 import collections
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -163,11 +164,17 @@ class MarimoRunner:
                 "--headless",
                 "--no-token",
             ]
+            popen_kwargs = {}
+            if sys.platform == "win32":
+                popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            else:
+                popen_kwargs["start_new_session"] = True
             try:
                 process = subprocess.Popen(
                     cmd,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.PIPE,
+                    **popen_kwargs,
                 )
             except FileNotFoundError as exc:
                 # sys.executable went away; treat as marimo-unavailable.
@@ -318,6 +325,15 @@ class MarimoRunner:
     def _best_effort_kill(self, process: subprocess.Popen) -> None:
         if process.poll() is not None:
             return
+        # Reclaim the whole process tree first (spec §10): the child was spawned
+        # in its own group, so a single signal reaps any grandchildren too.
+        try:
+            if sys.platform == "win32":
+                process.send_signal(signal.CTRL_BREAK_EVENT)
+            else:
+                _killpg_unless_self(process.pid, signal.SIGTERM)
+        except Exception:
+            pass
         try:
             process.terminate()
         except Exception:
@@ -327,7 +343,15 @@ class MarimoRunner:
             return
         except subprocess.TimeoutExpired:
             pass
+        # Grace expired → force-reclaim the whole TREE (PR #177 safety fix 6).
+        # On POSIX, killpg(SIGKILL) reaps the session group. On Windows,
+        # TerminateProcess (process.kill) kills ONLY the target — grandchildren a
+        # hung notebook spawned would leak — so walk the live tree with psutil.
         try:
+            if sys.platform != "win32":
+                _killpg_unless_self(process.pid, signal.SIGKILL)
+            else:
+                _reclaim_tree(process.pid)
             process.kill()
         except Exception:
             pass
@@ -378,6 +402,42 @@ class MarimoRunner:
             except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
                 continue
         return False
+
+
+def _killpg_unless_self(pid: int, sig: int) -> None:
+    """Signal a process's group — but NEVER our OWN process group, which would
+    SIGKILL the server/test process itself. A child spawned with
+    ``start_new_session`` is its own group leader (pgid != ours), so this proceeds
+    normally; a child that (mis)shares our group — e.g. a faked process whose
+    ``pid`` is ``0``, where ``os.getpgid(0)`` resolves to OUR group — is left to
+    ``proc.kill()`` instead of taking the whole runner down with it."""
+    pgid = os.getpgid(pid)
+    if pgid != os.getpgid(0):
+        os.killpg(pgid, sig)
+
+
+def _reclaim_tree(pid: int) -> None:
+    """Force-kill a process AND every descendant by pid (PR #177 safety fix 6).
+
+    On Windows, TerminateProcess kills only the target — grandchildren a hung
+    notebook spawned would leak. psutil (already a dep) walks the live tree and
+    kills each member. Best-effort: an already-exited or unsignalable process is
+    skipped."""
+    try:
+        parent = psutil.Process(pid)
+    except Exception:  # noqa: BLE001 — process gone
+        return
+    procs = []
+    try:
+        procs = parent.children(recursive=True)
+    except Exception:  # noqa: BLE001
+        pass
+    procs.append(parent)
+    for p in procs:
+        try:
+            p.kill()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def create_runner() -> MarimoRunner:

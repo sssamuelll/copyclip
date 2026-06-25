@@ -632,18 +632,67 @@ export type FunctionRef = {
   qualname?: string
 }
 
+/** The model's proposed call descriptor (args/kwargs sent as JSON-safe literals). */
+export type CallDescriptor = {
+  function_ref: FunctionRef
+  args?: unknown[]
+  kwargs?: Record<string, unknown>
+  ctor?: { args?: unknown[]; kwargs?: Record<string, unknown> }
+}
+
 export type PlaygroundLaunchRequest = {
   source: PlaygroundSource
   function_ref: FunctionRef
   deps_hint?: string[]
   suggested_inputs?: unknown[]
   breadcrumb: string
+  call?: CallDescriptor              // the model's structured proposal (spec §4)
+  call_text?: string                 // the user's edited free-text call (spec §6/§10, D2)
 }
 
 export type PlaygroundLaunchResponse = {
   playground_id: string
   iframe_url: string
 }
+
+// --- Cuaderno step-through (capture↔render seam, design spec §9) ---------
+
+export type Var = {
+  name: string
+  kind: 'scalar' | 'object' | 'opaque' | 'large'
+  text?: string                       // scalar/object: capped repr
+  label?: string                      // opaque: type name only (never repr'd)
+  summary?: string                    // large: "dict" | "DataFrame" | "list" | ...
+  meta?: string                       // large: "3 keys" | "1000×12" | "5,000 items"
+  children?: { name: string; text: string }[]  // large: first-N expand entries
+}
+
+export type Step = {
+  line: number
+  event: 'call' | 'line' | 'return' | 'raise'
+  changed: string[]                   // var names that moved this step
+  scope: Var[]                        // ALL in-scope vars, stable insertion order
+  raised?: { type: string; message: string }  // only on the final step if it threw
+}
+
+export type StepThroughResponse = {
+  kind: 'trace'
+  trace: Step[]
+  source_lines: { num: number; text: string }[]
+  func_name: string
+  file_line: string                   // e.g. "intelligence/symbols.py:255"
+  truncated: boolean
+  truncated_reason?: 'steps' | 'time' | null
+}
+
+export type FallbackResponse = {
+  kind: 'fallback'
+  reason: string
+  iframe_url: string
+  playground_id: string               // authoritative id — use directly, do NOT re-derive from iframe_url
+}
+
+export type PlaygroundLaunchResult = StepThroughResponse | FallbackResponse
 
 export type PlaygroundStatus = 'running' | 'exited' | 'missing'
 
@@ -708,6 +757,9 @@ export type PlaygroundWidgetData = {
   breadcrumb: string
   suggested_inputs?: unknown[]
   citation?: Citation
+  call?: CallDescriptor      // the model's structured proposed invocation
+  call_text?: string         // the model's proposed invocation pre-rendered as source text
+  needs_args?: boolean       // floor widget: call_text is an incomplete template; user must complete before confirming
 }
 
 export type Widget = GraphSubsetWidget | SequenceDiagramWidget | CallersTreeWidget | GraphViewWidget | PlaygroundWidgetData

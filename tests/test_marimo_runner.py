@@ -749,3 +749,173 @@ def test_launch_emits_launch_spawn_event(monkeypatch, tmp_path):
     assert "marimo" in payload["cmd"]
 
     r.kill_all()
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: Task 6 — process-group kill in _best_effort_kill
+# ---------------------------------------------------------------------------
+
+
+import signal
+import sys
+from unittest.mock import MagicMock
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only: signal.CTRL_BREAK_EVENT does not exist on POSIX")
+def test_best_effort_kill_uses_process_group_on_windows(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    proc = MagicMock()
+    proc.poll.return_value = None  # still alive
+    proc.wait.side_effect = [__import__("subprocess").TimeoutExpired("x", 1), None]
+    MarimoRunner()._best_effort_kill(proc)
+    proc.send_signal.assert_any_call(signal.CTRL_BREAK_EVENT)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only: signal.CTRL_BREAK_EVENT does not exist on POSIX")
+def test_best_effort_kill_reclaims_tree_on_windows_after_grace(monkeypatch):
+    """PR #177 safety fix 6: on Windows, when the CTRL_BREAK + terminate grace
+    expires, _best_effort_kill must reclaim the whole TREE (psutil children) — not
+    just TerminateProcess the target, which leaks grandchildren."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    reclaimed = {"pid": None}
+    monkeypatch.setattr(
+        "copyclip.intelligence.marimo_runner._reclaim_tree",
+        lambda pid: reclaimed.__setitem__("pid", pid),
+    )
+    proc = MagicMock()
+    proc.poll.return_value = None
+    proc.pid = 7777
+    # First wait (terminate grace) times out → escalate to tree reclaim + kill.
+    proc.wait.side_effect = [__import__("subprocess").TimeoutExpired("x", 1), None]
+    MarimoRunner()._best_effort_kill(proc)
+    assert reclaimed["pid"] == 7777, (
+        "after the grace expires, the whole process tree must be reclaimed on Windows"
+    )
+
+
+def test_popen_sets_process_group_flag_for_platform(monkeypatch, tmp_path):
+    """subprocess.Popen must receive the platform-correct process-group flag so
+    that _best_effort_kill can signal the whole process tree.
+
+    On Windows: creationflags must include CREATE_NEW_PROCESS_GROUP.
+    On POSIX:   start_new_session must be True.
+
+    Dropping either flag would silently break tree-kill for the current OS, so
+    this test inspects the actual Popen kwargs rather than the high-level kill
+    behaviour.
+    """
+    captured_kwargs: list[dict] = []
+
+    def capturing_popen(args, **kwargs):
+        captured_kwargs.append(dict(kwargs))
+        return _FakeProcess()
+
+    monkeypatch.setattr(
+        "copyclip.intelligence.marimo_runner.subprocess.Popen", capturing_popen
+    )
+    r = MarimoRunner()
+    monkeypatch.setattr(r, "_probe_url", lambda url: True)
+    nb = _make_notebook(tmp_path, "pgflag")
+
+    r.launch(nb)
+
+    assert len(captured_kwargs) == 1, "Expected exactly one Popen call"
+    kwargs = captured_kwargs[0]
+
+    if sys.platform == "win32":
+        assert "creationflags" in kwargs, (
+            "Popen on Windows must pass creationflags for CREATE_NEW_PROCESS_GROUP"
+        )
+        assert kwargs["creationflags"] & subprocess.CREATE_NEW_PROCESS_GROUP, (
+            f"creationflags {kwargs['creationflags']:#x} does not include "
+            f"CREATE_NEW_PROCESS_GROUP ({subprocess.CREATE_NEW_PROCESS_GROUP:#x})"
+        )
+    else:
+        assert kwargs.get("start_new_session") is True, (
+            "Popen on POSIX must pass start_new_session=True; "
+            f"got start_new_session={kwargs.get('start_new_session')!r}"
+        )
+
+    r.kill_all()
+
+
+def test_best_effort_kill_killpg_on_posix(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    killpg_calls: list[tuple[int, object]] = []
+    # getpgid / killpg are POSIX-only; patch them into the os module (raising=False
+    # so the patch works even on Windows where they don't exist).
+    # The child (pid 999) resolves to group 4242; OUR group (getpgid(0)) must be a
+    # DIFFERENT value (1), or the `_killpg_unless_self` guard would (correctly) skip
+    # the kill — see test_best_effort_kill_skips_killpg_when_group_is_self.
+    monkeypatch.setattr(
+        "os.getpgid", lambda pid: 1 if pid == 0 else 4242, raising=False
+    )
+    monkeypatch.setattr(
+        "os.killpg",
+        lambda pgid, sig: killpg_calls.append((pgid, sig)),
+        raising=False,
+    )
+    # signal.SIGKILL is not defined on Windows. Inject it so the production code
+    # branch (os.killpg(..., signal.SIGKILL)) can evaluate without AttributeError
+    # when we are simulating a POSIX environment from a Windows test runner.
+    _SIGKILL = getattr(signal, "SIGKILL", None)
+    if _SIGKILL is None:
+        import enum as _enum
+        _FakeSIGKILL = _enum.IntEnum("Signals", {"SIGKILL": 9})["SIGKILL"]
+        monkeypatch.setattr(signal, "SIGKILL", _FakeSIGKILL, raising=False)
+        _SIGKILL = _FakeSIGKILL
+    proc = MagicMock()
+    proc.poll.return_value = None
+    proc.pid = 999
+    # First wait() times out (grace period expires) → SIGKILL escalation fires.
+    # Second wait() succeeds after the kill.
+    proc.wait.side_effect = [__import__("subprocess").TimeoutExpired("x", 1), None]
+    MarimoRunner()._best_effort_kill(proc)
+    # Both escalation signals must have been sent to the process group.
+    pgids = [pgid for pgid, _sig in killpg_calls]
+    sigs = [sig for _pgid, sig in killpg_calls]
+    assert 4242 in pgids, f"Expected killpg(4242, ...) but got {killpg_calls}"
+    assert signal.SIGTERM in sigs, (
+        f"SIGTERM escalation not sent; killpg calls: {killpg_calls}"
+    )
+    assert _SIGKILL in sigs, (
+        f"SIGKILL escalation not sent after grace-period timeout; "
+        f"killpg calls: {killpg_calls}"
+    )
+
+
+def test_best_effort_kill_skips_killpg_when_group_is_self(monkeypatch):
+    """Regression: a process whose group is OUR OWN group must NEVER be killpg'd.
+
+    The unit tests fake the spawn with a process whose ``pid`` is ``0``; on POSIX
+    ``os.getpgid(0)`` resolves to the *calling* (pytest) process's group, so an
+    unguarded ``os.killpg(os.getpgid(0), SIGKILL)`` would SIGKILL the entire test
+    runner — which silently canceled CI mid-suite. The ``_killpg_unless_self`` guard
+    must detect the self-group and fall through to ``process.kill()`` instead."""
+    monkeypatch.setattr(sys, "platform", "linux")
+    killpg_calls: list[tuple[int, object]] = []
+    # Every pid (including 0) resolves to the SAME group → it IS our group.
+    monkeypatch.setattr("os.getpgid", lambda pid: 7777, raising=False)
+    monkeypatch.setattr(
+        "os.killpg",
+        lambda pgid, sig: killpg_calls.append((pgid, sig)),
+        raising=False,
+    )
+    if getattr(signal, "SIGKILL", None) is None:
+        import enum as _enum
+        monkeypatch.setattr(
+            signal,
+            "SIGKILL",
+            _enum.IntEnum("Signals", {"SIGKILL": 9})["SIGKILL"],
+            raising=False,
+        )
+    proc = MagicMock()
+    proc.poll.return_value = None
+    proc.pid = 0  # the faked-spawn pid that triggered the CI self-kill
+    proc.wait.side_effect = [__import__("subprocess").TimeoutExpired("x", 1), None]
+    MarimoRunner()._best_effort_kill(proc)
+    assert killpg_calls == [], (
+        f"killpg must NOT fire on our own process group, but got {killpg_calls}"
+    )
+    # The escalation still happens — just via the target-only process.kill().
+    proc.kill.assert_called()

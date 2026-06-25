@@ -60,7 +60,9 @@ class Widget:
 
     @staticmethod
     def playground(function_ref: dict, breadcrumb: str,
-                   suggested_inputs: Optional[list] = None) -> "Widget":
+                   suggested_inputs: Optional[list] = None,
+                   call: Optional[dict] = None,
+                   needs_args: Optional[bool] = None) -> "Widget":
         citation: dict[str, Any] = {"kind": "path", "path": function_ref.get("file")}
         if function_ref.get("line") is not None:
             citation["line_start"] = function_ref["line"]
@@ -68,6 +70,10 @@ class Widget:
                              "citation": citation}
         if suggested_inputs is not None:
             d["suggested_inputs"] = suggested_inputs
+        if call is not None:
+            d["call"] = call
+        if needs_args:
+            d["needs_args"] = True
         return Widget(kind="playground", data=d)
 
     def to_dict(self) -> dict[str, Any]:

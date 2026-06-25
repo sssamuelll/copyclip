@@ -207,21 +207,17 @@ def test_flow_diagram_cache_behavior_and_performance():
     root3 = cache.get(filepath, content_v2)
     assert root3 is not root1
 
-    # Benchmark cache hit vs no cache
-    import time
+    # A cache hit returns the SAME parsed object (no re-parse) — the real,
+    # deterministic guarantee of the cache. (This previously asserted
+    # `duration_cache < duration_no_cache`, a sub-millisecond wall-clock
+    # comparison that flaked non-deterministically on loaded CI runners.)
     large_source = "\n".join(
         [f"class Class{i}:\n    def method{i}(self):\n        pass\n" for i in range(1000)]
     )
     cache.cache.clear()
-    start = time.time()
     root = cache.get("large.py", large_source)
-    duration_no_cache = time.time() - start
-
-    start = time.time()
     root_cached = cache.get("large.py", large_source)
-    duration_cache = time.time() - start
-
-    assert duration_cache < duration_no_cache
+    assert root_cached is root
 
 def test_mermaid_output_structure():
     # Create a tree with known structure

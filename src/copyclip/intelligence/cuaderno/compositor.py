@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ast
 import json
+import os
 import re
 import sqlite3
 import time
@@ -13,6 +15,7 @@ from .prompts import (
     WIDGET_RECOVERY_DIRECTIVE_VISUAL, WIDGET_RECOVERY_DIRECTIVE_RUN,
     ALTITUDE_RETRY_DIRECTIVE,
 )
+from .emit_fold import fold_playground_widget
 from .read_ledger import ReadLedger, is_content_bearing_read
 from .trace import NULL_TRACE
 from .quality import assess, cheap_verdict_dict, artifacts_cited, altitude_violation
@@ -99,6 +102,12 @@ _RUN_REQUEST_TERMS = (
     "ejecut", "córre", "corre ", "prueba", "pruéba",
 )
 
+# Spanish-only subset of _RUN_REQUEST_TERMS used for language-branch breadcrumbs.
+# Derived from _RUN_REQUEST_TERMS by excluding the English-only prefixes so the
+# two never drift independently (no hand-maintained copy).
+_EN_ONLY_RUN_TERMS = frozenset({"run ", "runnable", "execute", "executable"})
+_ES_RUN_TERMS = tuple(t for t in _RUN_REQUEST_TERMS if t not in _EN_ONLY_RUN_TERMS)
+
 
 def _is_visual_request(question: str) -> bool:
     q = question.lower()
@@ -171,9 +180,68 @@ def _has_playground(emitted: list[Block]) -> bool:
     return False
 
 
+def _floor_target_arity(resolved, project_root: Optional[str]) -> Optional[int]:
+    """Best-effort: count the target def's positional/keyword params (excluding
+    ``self``/``cls``) by reading + AST-parsing the resolved source. Returns the
+    arity, or None when the source can't be read/parsed (arity unknown).
+
+    Used by the doomed-floor guard (PR #177 fix 7): a bare floor builds ``name()``
+    with no args, so an arity>0 target would TypeError. We only have file +
+    line_start in the symbols table — no signature column — so we read the source."""
+    if not project_root or not resolved.file or not resolved.line_start:
+        return None
+    path = os.path.join(project_root, resolved.file)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            src = fh.read()
+        tree = ast.parse(src)
+    except (OSError, SyntaxError, ValueError):
+        return None
+    best = None
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.name != resolved.name:
+            continue
+        # Prefer the def whose line matches the resolved line_start (handles a name
+        # that appears as both a method and a module function in the same file).
+        if best is None or node.lineno == resolved.line_start:
+            a = node.args
+            params = list(a.posonlyargs) + list(a.args) + list(a.kwonlyargs)
+            names = [p.arg for p in params]
+            is_method = resolved.kind == "method" or bool(resolved.parent_class)
+            if is_method and names and names[0] in ("self", "cls"):
+                names = names[1:]
+            # Params WITHOUT a default are the ones a bare name() call would miss.
+            n_required = len(names) - len(a.defaults) - len(a.kw_defaults or [])
+            best = max(0, n_required)
+            if node.lineno == resolved.line_start:
+                break
+    return best
+
+
+def _doomed_floor_reason(resolved, project_root: Optional[str]) -> Optional[str]:
+    """Return why a BARE ``name()`` floor for ``resolved`` needs user-supplied args,
+    or None when the bare call is self-sufficient.
+
+    Previously used to DECLINE the floor; now drives the ``needs_args`` flag instead
+    so the widget is still emitted as an editable template (the user completes the
+    call in the preview before confirming). The decline path is reserved ONLY for
+    genuinely unresolvable symbols (handled upstream in _resolve_floor_symbol)."""
+    if resolved.kind == "method" or resolved.parent_class:
+        return ("method needs constructor arguments the bare floor cannot infer "
+                "(name() would fail)")
+    arity = _floor_target_arity(resolved, project_root)
+    if arity is not None and arity > 0:
+        return (f"target requires {arity} argument(s) the bare floor cannot supply "
+                "(name() would fail)")
+    return None
+
+
 def _construct_playground_floor(question: str, conn: Optional[sqlite3.Connection],
                                 project_id: Optional[int], ledger: Optional[ReadLedger],
-                                emitted: list[Block]) -> tuple[Optional[Block], Optional[str]]:
+                                emitted: list[Block],
+                                project_root: Optional[str] = None) -> tuple[Optional[Block], Optional[str]]:
     """Build the playground Block for a run-request from a resolved symbol, or
     (None, reason) when nothing resolves (then the honest off_target stands)."""
     if conn is None or project_id is None:
@@ -186,15 +254,51 @@ def _construct_playground_floor(question: str, conn: Optional[sqlite3.Connection
                                      _candidate_symbol_names(question), ledger)
     if resolved is None:
         return None, "no candidate symbol resolved (unmatched or ambiguous across files)"
+    # _doomed_floor_reason now drives needs_args (not a decline): a method-without-ctor
+    # or arity>0 function emits a needs_args=True template the user completes in the
+    # editable preview — the decline path is reserved for genuinely unresolvable symbols.
+    doomed_reason = _doomed_floor_reason(resolved, project_root)
+    needs_args = doomed_reason is not None
     fr: dict[str, Any] = {"file": resolved.file, "name": resolved.name}
     if resolved.line_start is not None:
         fr["line"] = resolved.line_start
     if resolved.qualname and resolved.qualname != resolved.name:
         fr["qualname"] = resolved.qualname
     lang = detect_language(question)
-    breadcrumb = (f"Ejecuta {resolved.name} con un ejemplo"
-                  if lang == "es" else f"Run {resolved.name} with an example")
-    block = Block.widget(Widget.playground(function_ref=fr, breadcrumb=breadcrumb).to_dict())
+    _is_es = lang == "es" or any(t in question.lower() for t in _ES_RUN_TERMS)
+    breadcrumb = (f"Recorre {resolved.name} paso a paso"
+                  if _is_es else f"Step through {resolved.name}")
+    # Build the widget data for methods: derive a best-effort class name from the
+    # qualname so fold_playground_widget renders "Class().method()" for call_text.
+    # The ctor is passed at the TOP LEVEL of the widget (matching model emission)
+    # so fold_playground_widget picks it up and folds it into call + call_text.
+    extra_widget_data: dict[str, Any] = {}
+    if resolved.kind == "method" or resolved.parent_class:
+        # Derive the class name from qualname ("ClassName.method") or fall back to
+        # "Object" so call_text gives the user a concrete template to edit.
+        if resolved.qualname and "." in resolved.qualname:
+            class_name = resolved.qualname.split(".")[0]
+        elif resolved.parent_class:
+            class_name = resolved.parent_class
+        else:
+            class_name = "Object"
+        # Embed a synthetic qualname so fold_playground_widget renders "Class().method()".
+        fr = {**fr, "qualname": f"{class_name}.{resolved.name}"}
+        # Pass top-level ctor so the fold picks it up (fold reads w.get("ctor")).
+        extra_widget_data["ctor"] = {"args": [], "kwargs": {}}
+    raw_widget: Widget = Widget.playground(
+        function_ref=fr, breadcrumb=breadcrumb,
+        needs_args=needs_args if needs_args else None,
+    )
+    # Merge extra fields (ctor for methods) into the widget data dict.
+    # We patch the raw dict rather than the dataclass (frozen) to keep it simple.
+    raw_widget_dict = raw_widget.to_dict()
+    raw_widget_dict.update(extra_widget_data)
+    # Apply the emit-boundary fold so the floor widget also gets call_text
+    # (the function name with empty parens for a no-arg floor widget, or
+    # "Class().method()" for a method template).
+    folded_block_dict = fold_playground_widget({"kind": "widget", "widget": raw_widget_dict})
+    block = Block.from_dict(folded_block_dict)
     # Defensive: the floor must meet the same emit-time bar as a model widget.
     reason = validate_widget_payload(block.to_dict(), GraphEvidence())
     if reason is not None:
@@ -219,7 +323,8 @@ def _floor_verdict_dict(prior_status: str) -> dict[str, Any]:
 
 def _floored_frame(frame_dict: dict[str, Any], question: str,
                    conn: Optional[sqlite3.Connection], project_id: Optional[int],
-                   ledger: Optional[ReadLedger], trace: Any = NULL_TRACE) -> dict[str, Any]:
+                   ledger: Optional[ReadLedger], trace: Any = NULL_TRACE,
+                   project_root: Optional[str] = None) -> dict[str, Any]:
     """Apply the playground floor to a sealed terminal frame: a run-request that
     would seal `off_target` (prose, not a runnable artifact) or `fallback` (no
     answer at all) is upgraded to an `answer` carrying a system-constructed
@@ -245,7 +350,8 @@ def _floored_frame(frame_dict: dict[str, Any], question: str,
         return _seal(question, blocks, FRAME_STATUS_ANSWER, _floor_verdict_dict(status))
     # fallback's only block is a system 'couldn't finish' message — drop it.
     base: list[Block] = [] if status == FRAME_STATUS_FALLBACK else blocks
-    floor, decline = _construct_playground_floor(question, conn, project_id, ledger, base)
+    floor, decline = _construct_playground_floor(question, conn, project_id, ledger, base,
+                                                 project_root=project_root)
     if floor is None:
         trace.event("floor", attempted=True, reclassified=False, symbol=None,
                     decline_reason=decline)
@@ -451,6 +557,10 @@ def iter_compose_events(
                     blk = sev.get("block") or {}
                     if blk.get("type") == "tool_use" and blk.get("name") == "emit_block":
                         inp = blk.get("input") or {}
+                        # EMIT BOUNDARY (Critical #1): fold top-level args/kwargs/ctor on
+                        # playground widgets into nested `call` + pre-render `call_text`
+                        # BEFORE validation so widget_checks see the final wire shape.
+                        inp = fold_playground_widget(inp)
                         reason = validate_block_dict(inp)
                         if reason is None:
                             reason = validate_widget_payload(inp, evidence)
@@ -578,7 +688,8 @@ def iter_compose_events(
                            "frame": _floored_frame(
                                _seal(question, emitted, _judge_status(jv),
                                      judge_verdict_dict(jv)),
-                               question, conn, project_id, ledger, trace=trace)}
+                               question, conn, project_id, ledger, trace=trace,
+                               project_root=project_root)}
                     return
                 yield {"type": "frame",
                        "frame": _seal(question, emitted, FRAME_STATUS_ANSWER,
@@ -589,7 +700,8 @@ def iter_compose_events(
                        "frame": _floored_frame(
                            frame_to_dict(
                                _fallback_frame(question, "the model produced no answer blocks")),
-                           question, conn, project_id, ledger, trace=trace)}
+                           question, conn, project_id, ledger, trace=trace,
+                           project_root=project_root)}
             return
 
         # Continue: ack every tool_use block. Dispatch read tools (with events);
@@ -685,12 +797,14 @@ def iter_compose_events(
         yield {"type": "frame",
                "frame": _floored_frame(
                    _sealed_frame(question, emitted, ledger, judge=judge, trace=trace),
-                   question, conn, project_id, ledger, trace=trace)}
+                   question, conn, project_id, ledger, trace=trace,
+                   project_root=project_root)}
     else:
         yield {"type": "frame",
                "frame": _floored_frame(
                    frame_to_dict(_fallback_frame(question, "tool-call budget exhausted")),
-                   question, conn, project_id, ledger, trace=trace)}
+                   question, conn, project_id, ledger, trace=trace,
+                   project_root=project_root)}
 
 
 def compose_frame(

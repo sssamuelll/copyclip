@@ -273,3 +273,173 @@ def test_run_request_blank_fallback_constructs_playground_floor(tmp_path: Path):
     # The 'couldn't finish' fallback message must NOT survive alongside the artifact.
     leads = [b for b in frame["blocks"] if b.get("kind") == "paragraph"]
     assert leads == [], "fallback message must be dropped when the floor delivers the artifact"
+
+
+# ---------------------------------------------------------------------------
+# Task 9: floor emits real call descriptor + breadcrumb rename
+# ---------------------------------------------------------------------------
+
+from copyclip.intelligence.cuaderno.compositor import _construct_playground_floor
+
+
+def test_floor_breadcrumb_is_step_through_spanish(tmp_path: Path):
+    (tmp_path / "README.md").write_text("# analyzer\n", encoding="utf-8")
+    conn = sqlite3.connect(":memory:"); init_schema(conn)
+    pid = _seed_symbol_project(conn)
+    block, reason = _construct_playground_floor(
+        "ejecuta _module_from_relpath", conn, pid, ledger=None, emitted=[],
+        project_root=str(tmp_path))
+    assert reason is None
+    w = block.to_dict()["widget"]
+    assert w["breadcrumb"] == "Recorre _module_from_relpath paso a paso"
+
+
+def test_floor_breadcrumb_is_step_through_english(tmp_path: Path):
+    (tmp_path / "README.md").write_text("# analyzer\n", encoding="utf-8")
+    conn = sqlite3.connect(":memory:"); init_schema(conn)
+    pid = _seed_symbol_project(conn)
+    block, reason = _construct_playground_floor(
+        "run _module_from_relpath", conn, pid, ledger=None, emitted=[],
+        project_root=str(tmp_path))
+    assert reason is None
+    w = block.to_dict()["widget"]
+    assert w["breadcrumb"] == "Step through _module_from_relpath"
+
+
+def test_floor_emits_real_call_descriptor(tmp_path: Path):
+    # spec §6: the widget must carry a REAL call so the frontend renders the
+    # actual invocation, not a fake placeholder. The floor seeds a bare call
+    # (function_ref only) when it has no model-proposed args — the frontend's
+    # editable free-text field then shows `name(...)` from the real ref.
+    (tmp_path / "README.md").write_text("# analyzer\n", encoding="utf-8")
+    conn = sqlite3.connect(":memory:"); init_schema(conn)
+    pid = _seed_symbol_project(conn)
+    block, reason = _construct_playground_floor(
+        "run _module_from_relpath", conn, pid, ledger=None, emitted=[],
+        project_root=str(tmp_path))
+    assert reason is None
+    w = block.to_dict()["widget"]
+    assert w["call"]["function_ref"]["name"] == "_module_from_relpath"
+    assert w["call"]["function_ref"]["file"] == "src/copyclip/intelligence/analyzer.py"
+
+
+# ---------------------------------------------------------------------------
+# ORCHESTRATION Fix 7 (revised): arity>0 / method-without-ctor no longer declines —
+# the floor emits a needs_args=True template the user completes in the editable
+# preview before confirming. needs_args replaces the old decline so the user always
+# sees a widget (the off-target prose fallback was worse than an incomplete template).
+# ---------------------------------------------------------------------------
+
+
+def _seed_arity0_function(conn: sqlite3.Connection, root: str, tmp_path: Path) -> int:
+    """Seed a project whose run-target is an arity-0 function with REAL source on
+    disk (so the floor can read its signature and emit a non-doomed `name()`)."""
+    conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root, "t"))
+    pid = int(conn.execute("SELECT id FROM projects WHERE root_path=?", (root,)).fetchone()[0])
+    src = tmp_path / "src" / "pkg" / "mod.py"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_text("def boot():\n    return 1\n", encoding="utf-8")
+    conn.execute(
+        "INSERT INTO symbols(project_id,name,kind,file_path,line_start,line_end,parent_symbol_id,module) "
+        "VALUES(?,?,?,?,?,?,?,?)",
+        (pid, "boot", "function", "src/pkg/mod.py", 1, 2, None, "pkg"),
+    )
+    conn.commit()
+    return pid
+
+
+def _seed_arity_n_function(conn: sqlite3.Connection, root: str, tmp_path: Path) -> int:
+    """Seed an arity-1 function WITH real source so the floor reads arity>0."""
+    conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root, "t"))
+    pid = int(conn.execute("SELECT id FROM projects WHERE root_path=?", (root,)).fetchone()[0])
+    src = tmp_path / "src" / "pkg" / "mod.py"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_text("def needs_arg(rel):\n    return rel.upper()\n", encoding="utf-8")
+    conn.execute(
+        "INSERT INTO symbols(project_id,name,kind,file_path,line_start,line_end,parent_symbol_id,module) "
+        "VALUES(?,?,?,?,?,?,?,?)",
+        (pid, "needs_arg", "function", "src/pkg/mod.py", 1, 2, None, "pkg"),
+    )
+    conn.commit()
+    return pid
+
+
+def test_floor_proposes_widget_for_arity0_function(tmp_path: Path):
+    """An arity-0 function's `name()` floor is NOT doomed — the floor proceeds."""
+    root = str(tmp_path)
+    conn = sqlite3.connect(":memory:"); init_schema(conn)
+    pid = _seed_arity0_function(conn, root, tmp_path)
+    block, reason = _construct_playground_floor(
+        "run boot", conn, pid, ledger=None, emitted=[], project_root=root)
+    assert reason is None, f"arity-0 floor must be offered; declined with {reason!r}"
+    assert block is not None
+    assert block.to_dict()["widget"]["call"]["function_ref"]["name"] == "boot"
+
+
+def test_floor_emits_needs_args_widget_for_arity_n_function(tmp_path: Path):
+    """An arity>0 function with no proposed args emits a needs_args=True widget
+    (an editable template) instead of declining. The user supplies args in the
+    editable preview before confirming. The widget must be well-formed with an
+    empty-arg call descriptor and needs_args=True."""
+    root = str(tmp_path)
+    conn = sqlite3.connect(":memory:"); init_schema(conn)
+    pid = _seed_arity_n_function(conn, root, tmp_path)
+    block, reason = _construct_playground_floor(
+        "run needs_arg", conn, pid, ledger=None, emitted=[], project_root=root)
+    assert block is not None, "arity>0 floor must emit a needs_args widget, not decline"
+    assert reason is None
+    w = block.to_dict()["widget"]
+    assert w.get("needs_args") is True, "arity>0 floor widget must carry needs_args=True"
+    assert w["call"]["function_ref"]["name"] == "needs_arg"
+    assert w["call"]["args"] == []
+    assert w["call"]["kwargs"] == {}
+    assert "call_text" in w
+
+
+def test_floor_emits_needs_args_widget_for_method_without_ctor(tmp_path: Path):
+    """A method-without-inferable-ctor emits a needs_args=True widget (an editable
+    template) instead of declining. The widget must carry an empty ctor so call_text
+    renders 'Class().method()' giving the user a concrete template to complete."""
+    root = str(tmp_path)
+    conn = sqlite3.connect(":memory:"); init_schema(conn)
+    conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root, "t"))
+    pid = int(conn.execute("SELECT id FROM projects WHERE root_path=?", (root,)).fetchone()[0])
+    src = tmp_path / "src" / "pkg" / "mod.py"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_text("class Worker:\n    def run(self):\n        return 1\n", encoding="utf-8")
+    conn.execute(
+        "INSERT INTO symbols(project_id,name,kind,file_path,line_start,line_end,parent_symbol_id,module) "
+        "VALUES(?,?,?,?,?,?,?,?)",
+        (pid, "run", "method", "src/pkg/mod.py", 2, 3, None, "pkg"),
+    )
+    conn.commit()
+    block, reason = _construct_playground_floor(
+        "run run", conn, pid, ledger=None, emitted=[], project_root=root)
+    assert block is not None, "method-without-ctor floor must emit a needs_args widget, not decline"
+    assert reason is None
+    w = block.to_dict()["widget"]
+    assert w.get("needs_args") is True, "method floor widget must carry needs_args=True"
+    # The call_text must render a method-style invocation ("Class().method()") so the
+    # user sees a concrete template, not a bare "run()" that hides the class context.
+    assert "." in w.get("call_text", ""), (
+        f"method call_text must be 'Class().method()' form, got {w.get('call_text')!r}"
+    )
+    assert w["call"]["function_ref"]["name"] == "run"
+    # The call must carry an empty ctor so the structured path is well-formed.
+    assert "ctor" in w["call"], "method floor widget call must include an empty ctor"
+
+
+def test_floor_proceeds_when_arity_unknown(tmp_path: Path):
+    """When the source is not readable (arity unknown), the floor must NOT decline
+    on arity grounds — it preserves the 'symbol resolves → offer the floor'
+    behavior. (Only positively-doomed targets are declined.)"""
+    (tmp_path / "README.md").write_text("# analyzer\n", encoding="utf-8")
+    conn = sqlite3.connect(":memory:"); init_schema(conn)
+    pid = _seed_symbol_project(conn)  # file points at analyzer.py NOT in tmp_path
+    block, reason = _construct_playground_floor(
+        "run _module_from_relpath", conn, pid, ledger=None, emitted=[],
+        project_root=str(tmp_path))
+    assert reason is None, (
+        f"arity-unknown floor must still be offered (symbol resolved); declined: {reason!r}"
+    )
+    assert block is not None

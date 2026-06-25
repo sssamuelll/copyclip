@@ -962,6 +962,38 @@ def test_launch_endpoint_rejects_path_traversal():
 
 
 # ---------------------------------------------------------------------------
+# ORCHESTRATION Fix 3: a non-PlaygroundError escaping launch_playground (OSError
+# from tempfile/open, a malformed driver payload, etc.) must surface as a generic
+# 500 JSON — never a dropped connection / raw traceback.
+# ---------------------------------------------------------------------------
+
+
+def test_launch_endpoint_unexpected_exception_returns_500_json():
+    """When the runner raises a NON-PlaygroundError (e.g. OSError from tempfile),
+    the endpoint must emit a stable 500 JSON body, not drop the connection."""
+    mock_runner = Mock()
+    mock_runner.launch.side_effect = OSError("no space left on device")
+    _, port = _start_server_with_runner(mock_runner)
+
+    status, body = _post_json(
+        f"http://127.0.0.1:{port}/api/playground/launch",
+        {
+            "source": "atlas",
+            "function_ref": {
+                "file": "src/copyclip/intelligence/reacquaintance.py",
+                "name": "build_reacquaintance_briefing",
+            },
+            "breadcrumb": "test",
+        },
+    )
+    assert status == 500, f"unexpected exception must yield 500, got {status}"
+    assert body.get("error") == "internal_error", (
+        f"must carry a stable error code; got {body!r}"
+    )
+    assert "message" in body
+
+
+# ---------------------------------------------------------------------------
 # Wave-3: cuaderno source + run mode + list route
 # ---------------------------------------------------------------------------
 
@@ -976,46 +1008,6 @@ def test_cuaderno_source_accepted():
         }
     )
     assert req.source == "cuaderno"
-
-
-def test_cuaderno_source_launches_run_mode(tmp_path):
-    """launch_playground with source='cuaderno' must call runner.launch(path, mode='run').
-    Any other source must use mode='edit'.
-    """
-    conn = sqlite3.connect(":memory:")
-    init_schema(conn)
-    pid = _seed_project(conn)
-    _seed_symbol(conn, pid, name="bar", kind="function", file_path="src/foo.py", module="foo")
-
-    # cuaderno source -> run mode
-    mock_runner = Mock()
-    mock_runner.launch.return_value = ("id-run", "http://127.0.0.1:9999/")
-
-    req_cuaderno = PlaygroundLaunchRequest(
-        source="cuaderno",
-        function_ref=FunctionRef(file="src/foo.py", name="bar"),
-        breadcrumb="Cuaderno -> bar()",
-    )
-    launch_playground(req_cuaderno, str(tmp_path), conn, pid, mock_runner)
-    _, kwargs_run = mock_runner.launch.call_args
-    assert kwargs_run.get("mode") == "run", (
-        f"Expected mode='run' for cuaderno source, got {kwargs_run}"
-    )
-
-    # atlas source -> edit mode
-    mock_runner.reset_mock()
-    mock_runner.launch.return_value = ("id-edit", "http://127.0.0.1:9998/")
-
-    req_atlas = PlaygroundLaunchRequest(
-        source="atlas",
-        function_ref=FunctionRef(file="src/foo.py", name="bar"),
-        breadcrumb="Atlas -> bar()",
-    )
-    launch_playground(req_atlas, str(tmp_path), conn, pid, mock_runner)
-    _, kwargs_edit = mock_runner.launch.call_args
-    assert kwargs_edit.get("mode") == "edit", (
-        f"Expected mode='edit' for atlas source, got {kwargs_edit}"
-    )
 
 
 def test_get_playground_list_route():
@@ -1034,3 +1026,189 @@ def test_get_playground_list_route():
         {"id": "abc123", "status": "running"},
         {"id": "def456", "status": "exited"},
     ]
+
+
+# ---------------------------------------------------------------------------
+# Task 7: launch_playground branches cuaderno → capture, else Marimo
+# Task 11: re-point the one behavioral assertion from test_cuaderno_source_-
+#          launches_run_mode to test_cuaderno_fallback_launches_run_mode.
+#          The Marimo notebook template is UNCHANGED; all 12 test_generate_-
+#          notebook_* tests call generate_marimo_notebook directly and pass
+#          without modification (template is untouched by Tasks 1-10).
+# ---------------------------------------------------------------------------
+
+import textwrap as _tw
+from copyclip.intelligence.capture import StepThroughResponse, FallbackResponse
+
+
+def _seed_user_symbol(conn, project_root, body, file_rel, name,
+                      kind="function", module="usermod"):
+    """Mirror _seed_symbol (tests/test_playground.py:338) but write a REAL
+    importable module the capture subprocess can import from project_root."""
+    (Path(project_root) / file_rel).write_text(_tw.dedent(body), encoding="utf-8")
+    conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)",
+                 (str(project_root), "test"))
+    pid = int(conn.execute("SELECT id FROM projects WHERE root_path=?",
+                           (str(project_root),)).fetchone()[0])
+    conn.execute(
+        "INSERT INTO symbols(project_id,name,kind,file_path,line_start,line_end,"
+        "parent_symbol_id,module) VALUES(?,?,?,?,?,?,?,?)",
+        (pid, name, kind, file_rel, 1, 5, None, module))
+    conn.commit()
+    return pid
+
+
+def test_cuaderno_fallback_launches_edit_mode(tmp_path):
+    """The FALLBACK path (async function → Marimo) must launch with mode='edit'
+    for cuaderno source. The fallback box is the reactive input→output box the
+    user interacts with (async/generator/ctor-missing); mode='edit' keeps the
+    input cell visible so the user can modify it. mode='run' would hide the cell
+    and make the fallback box non-interactive (item 6, PR #177 staff review).
+
+    Non-fallback cuaderno paths go straight to StepThroughResponse without
+    touching runner.launch (see test_cuaderno_eligible_returns_trace_response).
+    """
+    conn = connect(str(tmp_path)); init_schema(conn)
+    pid = _seed_user_symbol(conn, tmp_path,
+                            "async def fetch(x):\n    return x\n",
+                            "usermod.py", "fetch")
+    req = PlaygroundLaunchRequest.from_dict({
+        "source": "cuaderno",
+        "function_ref": {"file": "usermod.py", "name": "fetch"},
+        "call": {"function_ref": {"file": "usermod.py", "name": "fetch"}, "args": [1]},
+    })
+    runner = Mock(); runner.launch.return_value = ("pg", "http://127.0.0.1:5000/")
+    launch_playground(req, str(tmp_path), conn, pid, runner)
+    assert runner.launch.call_args.kwargs.get("mode") == "edit"
+
+
+def test_cuaderno_eligible_returns_trace_response(tmp_path):
+    conn = connect(str(tmp_path)); init_schema(conn)
+    pid = _seed_user_symbol(conn, tmp_path,
+                            "def addup(a):\n    b = a + 1\n    return b * 2\n",
+                            "usermod.py", "addup")
+    req = PlaygroundLaunchRequest.from_dict({
+        "source": "cuaderno",
+        "function_ref": {"file": "usermod.py", "name": "addup"},
+        "call": {"function_ref": {"file": "usermod.py", "name": "addup"}, "args": [3]},
+    })
+    runner = Mock()
+    resp = launch_playground(req, str(tmp_path), conn, pid, runner)
+    assert isinstance(resp, StepThroughResponse)
+    assert resp.to_dict()["kind"] == "trace"
+    assert resp.func_name == "addup"
+    runner.launch.assert_not_called()  # the trace path does NOT spawn marimo
+
+
+def test_cuaderno_free_text_call_returns_trace(tmp_path):
+    conn = connect(str(tmp_path)); init_schema(conn)
+    pid = _seed_user_symbol(conn, tmp_path,
+                            "def addup(a):\n    b = a + 1\n    return b * 2\n",
+                            "usermod.py", "addup")
+    req = PlaygroundLaunchRequest.from_dict({
+        "source": "cuaderno",
+        "function_ref": {"file": "usermod.py", "name": "addup"},
+        "call_text": "addup(3 + 4)",  # USER free-text path (spec §6/§10)
+    })
+    resp = launch_playground(req, str(tmp_path), conn, pid, Mock())
+    assert isinstance(resp, StepThroughResponse)
+    assert resp.to_dict()["kind"] == "trace"
+
+
+def test_cuaderno_async_falls_back_to_marimo(tmp_path):
+    conn = connect(str(tmp_path)); init_schema(conn)
+    pid = _seed_user_symbol(conn, tmp_path,
+                            "async def fetch(x):\n    return x\n",
+                            "usermod.py", "fetch")
+    req = PlaygroundLaunchRequest.from_dict({
+        "source": "cuaderno",
+        "function_ref": {"file": "usermod.py", "name": "fetch"},
+        "call": {"function_ref": {"file": "usermod.py", "name": "fetch"}, "args": [1]},
+    })
+    runner = Mock(); runner.launch.return_value = ("pg1", "http://127.0.0.1:5000/")
+    resp = launch_playground(req, str(tmp_path), conn, pid, runner)
+    assert isinstance(resp, FallbackResponse)
+    assert resp.iframe_url == "http://127.0.0.1:5000/"
+    runner.launch.assert_called_once()
+    # Cuaderno fallback uses 'edit' so the input cell stays visible and interactive
+    # (item 6, PR #177 staff review: fallback box is interactive, not a run-only widget).
+    assert runner.launch.call_args.kwargs.get("mode") == "edit"
+
+
+def test_non_cuaderno_source_unchanged_marimo_iframe(tmp_path):
+    conn = connect(str(tmp_path)); init_schema(conn)
+    pid = _seed_user_symbol(conn, tmp_path,
+                            "def addup(a):\n    return a\n",
+                            "usermod.py", "addup")
+    req = PlaygroundLaunchRequest.from_dict({
+        "source": "atlas",
+        "function_ref": {"file": "usermod.py", "name": "addup"},
+    })
+    runner = Mock(); runner.launch.return_value = ("pg2", "http://127.0.0.1:5001/")
+    resp = launch_playground(req, str(tmp_path), conn, pid, runner)
+    assert isinstance(resp, PlaygroundLaunchResponse)
+    assert resp.iframe_url == "http://127.0.0.1:5001/"
+    assert runner.launch.call_args.kwargs.get("mode") == "edit"
+
+
+# ---------------------------------------------------------------------------
+# Task 8: Server endpoint returns trace/fallback for cuaderno, stable error
+# codes (invalid_call_descriptor → 400, capture_failed → 500)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def running_server_with_user_symbol():
+    """Like _start_server_with_runner (tests/test_playground.py:566) but seeds a
+    REAL importable usermod.addup so the capture subprocess can import it."""
+    td = tempfile.mkdtemp(prefix="copyclip-pg-test-")
+    root = str(Path(td).absolute())
+    (Path(root) / "usermod.py").write_text(
+        "def addup(a):\n    b = a + 1\n    return b * 2\n", encoding="utf-8")
+    conn = connect(root)
+    init_schema(conn)
+    conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root, "test"))
+    pid = int(conn.execute("SELECT id FROM projects WHERE root_path=?",
+                           (root,)).fetchone()[0])
+    conn.execute(
+        "INSERT INTO symbols(project_id,name,kind,file_path,line_start,line_end,"
+        "parent_symbol_id,module) VALUES(?,?,?,?,?,?,?,?)",
+        (pid, "addup", "function", "usermod.py", 1, 3, None, "usermod"))
+    conn.commit()
+    conn.close()
+
+    port = _free_port()
+    th = threading.Thread(
+        target=run_server,
+        kwargs={"project_root": root, "port": port, "playground_runner": Mock()},
+        daemon=True,
+    )
+    th.start()
+    _wait_port(port)
+    yield f"http://127.0.0.1:{port}", root
+
+
+def test_endpoint_cuaderno_returns_trace_kind(running_server_with_user_symbol):
+    base, _ = running_server_with_user_symbol
+    status, body = _post_json(base + "/api/playground/launch", {
+        "source": "cuaderno",
+        "function_ref": {"file": "usermod.py", "name": "addup"},
+        "call": {"function_ref": {"file": "usermod.py", "name": "addup"}, "args": [3]},
+    })
+    assert status == 200
+    assert body["kind"] == "trace"
+    assert body["func_name"] == "addup"
+    assert isinstance(body["trace"], list)
+    assert "iframe_url" not in body  # trace path mounts the React stepper, no iframe
+
+
+def test_endpoint_invalid_call_descriptor_is_400(running_server_with_user_symbol):
+    base, _ = running_server_with_user_symbol
+    status, body = _post_json(base + "/api/playground/launch", {
+        "source": "cuaderno",
+        "function_ref": {"file": "usermod.py", "name": "addup"},
+        "call": {"function_ref": {"file": "usermod.py", "name": "addup"},
+                 "kwargs": {"bad key": 1}},  # non-identifier kwarg key
+    })
+    assert status == 400
+    assert body["error"] == "invalid_call_descriptor"

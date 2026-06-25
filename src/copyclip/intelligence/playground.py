@@ -134,6 +134,8 @@ class PlaygroundLaunchRequest:
     deps_hint: list[str] | None = None
     suggested_inputs: list[object] | None = None
     breadcrumb: str = ""
+    call: object | None = None  # cuaderno: model's CallDescriptor dict (raw; parsed in launch_playground)
+    call_text: str | None = None  # cuaderno: user's free-text call expression
 
     @classmethod
     def from_dict(cls, data: object) -> "PlaygroundLaunchRequest":
@@ -156,12 +158,18 @@ class PlaygroundLaunchRequest:
         breadcrumb = data.get("breadcrumb") or ""
         if not isinstance(breadcrumb, str):
             raise InvalidRequestError("breadcrumb must be a string")
+        call = data.get("call")
+        call_text = data.get("call_text")
+        if call_text is not None and not isinstance(call_text, str):
+            raise InvalidRequestError("call_text must be a string when provided")
         return cls(
             source=str(source),
             function_ref=ref,
             deps_hint=[str(x) for x in deps_hint] if deps_hint else None,
             suggested_inputs=list(suggested) if suggested else None,
             breadcrumb=breadcrumb,
+            call=call,
+            call_text=call_text,
         )
 
 
@@ -504,17 +512,34 @@ def launch_playground(
     pid: int,
     runner: MarimoRunner,
     trace: object = None,
-) -> PlaygroundLaunchResponse:
+) -> "PlaygroundLaunchResponse | StepThroughResponse | FallbackResponse":
     """Resolve, generate, launch. May raise PlaygroundError subclasses.
 
-    If the runner fails after the notebook has been written, the temp dir is
-    cleaned up best-effort so we don't leak per-request directories in the
-    common error path. Crash-cleanup of orphans across CopyClip restarts is
-    the runner's responsibility on startup (see spec, "Orphan cleanup").
+    For source == "cuaderno": runs the model's CallDescriptor OR the user's
+    free-text call in a bounded subprocess and returns a StepThroughResponse
+    (trace) or FallbackResponse (async/generator → Marimo fallback).
+
+    For all other sources: generates a Marimo notebook and returns
+    PlaygroundLaunchResponse (iframe_url). If the runner fails after the
+    notebook has been written, the temp dir is cleaned up best-effort so we
+    don't leak per-request directories in the common error path. Crash-cleanup
+    of orphans across CopyClip restarts is the runner's responsibility on
+    startup (see spec, "Orphan cleanup").
 
     `trace` is an optional InteractionTrace (spec 2026-06-10): each stage emits
     a `launch.*` event; failures emit `launch.error` with the failing stage.
     """
+    # Import here to avoid a forward-reference cycle; capture imports playground.
+    from .capture import (
+        CallDescriptor,
+        CaptureError,
+        FreeTextCall,
+        StepThroughResponse,
+        FallbackResponse,
+        run_capture,
+        run_free_text_capture,
+        probe_target,
+    )
     trace = trace if trace is not None else NULL_TRACE
     try:
         resolved = resolve_function_ref(conn, pid, req.function_ref)
@@ -525,6 +550,108 @@ def launch_playground(
                 qualname=resolved.qualname, kind=resolved.kind,
                 module=resolved.module, line_start=resolved.line_start,
                 parent_class=resolved.parent_class)
+
+    if req.source == "cuaderno":
+        file_line = resolved.file + (f":{resolved.line_start}" if resolved.line_start else "")
+        if req.call_text is not None:  # USER free-text path (spec §6/§10)
+            # Parse first (cheap — no subprocess). Probe only after parse succeeds
+            # so source_lines is not fetched for a path that cannot proceed.
+            try:
+                ft = FreeTextCall.from_text(req.call_text)
+            except PlaygroundError as exc:
+                trace.event("launch.error", stage="call_text", error=str(exc))
+                raise
+            detect, source_lines = probe_target(resolved, project_root=project_root)
+            # SAME eligibility gate as the structured path (PR #177 fix 1): async /
+            # generator / decorated decline identically. The method-without-ctor
+            # check does NOT fire here because the user types the WHOLE call (ctor
+            # included), which the synthetic descriptor records as ctor-supplied.
+            cd = _free_text_descriptor(req.function_ref, resolved)
+            reason = _eligibility_gate(cd, resolved, detect)
+            if reason is not None:
+                trace.event("launch.capture", outcome="fallback", reason=reason)
+                return _cuaderno_fallback(req, project_root, resolved, runner, reason, trace)
+            try:
+                steps, truncated, truncated_reason = run_free_text_capture(
+                    ft, resolved, project_root=project_root, source_lines=source_lines)
+            except CaptureError as exc:
+                trace.event("launch.error", stage="capture", error=str(exc))
+                raise
+        else:  # MODEL structured-descriptor path
+            # Parse first (cheap — no subprocess).
+            try:
+                cd = (CallDescriptor.from_dict(req.call) if req.call is not None
+                      else CallDescriptor(function_ref=req.function_ref))
+            except PlaygroundError as exc:
+                trace.event("launch.error", stage="descriptor", error=str(exc))
+                raise
+            # Cheap ctor eligibility short-circuit: method with no proposed ctor
+            # declines without any subprocess spawn (the probe is deferred until
+            # this passes). This is the SAME method-ctor rule eligibility_reason
+            # enforces below — checked early here only to skip a doomed probe.
+            if (resolved.kind == "method" or resolved.parent_class) and cd.ctor is None:
+                reason = "this method needs constructor arguments the example did not supply"
+                trace.event("launch.capture", outcome="fallback", reason=reason)
+                return _cuaderno_fallback(req, project_root, resolved, runner, reason, trace)
+            detect, source_lines = probe_target(resolved, project_root=project_root)
+            reason = _eligibility_gate(cd, resolved, detect)
+            if reason is not None:
+                trace.event("launch.capture", outcome="fallback", reason=reason)
+                return _cuaderno_fallback(req, project_root, resolved, runner, reason, trace)
+            try:
+                steps, truncated, truncated_reason = run_capture(
+                    cd, resolved, project_root=project_root, source_lines=source_lines)
+            except CaptureError as exc:
+                trace.event("launch.error", stage="capture", error=str(exc))
+                raise
+        # PR #177 fix 2: an empty trace means execution never entered the target's
+        # OWN frames — the call ran entirely in library / C frames (invisible to
+        # sys.settrace, spec §7) or never reached the function body. Decorated
+        # targets are already declined up front (eligibility gate), so an empty
+        # trace here is the honest "ran, but nothing of YOUR Python anchored"
+        # case — distinct from "produced zero anchored steps after running". Both
+        # surface as a fallback with an honest note rather than an empty stepper.
+        if not steps:
+            reason = ("that call ran entirely in library/C frames — none of this "
+                      "function's own Python lines were reached, so there's nothing "
+                      "to step through")
+            trace.event("launch.capture", outcome="fallback", reason=reason)
+            return _cuaderno_fallback(req, project_root, resolved, runner, reason, trace)
+        trace.event("launch.capture", outcome="trace", steps=len(steps),
+                    truncated=truncated, truncated_reason=truncated_reason)
+        # Low display #6: for a method, use qualname (e.g. "MyClass.process") so
+        # the stepper header shows class context; fall back to name otherwise.
+        func_name = (resolved.qualname if resolved.parent_class else resolved.name)
+        return StepThroughResponse(
+            trace=steps, source_lines=source_lines, func_name=func_name,
+            file_line=file_line, truncated=truncated, truncated_reason=truncated_reason)
+
+    # Non-cuaderno sources: the Marimo iframe path is UNCHANGED.
+    return _launch_marimo(req, project_root, resolved, runner, trace)
+
+
+def _launch_marimo(
+    req: PlaygroundLaunchRequest,
+    project_root: str,
+    resolved: ResolvedFunction,
+    runner: MarimoRunner,
+    trace: object,
+    *,
+    is_fallback: bool = False,
+) -> PlaygroundLaunchResponse:
+    """Generate a Marimo notebook and spawn via the runner. This is the
+    original launch_playground tail, extracted verbatim so the cuaderno
+    fallback can reuse it without duplicating spawn logic.
+
+    Mode decision (deliberate, not incidental):
+    - Non-cuaderno sources: 'edit' — the user navigates the notebook freely.
+    - Cuaderno non-fallback: 'run' — the notebook is a pre-wired reactive box;
+      hiding the code gives a cleaner run-only widget experience.
+    - Cuaderno fallback (is_fallback=True): 'edit' — this IS the interactive
+      input→output box the user steps through (async, generator, ctor-missing).
+      The user MUST be able to see and modify the input cell to interact; 'run'
+      would hide the cell and make the fallback box non-interactive.
+    """
     try:
         notebook_path = generate_marimo_notebook(req, project_root, resolved)
     except Exception as exc:
@@ -533,7 +660,10 @@ def launch_playground(
     trace.event("launch.notebook", path=notebook_path,
                 input_element=_build_input_element(req.suggested_inputs),
                 deps_hint=req.deps_hint)
-    mode = "run" if req.source == "cuaderno" else "edit"
+    if req.source == "cuaderno" and not is_fallback:
+        mode = "run"   # pre-wired reactive box: hide code for a clean widget
+    else:
+        mode = "edit"  # all other sources + cuaderno fallbacks: expose the cell
     try:
         playground_id, iframe_url = runner.launch(notebook_path, mode=mode, trace=trace)
     except Exception as exc:
@@ -545,6 +675,56 @@ def launch_playground(
         playground_id=playground_id,
         iframe_url=iframe_url,
     )
+
+
+def _free_text_descriptor(function_ref: "FunctionRef", resolved: ResolvedFunction):
+    """Synthesize a CallDescriptor for the free-text (USER) path so it routes
+    through the SAME eligibility gate as the model path (PR #177 fix 1).
+
+    The user types the WHOLE call expression — constructor included — so a method
+    target's ctor IS supplied (by the text). We record that as a non-None ``ctor``
+    so eligibility_reason's method-without-ctor branch does NOT fire, while every
+    other check (async / generator / decorated) runs identically to the model
+    path. For a plain function the ctor stays None (no method-ctor branch reached).
+    """
+    from .capture import CallDescriptor
+    is_method = resolved.kind == "method" or bool(resolved.parent_class)
+    ctor = {"args": [], "kwargs": {}} if is_method else None
+    return CallDescriptor(function_ref=function_ref, ctor=ctor)
+
+
+def _eligibility_gate(cd, resolved: ResolvedFunction, detect: dict) -> str | None:
+    """THE single eligibility gate both dispatch paths share (PR #177 fix 1).
+
+    Routes through ``eligibility_reason`` so async / generator / decorated /
+    method-without-ctor all decline with the SAME honest copy regardless of path.
+    Returns the decline reason, or None when the target can be stepped."""
+    from .capture import eligibility_reason
+    return eligibility_reason(
+        cd, resolved,
+        is_async=detect.get("is_async", False),
+        is_generator=detect.get("is_generator", False),
+        is_decorated=detect.get("is_decorated", False),
+    )
+
+
+def _cuaderno_fallback(
+    req: PlaygroundLaunchRequest,
+    project_root: str,
+    resolved: ResolvedFunction,
+    runner: MarimoRunner,
+    reason: str,
+    trace: object,
+) -> "FallbackResponse":
+    """Decline the step-through, fall back to the Marimo reactive box.
+
+    Sets playground_id from inner.playground_id (spec §8) so the frontend can
+    use it for the live-state id, /status poll, and reap — NOT idFromIframeUrl.
+    """
+    from . import capture as _capture_mod  # single deferred import; no duplicate from-import
+    inner = _launch_marimo(req, project_root, resolved, runner, trace, is_fallback=True)
+    return _capture_mod.FallbackResponse(reason=reason, iframe_url=inner.iframe_url,
+                                         playground_id=inner.playground_id)
 
 
 # ---------------------------------------------------------------------------

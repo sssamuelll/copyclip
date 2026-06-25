@@ -37,6 +37,32 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     playground_preparing: 'preparing…',
     playground_ended: 'runtime ended — run again to relaunch',
     playground_evicted: 'paused — another example is running',
+    playground_step_through: 'Step through',
+    playground_anchored: 'Anchored function',
+    playground_run_note: 'Runs your real code once, side effects included.',
+    playground_python_limit: 'Steps through your Python; library calls appear as one step.',
+    playground_preview_lead: "I'll step through this call:",
+    playground_edit_call: 'Edit call',
+    playground_cancel: 'Cancel',
+    playground_preparing_capturing: 'running once · capturing trace',
+    playground_state: 'State',
+    playground_next_change: 'next change ◆',
+    playground_truncated: 'Stopped at step {n} — trace truncated.',
+    playground_truncated_steps: 'Stopped at step {n} — hit the step cap.',
+    playground_truncated_time: 'Stopped at step {n} — ran out of time.',
+    playground_raised_final: 'Raised — this is the final step.',
+    playground_raised_label: 'raised',
+    playground_fallback_note: "This function can't be stepped through yet — {reason}. Here's its input and output.",
+    playground_runtime_closed: 'Runtime closed',
+    playground_runtime_closed_body: 'The sandbox shut down after idle. The captured trace is gone.',
+    playground_reopen: 'Reopen',
+    playground_evicted_title: 'Evicted',
+    playground_evicted_body: 'Another example took this slot. Only one playground runs at a time.',
+    playground_bring_back: 'Bring it back',
+    playground_spawn_error: 'Spawn error',
+    playground_spawn_error_body: "The playground didn't start. Nothing ran — your code wasn't touched.",
+    playground_try_again: 'Try again',
+    playground_complete_call: "Complete the call's arguments before stepping through.",
   },
   es: {
     answercheck_prompt: '¿esto responde tu pregunta?',
@@ -72,6 +98,32 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     playground_preparing: 'preparando…',
     playground_ended: 'el runtime terminó: corre de nuevo para relanzarlo',
     playground_evicted: 'en pausa: hay otro ejemplo corriendo',
+    playground_step_through: 'Recorrer',
+    playground_anchored: 'Función anclada',
+    playground_run_note: 'Corre tu código real una vez, con sus efectos.',
+    playground_python_limit: 'Recorre tu Python; las llamadas a librerías son un paso.',
+    playground_preview_lead: 'Voy a recorrer esta llamada:',
+    playground_edit_call: 'Editar llamada',
+    playground_cancel: 'Cancelar',
+    playground_preparing_capturing: 'corriendo una vez · capturando la traza',
+    playground_state: 'Estado',
+    playground_next_change: 'siguiente cambio ◆',
+    playground_truncated: 'Detenido en el paso {n} — traza truncada.',
+    playground_truncated_steps: 'Detenido en el paso {n} — alcanzó el límite de pasos.',
+    playground_truncated_time: 'Detenido en el paso {n} — se agotó el tiempo.',
+    playground_raised_final: 'Lanzó — este es el paso final.',
+    playground_raised_label: 'lanzó',
+    playground_fallback_note: 'Esta función no se puede recorrer paso a paso todavía — {reason}. Aquí está su entrada y salida.',
+    playground_runtime_closed: 'Runtime cerrado',
+    playground_runtime_closed_body: 'El sandbox se apagó tras estar inactivo. La traza capturada se perdió.',
+    playground_reopen: 'Reabrir',
+    playground_evicted_title: 'Desalojado',
+    playground_evicted_body: 'Otro ejemplo tomó este espacio. Solo corre un playground a la vez.',
+    playground_bring_back: 'Traerlo de vuelta',
+    playground_spawn_error: 'Error al iniciar',
+    playground_spawn_error_body: 'El playground no arrancó. Nada corrió — tu código no se tocó.',
+    playground_try_again: 'Reintentar',
+    playground_complete_call: 'Completa los argumentos de la llamada antes de recorrer.',
   },
 }
 
@@ -79,7 +131,9 @@ export function pickLang(lang?: string | null): Lang {
   return lang === 'es' ? 'es' : 'en'
 }
 
-export function t(key: string, lang?: string | null): string {
+export function t(key: string, lang?: string | null, params?: Record<string, string>): string {
   const l = pickLang(lang)
-  return STRINGS[l][key] ?? STRINGS.en[key] ?? key
+  const raw = STRINGS[l][key] ?? STRINGS.en[key] ?? key
+  if (!params) return raw
+  return raw.replace(/\{(\w+)\}/g, (match, k) => (k in params ? params[k] : match))
 }

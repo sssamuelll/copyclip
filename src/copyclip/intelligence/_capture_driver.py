@@ -1,0 +1,494 @@
+"""In-subprocess capture driver for the cuaderno step-through.
+
+Run as ``python -m copyclip.intelligence._capture_driver <spec.json>``: it
+imports the user's module, builds the invocation from repr-literal args (the
+MODEL path) OR exec's the user's edited free-text call in the module namespace
+(the USER path, spec §10), installs a BOUNDED ``sys.settrace`` callback, runs
+the call ONCE, and writes the raw trace JSON to the ``trace_path`` named in the
+spec (NOT stdout — see below).
+
+stdout demux (PR #177 safety fix 4): the user's real code runs in THIS process,
+so its ``print`` / C ``flush`` / ``atexit`` output would corrupt a stdout-parsed
+trace. We therefore (a) write the trace JSON to a known file, and (b) redirect
+the user's own stdout to stderr while the call runs, so the trace channel is
+never polluted by user output. stdout stays clean for the orchestrator.
+
+Bounds: the in-callback caps (MAX_STEPS, per-value repr size/time, the
+dangerous-type skip-list, the wall-clock guard) are BEST-EFFORT — they only fire
+at trace-event boundaries, so a single blocking C call or a hostile ``__repr__``
+is NOT interrupted by them (PR #177 safety fix 5). The SOLE HARD bound on total
+wall time is the OUTER subprocess timeout in capture._run_driver; these caps
+trim a well-behaved-but-large capture, they do not guarantee termination.
+
+This is our OWN tracer — no third-party tracer is imported (spec §0 decision 1
+dropped json-tracer). The license rule (never copy Online Python Tutor source)
+holds by not copying it; we emit our own Step/Var-shaped events directly.
+
+This module is import-safe (the helpers are unit-tested in-process); the
+``__main__`` block is what the subprocess executes.
+"""
+from __future__ import annotations
+
+import importlib
+import inspect
+import json
+import sys
+import time
+import traceback
+
+MAX_STEPS = 1000
+REPR_SIZE_CAP = 1000
+REPR_TIME_BUDGET_S = 0.05
+WALL_CLOCK_BUDGET_S = 8.0
+LARGE_CHILDREN_CAP = 20
+
+# Dangerous-to-repr types: file handles, sockets, DB sessions, lazy proxies
+# whose __repr__ may block, hit the network, or mutate.
+#
+# IMPORTANT: match on MODULE-ANCHORED FQN PREFIXES (e.g. "sqlite3.") — NOT
+# on loose type-name substrings — so a user class named ConnectionManager or
+# EngineConfig is never wrongly hidden (spec §5 cap 4 + Medium correctness fix).
+#
+# Each entry is matched as a PREFIX of the fully-qualified "module.TypeName"
+# string returned by _type_fqn().  Entries that must match any class in a
+# well-known module use the module prefix only (e.g. "sqlalchemy.orm.").
+_OPAQUE_FQN_PREFIXES: tuple[str, ...] = (
+    # stdlib: io — both the public 'io' alias and the C '_io' backing module
+    "io.TextIOWrapper",
+    "_io.TextIOWrapper",
+    "io.BufferedReader",
+    "_io.BufferedReader",
+    "io.BufferedWriter",
+    "_io.BufferedWriter",
+    "io.BufferedRandom",
+    "_io.BufferedRandom",
+    "io.FileIO",
+    "_io.FileIO",
+    "io.RawIOBase",
+    "_io.RawIOBase",
+    "io.BufferedIOBase",
+    "_io.BufferedIOBase",
+    "io.TextIOBase",
+    "_io.TextIOBase",
+    # stdlib: socket / ssl
+    "socket.socket",
+    "ssl.SSLSocket",
+    "ssl.SSLObject",
+    # stdlib: sqlite3
+    "sqlite3.Connection",
+    "sqlite3.Cursor",
+    # stdlib: subprocess / threading / _thread / multiprocessing
+    "subprocess.Popen",
+    "threading.Thread",
+    "threading.Lock",
+    "threading._RLock",
+    "_thread.lock",
+    "_thread.RLock",
+    "multiprocessing.process.BaseProcess",
+    # SQLAlchemy (any version — match the module prefix)
+    "sqlalchemy.",
+    # requests / httpx sessions
+    "requests.sessions.Session",
+    "httpx.",
+    # psycopg2 / pymysql connections
+    "psycopg2.",
+    "pymysql.",
+    # redis
+    "redis.",
+    # celery
+    "celery.",
+)
+
+_LARGE_BY_LEN = (list, tuple, set, frozenset, dict, bytes, bytearray)
+
+
+def _type_fqn(obj: object) -> str:
+    t = type(obj)
+    mod = getattr(t, "__module__", "")
+    return f"{mod}.{t.__qualname__}" if mod and mod != "builtins" else t.__qualname__
+
+
+def _is_opaque_type(obj: object) -> bool:
+    """Return True iff the object should be rendered opaque (never repr'd).
+
+    Matches MODULE-ANCHORED FQN prefixes only — a user class whose name
+    contains 'Connection' but lives in __main__ or a project module will NOT
+    match any entry (their FQN starts with '__main__.' or 'myproject.', not
+    'sqlite3.' etc.).
+    """
+    fqn = _type_fqn(obj)
+    return any(fqn == prefix or fqn.startswith(prefix) for prefix in _OPAQUE_FQN_PREFIXES)
+
+
+def _safe_repr(obj: object) -> str | None:
+    """repr() with a BEST-EFFORT time budget; None if it raises or overran.
+
+    PR #177 safety fix 5: the budget is measured AFTER ``repr()`` returns, so a
+    ``__repr__`` that blocks (a network call, a C extension, a sleep) is NOT
+    interrupted here — it runs to completion and is only then discarded as
+    over-budget. The sole HARD bound on total wall time is the OUTER subprocess
+    timeout in capture._run_driver (communicate(timeout=...)); this in-driver cap
+    is best-effort and only trims values whose repr happened to be slow."""
+    start = time.monotonic()
+    try:
+        r = repr(obj)
+    except Exception:  # noqa: BLE001 — a hostile __repr__ must not crash capture
+        return None
+    if time.monotonic() - start > REPR_TIME_BUDGET_S:
+        return None
+    return r
+
+
+def var_for(name: str, obj: object) -> dict:
+    """Build one Var dict (driver shape) honoring the size/time caps + skip-list.
+
+    For _LARGE_BY_LEN objects we call _safe_repr ONCE: if the repr is None or
+    too long we demote to large immediately, rather than calling _too_big_repr
+    (which calls _safe_repr internally) and then calling _safe_repr again.  That
+    old double-call could blow the per-value time budget on a near-budget value.
+    """
+    if _is_opaque_type(obj):
+        return {"name": name, "kind": "opaque", "label": _type_fqn(obj)}
+    if isinstance(obj, _LARGE_BY_LEN):
+        try:
+            n = len(obj)
+        except Exception:  # noqa: BLE001
+            n = 0
+        if n > LARGE_CHILDREN_CAP:
+            return _large_var(name, obj, n)
+        # Single repr call — avoid the double-call that _too_big_repr would cause.
+        r = _safe_repr(obj)
+        if r is None or len(r) > REPR_SIZE_CAP:
+            return _large_var(name, obj, n)
+        kind = "scalar" if isinstance(obj, (int, float, bool, str, bytes, type(None))) else "object"
+        return {"name": name, "kind": kind, "text": r}
+    r = _safe_repr(obj)
+    if r is None:
+        return {"name": name, "kind": "opaque", "label": _type_fqn(obj)}
+    if len(r) > REPR_SIZE_CAP:
+        return _large_var(name, obj, _maybe_len(obj))
+    kind = "scalar" if isinstance(obj, (int, float, bool, str, bytes, type(None))) else "object"
+    return {"name": name, "kind": kind, "text": r}
+
+
+def _maybe_len(obj: object) -> int | None:
+    try:
+        return len(obj)  # type: ignore[arg-type]
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _too_big_repr(obj: object) -> bool:
+    r = _safe_repr(obj)
+    return r is None or len(r) > REPR_SIZE_CAP
+
+
+def _large_var(name: str, obj: object, n: int | None) -> dict:
+    summary = type(obj).__name__
+    meta = f"{n:,} items" if n is not None else ""
+    children: list[dict[str, str]] = []
+    if isinstance(obj, dict):
+        meta = f"{n:,} keys" if n is not None else ""
+        for k, v in list(obj.items())[:LARGE_CHILDREN_CAP]:
+            children.append({"name": _safe_repr(k) or "?", "text": _child_text(v)})
+    elif isinstance(obj, (list, tuple)):
+        for i, v in enumerate(list(obj)[:LARGE_CHILDREN_CAP]):
+            children.append({"name": str(i), "text": _child_text(v)})
+    return {"name": name, "kind": "large", "summary": summary, "meta": meta,
+            "children": children}
+
+
+def _child_text(v: object) -> str:
+    r = _safe_repr(v)
+    if r is None:
+        return f"‹{_type_fqn(v)}›"
+    return r if len(r) <= REPR_SIZE_CAP else r[: REPR_SIZE_CAP - 1] + "…"
+
+
+class _Abort(BaseException):
+    """Internal: raised inside the tracer to stop a runaway capture.
+
+    MUST be BaseException (not Exception) so that user code with
+    ``except Exception:`` or bare ``except:`` cannot accidentally swallow
+    the abort signal — the caps would never fire for such functions.
+    The existing ``except _Abort:`` handlers in trace_call/_trace_free_text
+    are unaffected because they name _Abort explicitly.
+    """
+
+
+def trace_call(func, args: list, kwargs: dict) -> dict:
+    """Run ``func(*args, **kwargs)`` once under a bounded settrace. Returns the
+    driver-shape raw trace: {"trace": [...], "truncated": bool,
+    "truncated_reason": "steps"|"time"|None}. The driver emits line/event/scope
+    ONLY — `changed` is derived later by normalize_trace.
+
+    Frame-scoping (spec §5 + §7): the callback anchors on the target's CODE
+    OBJECT (``func.__code__``), NOT its filename. Only frames whose ``f_code`` IS
+    the target's code object are recorded line-by-line; every other frame
+    (sibling helpers in the same file, nested defs/comprehensions with their own
+    code objects, library / C frames) is treated as opaque — its ``call`` is not
+    descended, so it contributes at most the surrounding target line, never its
+    own interleaved lines. Recursion re-enters the SAME code object, so recursive
+    frames ARE still traced.
+
+    A call that raises is recorded as a terminal ``raise`` step, not an error.
+
+    ``exception`` events from sys.settrace are NOT emitted (they are not in the
+    Step schema union call|line|return|raise).  When an exception propagates out
+    of the function, the outer except-BaseException handler emits a ``raise`` step
+    with scope captured from the last exception frame so the terminal snapshot is
+    correct.
+    """
+    target_code = func.__code__
+    events: list[dict] = []
+    truncated = {"hit": False, "reason": None}
+    started = time.monotonic()
+    last_line = {"n": 0}
+    # Capture the most recent exception frame's locals so the terminal raise step
+    # has a populated scope even when the exception propagated out of the callback.
+    last_exc_scope: list[dict] = []
+
+    def tracer(frame, event, arg):
+        # Anchor on the code object: only the target function's own frames are
+        # traced. A non-target frame (helper/library/comprehension) returns None,
+        # so the tracer never descends into its line events — it stays one opaque
+        # step from the target's vantage point (spec §7).
+        if frame.f_code is not target_code:
+            return None
+        if len(events) >= MAX_STEPS:
+            truncated["hit"] = True
+            truncated["reason"] = "steps"
+            raise _Abort()
+        if (time.monotonic() - started) > WALL_CLOCK_BUDGET_S:
+            truncated["hit"] = True
+            truncated["reason"] = "time"
+            raise _Abort()
+        scope = [var_for(k, v) for k, v in frame.f_locals.items()]
+        last_line["n"] = frame.f_lineno
+        if event == "exception":
+            # sys.settrace fires 'exception' when an exception is propagating
+            # through the frame. This event is NOT in the schema union — suppress
+            # the emit.  Save the scope so the terminal raise step (if this
+            # exception propagates out) has a non-empty snapshot. last_line["n"]
+            # now points at the line that raised — the unified raise-line source
+            # shared with _trace_free_text (PR #177 fix 3).
+            last_exc_scope[:] = scope
+            return tracer
+        events.append({"line": frame.f_lineno, "event": event, "scope": scope})
+        return tracer
+
+    sys.settrace(tracer)
+    try:
+        func(*args, **kwargs)
+    except _Abort:
+        pass
+    except BaseException as exc:  # the call itself threw → terminal raise step
+        sys.settrace(None)
+        # Use the scope captured from the exception frame (last_exc_scope) so the
+        # terminal raise step shows live locals, not an empty snapshot.
+        scope_for_raise = last_exc_scope if last_exc_scope else []
+        # Raise-line source (PR #177 fix 3): last_line["n"] is the last line the
+        # TARGET frame executed (updated on every event including the suppressed
+        # 'exception' event), so the terminal raise points at the raising line.
+        events.append({
+            "line": last_line["n"], "event": "raise", "scope": scope_for_raise,
+            "raised": {"type": type(exc).__name__, "message": str(exc)},
+        })
+        return {"trace": events, "truncated": truncated["hit"],
+                "truncated_reason": truncated["reason"]}
+    finally:
+        sys.settrace(None)
+    return {"trace": events, "truncated": truncated["hit"],
+            "truncated_reason": truncated["reason"]}
+
+
+def _build_invocation(spec: dict):
+    """Import the module, resolve the callable, and return (callable, args, kwargs).
+
+    Methods build ``Foo(*ctor.args, **ctor.kwargs).method`` first, so the
+    captured trace anchors on the METHOD body, not the constructor.
+    """
+    module = importlib.import_module(spec["module"])
+    name = spec["name"]
+    parent = spec.get("parent_class")
+    args = spec.get("args", [])
+    kwargs = spec.get("kwargs", {})
+    if parent:
+        cls = getattr(module, parent)
+        ctor = spec.get("ctor") or {}
+        instance = cls(*ctor.get("args", []), **ctor.get("kwargs", {}))
+        return getattr(instance, name), args, kwargs
+    return getattr(module, name), args, kwargs
+
+
+def _trace_free_text(spec: dict) -> dict:
+    """USER path (spec §6/§10): exec the user's edited free-text call in the
+    target module's namespace under the SAME bounded callback. The expression is
+    the user's own code (pytest-equivalent trust); caps still apply.
+
+    Frame-scoping (spec §5 + §7): like trace_call, the tracer anchors on the
+    target function's CODE OBJECT (``target.__code__``), NOT its filename — so a
+    sibling helper defined in the same module file does not interleave its lines
+    into the flat Step[] and mis-anchor on the target's source pane.
+
+    ``exception`` events are suppressed (not in the schema union); the terminal
+    raise step's line comes from ``last_line["n"]`` (the last line the TARGET
+    frame executed before raising) — the SAME source trace_call uses (PR #177
+    fix 3 unifies the two).
+    """
+    module = importlib.import_module(spec["module"])
+    parent = spec.get("parent_class")
+    target = getattr(getattr(module, parent), spec["name"]) if parent \
+        else getattr(module, spec["name"])
+    # Anchor on the code object, not the filename. Unwrap a decorator so we still
+    # anchor on the user's real body when __wrapped__ is present (the eligibility
+    # gate declines decorated targets up front, but anchoring on the unwrapped
+    # code object keeps this honest if it is ever reached).
+    real = inspect.unwrap(target)
+    target_code = getattr(real, "__code__", None)
+    text = spec["call_text"]
+    ns = dict(vars(module))
+    events: list[dict] = []
+    truncated = {"hit": False, "reason": None}
+    started = time.monotonic()
+    last_line = {"n": 0}
+    code_obj = compile(text, "<call_text>", "eval")
+    last_exc_scope: list[dict] = []
+
+    def tracer(frame, event, arg):
+        if frame.f_code is not target_code:
+            return None  # opaque: do not descend non-target frames (spec §7)
+        if len(events) >= MAX_STEPS:
+            truncated["hit"] = True
+            truncated["reason"] = "steps"
+            raise _Abort()
+        if (time.monotonic() - started) > WALL_CLOCK_BUDGET_S:
+            truncated["hit"] = True
+            truncated["reason"] = "time"
+            raise _Abort()
+        scope = [var_for(k, v) for k, v in frame.f_locals.items()]
+        last_line["n"] = frame.f_lineno
+        if event == "exception":
+            # Suppress — not in the schema union; save scope for terminal raise.
+            last_exc_scope[:] = scope
+            return tracer
+        events.append({"line": frame.f_lineno, "event": event, "scope": scope})
+        return tracer
+
+    sys.settrace(tracer)
+    try:
+        eval(code_obj, ns, ns)
+    except _Abort:
+        pass
+    except BaseException as exc:
+        sys.settrace(None)
+        # Unified raise-line (PR #177 fix 3): last_line["n"] is the last line the
+        # TARGET frame executed (0 if the exception never entered the target —
+        # e.g. it raised before reaching the anchored body).
+        scope_for_raise = last_exc_scope if last_exc_scope else []
+        events.append({"line": last_line["n"], "event": "raise", "scope": scope_for_raise,
+                       "raised": {"type": type(exc).__name__, "message": str(exc)}})
+        return {"trace": events, "truncated": truncated["hit"],
+                "truncated_reason": truncated["reason"]}
+    finally:
+        sys.settrace(None)
+    return {"trace": events, "truncated": truncated["hit"],
+            "truncated_reason": truncated["reason"]}
+
+
+def detect_kind(spec: dict) -> dict:
+    """Re-derive async/generator/decorated at import time so the server can fall
+    back BEFORE running real code. An async generator reports is_async=True so the
+    eligibility gate declines it with the 'async' reason (spec §7); is_generator
+    stays for SYNC generators only. Returns
+    {"is_async":bool, "is_generator":bool, "is_decorated":bool}.
+
+    Decorated-target detection (PR #177 fix 2): a decorator replaces the public
+    name with a wrapper, so own_file becomes the WRAPPER's file and the real body
+    is never anchored — the capture would null the slab. We detect this so the
+    gate declines honestly. Two signals:
+      - ``__wrapped__`` exists (functools.wraps preserves the original); OR
+      - the visible callable's ``co_name`` differs from the looked-up name (a
+        bare wrapper that did not use functools.wraps).
+    """
+    module = importlib.import_module(spec["module"])
+    parent = spec.get("parent_class")
+    name = spec["name"]
+    target = getattr(getattr(module, parent), name) if parent \
+        else getattr(module, name)
+    is_async = inspect.iscoroutinefunction(target) or inspect.isasyncgenfunction(target)
+    code = getattr(target, "__code__", None)
+    is_decorated = hasattr(target, "__wrapped__") or (
+        code is not None and code.co_name != name
+    )
+    return {
+        "is_async": is_async,
+        "is_generator": inspect.isgeneratorfunction(target),
+        "is_decorated": bool(is_decorated),
+    }
+
+
+def source_lines_for(spec: dict) -> list[dict]:
+    module = importlib.import_module(spec["module"])
+    parent = spec.get("parent_class")
+    target = getattr(getattr(module, parent), spec["name"]) if parent \
+        else getattr(module, spec["name"])
+    try:
+        src, start = inspect.getsourcelines(target)
+    except (OSError, TypeError):
+        return []
+    return [{"num": start + i, "text": line.rstrip("\n")} for i, line in enumerate(src)]
+
+
+def _emit(payload: dict, trace_path: str | None) -> None:
+    """Write the trace/probe/error payload to the trace channel.
+
+    stdout demux (PR #177 safety fix 4): when ``trace_path`` is set we write the
+    JSON to that file so the user's own stdout (which we redirect to stderr while
+    the call runs) can never corrupt the trace. Back-compat: with no ``trace_path``
+    (older caller / in-process unit test) we fall back to stdout."""
+    blob = json.dumps(payload)
+    if trace_path:
+        with open(trace_path, "w", encoding="utf-8") as fh:
+            fh.write(blob)
+    else:
+        print(blob)
+
+
+def main(argv: list[str]) -> int:
+    with open(argv[1], encoding="utf-8") as fh:
+        spec = json.loads(fh.read())
+    trace_path = spec.get("trace_path")
+    if spec.get("probe"):  # eligibility/source probe — never runs user logic
+        out = {"detect": detect_kind(spec), "source_lines": source_lines_for(spec)}
+        _emit(out, trace_path)
+        return 0
+    # Redirect the user's stdout to stderr for the duration of the run so a user
+    # print / C flush / atexit line stays OFF the trace channel (fix 4). stderr is
+    # already a diagnostics-only sink for us (we never parse it as a trace).
+    saved_stdout = sys.stdout
+    try:
+        sys.stdout = sys.stderr
+        if spec.get("call_text"):  # USER free-text path (spec §6/§10)
+            raw = _trace_free_text(spec)
+        else:  # MODEL structured-descriptor path
+            callable_, args, kwargs = _build_invocation(spec)
+            raw = trace_call(callable_, args, kwargs)
+    finally:
+        sys.stdout = saved_stdout
+    _emit(raw, trace_path)
+    return 0
+
+
+if __name__ == "__main__":
+    _trace_path = None
+    try:
+        with open(sys.argv[1], encoding="utf-8") as _fh:
+            _trace_path = json.loads(_fh.read()).get("trace_path")
+    except Exception:  # noqa: BLE001 — argv/spec unreadable; fall back to stdout
+        _trace_path = None
+    try:
+        sys.exit(main(sys.argv))
+    except Exception:  # noqa: BLE001 — surface import/build errors as a clean payload
+        _emit({"error": traceback.format_exc()}, _trace_path)
+        sys.exit(3)
