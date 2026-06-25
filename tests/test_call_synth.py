@@ -239,3 +239,136 @@ def test_lift_literal_args_rejects_non_json_float():
     assert _lift_literal_args(_one_call("f(float('nan'))")) is None  # not a literal anyway
     # a literal that json rejects:
     assert _lift_literal_args(_one_call("f(1e400)")) is None  # inf literal -> rejected
+
+
+# ---------------------------------------------------------------------------
+# Task 5: synthesize_call
+# ---------------------------------------------------------------------------
+
+def test_synthesize_call_lifts_literal_test_call(tmp_path):
+    conn, pid, root = analyzed_project(
+        tmp_path, {"src/pkg/lib.py": _LIB, "tests/test_lib.py": _TEST}
+    )
+    resolved = resolve_function_ref(conn, pid, FunctionRef(file="src/pkg/lib.py", name="target"))
+    out = synthesize_call_for_test = call_synth.synthesize_call(resolved, conn, pid, root)
+    assert out is not None
+    assert out.args == ["abc"]
+    assert out.kwargs == {}
+    assert out.ctor is None
+    assert out.arg_source == "tests"
+
+
+def test_synthesize_call_returns_none_for_fixture_args(tmp_path):
+    files = {
+        "src/pkg/lib.py": "def needs_conn(conn, n):\n    return n\n",
+        "tests/test_lib.py": (
+            "from src.pkg.lib import needs_conn\n\n"
+            "def test_it(db):\n"
+            "    assert needs_conn(db, 3) == 3\n"   # `db` is a fixture (free name)
+        ),
+    }
+    conn, pid, root = analyzed_project(tmp_path, files)
+    resolved = resolve_function_ref(conn, pid, FunctionRef(file="src/pkg/lib.py", name="needs_conn"))
+    assert call_synth.synthesize_call(resolved, conn, pid, root) is None
+
+
+def test_synthesize_call_returns_none_with_no_call_site(tmp_path):
+    conn, pid, root = analyzed_project(
+        tmp_path, {"src/pkg/lib.py": "def lonely(x):\n    return x\n"}
+    )
+    resolved = resolve_function_ref(conn, pid, FunctionRef(file="src/pkg/lib.py", name="lonely"))
+    assert call_synth.synthesize_call(resolved, conn, pid, root) is None
+
+
+def test_synthesize_call_does_not_lift_same_name_other_module(tmp_path):
+    # The spec §8 re-verification BLOCKER: two same-named `process` functions in
+    # DIFFERENT modules; the test imports zzz.process with a literal arg. The
+    # analyzer's name-based edge binds test_p -> aaa.process (first-match-wins), so a
+    # request for aaa.process must NOT lift zzz's call-site (binding mismatch).
+    files = {
+        "src/pkg/aaa.py": "def process(rel):\n    return 'AAA'\n",
+        "src/pkg/zzz.py": "def process(rel):\n    return 'ZZZ'\n",
+        "tests/test_z.py": (
+            "from src.pkg.zzz import process\n\n"
+            "def test_p():\n"
+            "    assert process('x') == 'ZZZ'\n"
+        ),
+    }
+    conn, pid, root = analyzed_project(tmp_path, files)
+    # aaa: the (wrong) edge points here, but the caller imports zzz -> rejected -> None.
+    resolved_aaa = resolve_function_ref(conn, pid, FunctionRef(file="src/pkg/aaa.py", name="process"))
+    assert call_synth.synthesize_call(resolved_aaa, conn, pid, root) is None
+    # zzz: the correctly-bound target has NO inbound edge (the analyzer wrote only the
+    # single first-match edge to aaa), so there is nothing to lift -> None. Re-verification
+    # PREVENTS the wrong lift; it does not RECOVER the right one (honest v1 boundary).
+    resolved_zzz = resolve_function_ref(conn, pid, FunctionRef(file="src/pkg/zzz.py", name="process"))
+    assert call_synth.synthesize_call(resolved_zzz, conn, pid, root) is None
+
+
+def test_synthesize_call_refuses_ambiguous_module_collision(tmp_path):
+    # False-confirm guard: two DISTINCT files collapse to the same _module_from_file
+    # module ('pkg.lib') — src/pkg/lib.py (src-stripped) and pkg/lib.py (already pkg.lib).
+    # A module-string match is then not a unique-file match, so synthesis must refuse
+    # rather than risk lifting the wrong file's call and stamping it 'tests'.
+    files = {
+        "src/pkg/lib.py": "def target(rel):\n    return rel.upper()\n",
+        "pkg/lib.py": "def target(rel):\n    return rel.lower()\n",
+        "tests/test_lib.py": (
+            "from pkg.lib import target\n\n"
+            "def test_t():\n"
+            "    assert target('abc') in ('ABC', 'abc')\n"
+        ),
+    }
+    conn, pid, root = analyzed_project(tmp_path, files)
+    for f in ("src/pkg/lib.py", "pkg/lib.py"):
+        resolved = resolve_function_ref(conn, pid, FunctionRef(file=f, name="target"))
+        assert resolved.module == "pkg.lib"  # confirms the collision
+        assert call_synth.synthesize_call(resolved, conn, pid, root) is None
+
+
+def test_synthesize_call_returns_none_for_class_target(tmp_path):
+    files = {
+        "src/pkg/greet.py": (
+            "class Greeter:\n"
+            "    def __init__(self, prefix):\n"
+            "        self.prefix = prefix\n"
+        ),
+        "tests/test_greet.py": (
+            "from src.pkg.greet import Greeter\n\n"
+            "def test_make():\n"
+            "    assert Greeter('hi').prefix == 'hi'\n"
+        ),
+    }
+    conn, pid, root = analyzed_project(tmp_path, files)
+    resolved = resolve_function_ref(conn, pid, FunctionRef(file="src/pkg/greet.py", name="Greeter"))
+    assert resolved.kind == "class"
+    assert call_synth.synthesize_call(resolved, conn, pid, root) is None
+
+
+def test_synthesize_call_prefers_tests_and_richest(tmp_path):
+    files = {
+        "src/pkg/lib.py": "def target(a, b=0):\n    return a\n",
+        "src/pkg/use.py": (
+            "from src.pkg.lib import target\n\n"
+            "def use():\n"
+            "    return target(1)\n"            # non-test, fewer args
+        ),
+        "tests/test_lib.py": (
+            "from src.pkg.lib import target\n\n"
+            "def test_a():\n"
+            "    target(7, b=9)\n"              # test, richer
+        ),
+    }
+    conn, pid, root = analyzed_project(tmp_path, files)
+    resolved = resolve_function_ref(conn, pid, FunctionRef(file="src/pkg/lib.py", name="target"))
+    out = call_synth.synthesize_call(resolved, conn, pid, root)
+    assert out is not None
+    assert out.args == [7] and out.kwargs == {"b": 9}
+
+
+def test_synthesize_call_returns_none_without_project_root(tmp_path):
+    conn, pid, root = analyzed_project(
+        tmp_path, {"src/pkg/lib.py": _LIB, "tests/test_lib.py": _TEST}
+    )
+    resolved = resolve_function_ref(conn, pid, FunctionRef(file="src/pkg/lib.py", name="target"))
+    assert call_synth.synthesize_call(resolved, conn, pid, None) is None

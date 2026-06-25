@@ -9,9 +9,13 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import sqlite3
 from dataclasses import dataclass
 from typing import Any, Optional
+
+from ..analyzer import _is_test_path
+from ..playground import _module_from_file
 
 
 @dataclass(frozen=True)
@@ -194,3 +198,139 @@ def _lift_literal_args(call_node: ast.Call) -> Optional[tuple[list, dict]]:
             return None
         kwargs[kw.arg] = value
     return args, kwargs
+
+
+# ---------------------------------------------------------------------------
+# Task 5: synthesize_call for plain functions
+# ---------------------------------------------------------------------------
+
+def _target_module_is_unambiguous(conn: sqlite3.Connection, project_id: int, resolved) -> bool:
+    """True when (resolved.name, resolved.module) identifies a SINGLE file.
+
+    `resolved.module` is derived (playground._module_from_file strips a leading
+    `src/`), so two DISTINCT files can collapse to the same dotted module
+    (`src/pkg/lib.py` and `pkg/lib.py` both → `pkg.lib`). When that happens an
+    import's module string no longer pins a unique file, so a name-based `calls`
+    edge + module-string confirmation could lift a call that actually targets the
+    OTHER file — a wrong input wearing a `tests` chip. Refuse (→ manual) instead."""
+    rows = conn.execute(
+        "SELECT DISTINCT file_path FROM symbols WHERE project_id=? AND name=?",
+        (project_id, resolved.name),
+    ).fetchall()
+    same_module_files = {r[0] for r in rows if _module_from_file(r[0]) == resolved.module}
+    return len(same_module_files) <= 1
+
+
+@dataclass(frozen=True)
+class _Candidate:
+    is_test: bool
+    richness: int
+    file_path: str
+    line: int
+    args: list
+    kwargs: dict
+    ctor: Optional[dict]
+
+
+def _parse_caller_file(project_root: str, file_path: str) -> Optional[ast.Module]:
+    path = os.path.join(project_root, file_path)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return ast.parse(fh.read())
+    except (OSError, SyntaxError, ValueError):
+        return None
+
+
+def _find_def(
+    tree: ast.Module, name: str, line_start: Optional[int]
+) -> Optional[ast.AST]:
+    """Find the FunctionDef/AsyncFunctionDef named `name`, preferring the one whose
+    lineno matches line_start (mirrors compositor._floor_target_arity)."""
+    best = None
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.name != name:
+            continue
+        if best is None or node.lineno == line_start:
+            best = node
+            if node.lineno == line_start:
+                break
+    return best
+
+
+def _richness(args: list, kwargs: dict, ctor: Optional[dict]) -> int:
+    """Count of non-degenerate literal values, where 'non-degenerate' = not None.
+    A present ``''`` / ``0`` / ``False`` / ``[]`` is a real value and DOES count;
+    only ``None`` (and absent args) score 0, so an empty/None-only call ranks lowest
+    (spec §2.4 'avoid an empty/None-only call that teaches nothing')."""
+    n = sum(1 for v in args if v is not None)
+    n += sum(1 for v in kwargs.values() if v is not None)
+    if ctor is not None:
+        n += sum(1 for v in (ctor.get("args") or []) if v is not None)
+        n += sum(1 for v in (ctor.get("kwargs") or {}).values() if v is not None)
+    return n
+
+
+def _iter_calls(def_node: ast.AST):
+    for node in ast.walk(def_node):
+        if isinstance(node, ast.Call):
+            yield node
+
+
+def synthesize_call(
+    resolved, conn: sqlite3.Connection, project_id: int, project_root: Optional[str]
+) -> Optional[SynthesizedCall]:
+    """Lift a runnable call to `resolved` from a verified, fully-literal real
+    call-site. None when none exists (the floor then emits the `manual` widget).
+    Best-effort: any failure returns None and never raises into the floor."""
+    try:
+        if conn is None or project_id is None or not project_root:
+            return None
+        if resolved.line_start is None:
+            return None
+        if resolved.kind == "class":
+            # A class-name run-request: lifting ClassName(args) has no ctor handling.
+            return None
+        if not _target_module_is_unambiguous(conn, project_id, resolved):
+            # Module string is not a unique file id -> refuse (false-confirm guard).
+            return None
+        is_method = resolved.kind == "method" or bool(resolved.parent_class)
+        if is_method:
+            # Methods are handled in a later task; for now, plain functions only.
+            return None
+        target_id = _resolve_target_symbol_id(conn, project_id, resolved)
+        if target_id is None:
+            return None
+        candidates: list[_Candidate] = []
+        for caller in _candidate_callers(conn, project_id, target_id):
+            tree = _parse_caller_file(project_root, caller.file_path)
+            if tree is None:
+                continue
+            bindings = _import_bindings(tree)
+            def_node = _find_def(tree, caller.name, caller.line_start)
+            if def_node is None:
+                continue
+            is_test = _is_test_path(caller.file_path)
+            for call_node in _iter_calls(def_node):
+                if not _function_call_confirms(call_node, bindings, caller.file_path, resolved):
+                    continue
+                lifted = _lift_literal_args(call_node)
+                if lifted is None:
+                    continue
+                a, k = lifted
+                candidates.append(_Candidate(
+                    is_test=is_test, richness=_richness(a, k, None),
+                    file_path=caller.file_path, line=call_node.lineno,
+                    args=a, kwargs=k, ctor=None,
+                ))
+        if not candidates:
+            return None
+        best = sorted(
+            candidates,
+            key=lambda c: (not c.is_test, -c.richness, c.file_path, c.line),
+        )[0]
+        return SynthesizedCall(args=best.args, kwargs=best.kwargs, ctor=best.ctor,
+                               arg_source="tests")
+    except Exception:  # noqa: BLE001 — best-effort; never raise into the floor
+        return None
