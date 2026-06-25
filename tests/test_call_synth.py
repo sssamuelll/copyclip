@@ -372,3 +372,66 @@ def test_synthesize_call_returns_none_without_project_root(tmp_path):
     )
     resolved = resolve_function_ref(conn, pid, FunctionRef(file="src/pkg/lib.py", name="target"))
     assert call_synth.synthesize_call(resolved, conn, pid, None) is None
+
+
+# ---------------------------------------------------------------------------
+# Task 6: synthesize_call for methods — inline ClassName(lit).method(lit)
+# ---------------------------------------------------------------------------
+
+_CLS = (
+    "class Greeter:\n"
+    "    def __init__(self, prefix):\n"
+    "        self.prefix = prefix\n"
+    "    def greet(self, name):\n"
+    "        return self.prefix + name\n"
+)
+_CLS_TEST = (
+    "from src.pkg.greet import Greeter\n\n"
+    "def test_greet():\n"
+    "    assert Greeter('hi ').greet('sam') == 'hi sam'\n"
+)
+
+
+def test_synthesize_call_method_inline_lifts_ctor_and_args(tmp_path):
+    conn, pid, root = analyzed_project(
+        tmp_path, {"src/pkg/greet.py": _CLS, "tests/test_greet.py": _CLS_TEST}
+    )
+    resolved = resolve_function_ref(
+        conn, pid, FunctionRef(file="src/pkg/greet.py", name="greet", qualname="Greeter.greet")
+    )
+    out = call_synth.synthesize_call(resolved, conn, pid, root)
+    assert out is not None
+    assert out.args == ["sam"]
+    assert out.ctor == {"args": ["hi "], "kwargs": {}}
+    assert out.arg_source == "tests"
+
+
+def test_synthesize_call_method_two_statement_form_returns_none(tmp_path):
+    two_stmt = (
+        "from src.pkg.greet import Greeter\n\n"
+        "def test_greet():\n"
+        "    g = Greeter('hi ')\n"
+        "    assert g.greet('sam') == 'hi sam'\n"
+    )
+    conn, pid, root = analyzed_project(
+        tmp_path, {"src/pkg/greet.py": _CLS, "tests/test_greet.py": two_stmt}
+    )
+    resolved = resolve_function_ref(
+        conn, pid, FunctionRef(file="src/pkg/greet.py", name="greet", qualname="Greeter.greet")
+    )
+    assert call_synth.synthesize_call(resolved, conn, pid, root) is None
+
+
+def test_synthesize_call_method_non_literal_ctor_returns_none(tmp_path):
+    nonlit = (
+        "from src.pkg.greet import Greeter\n\n"
+        "def test_greet(cfg):\n"
+        "    assert Greeter(cfg).greet('sam') == 'x'\n"   # ctor arg is a fixture
+    )
+    conn, pid, root = analyzed_project(
+        tmp_path, {"src/pkg/greet.py": _CLS, "tests/test_greet.py": nonlit}
+    )
+    resolved = resolve_function_ref(
+        conn, pid, FunctionRef(file="src/pkg/greet.py", name="greet", qualname="Greeter.greet")
+    )
+    assert call_synth.synthesize_call(resolved, conn, pid, root) is None

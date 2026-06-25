@@ -278,6 +278,54 @@ def _iter_calls(def_node: ast.AST):
             yield node
 
 
+def _class_binds(class_node: ast.AST, bindings: dict[str, _Binding],
+                 caller_file: str, resolved) -> bool:
+    """True when the constructor reference binds to resolved's class in resolved.module."""
+    simple = _dotted_name(class_node)
+    if simple is None:
+        return False
+    simple_name = simple.split(".")[-1]
+    if simple_name != resolved.parent_class:
+        return False
+    if isinstance(class_node, ast.Name):
+        if caller_file == resolved.file:
+            return True
+        b = bindings.get(class_node.id)
+        return (
+            b is not None
+            and b.orig_name == simple_name
+            and _import_module_matches(b.module, resolved.module)
+        )
+    # Attribute chain: mod.ClassName(...)
+    prefix = _dotted_name(class_node.value) if isinstance(class_node, ast.Attribute) else None
+    if prefix is None:
+        return False
+    b = bindings.get(prefix)
+    return b is not None and _import_module_matches(b.module, resolved.module)
+
+
+def _method_call_confirms_and_lifts(
+    call_node: ast.Call, bindings: dict[str, _Binding], caller_file: str, resolved
+) -> Optional[tuple[list, dict, dict]]:
+    """Confirm + lift an inline ``ClassName(<lit>).method(<lit>)`` call. Returns
+    (method_args, method_kwargs, ctor) or None."""
+    func = call_node.func
+    if not isinstance(func, ast.Attribute) or func.attr != resolved.name:
+        return None
+    inner = func.value
+    if not isinstance(inner, ast.Call):  # not inline construction (e.g. obj.method())
+        return None
+    if not _class_binds(inner.func, bindings, caller_file, resolved):
+        return None
+    method_lits = _lift_literal_args(call_node)
+    ctor_lits = _lift_literal_args(inner)
+    if method_lits is None or ctor_lits is None:
+        return None
+    m_args, m_kwargs = method_lits
+    c_args, c_kwargs = ctor_lits
+    return m_args, m_kwargs, {"args": c_args, "kwargs": c_kwargs}
+
+
 def synthesize_call(
     resolved, conn: sqlite3.Connection, project_id: int, project_root: Optional[str]
 ) -> Optional[SynthesizedCall]:
@@ -296,8 +344,9 @@ def synthesize_call(
             # Module string is not a unique file id -> refuse (false-confirm guard).
             return None
         is_method = resolved.kind == "method" or bool(resolved.parent_class)
-        if is_method:
-            # Methods are handled in a later task; for now, plain functions only.
+        # Nested-class methods are out of v1 scope (fold only renders 2-segment
+        # qualnames); a method with no parent_class cannot be constructed.
+        if is_method and not resolved.parent_class:
             return None
         target_id = _resolve_target_symbol_id(conn, project_id, resolved)
         if target_id is None:
@@ -313,17 +362,29 @@ def synthesize_call(
                 continue
             is_test = _is_test_path(caller.file_path)
             for call_node in _iter_calls(def_node):
-                if not _function_call_confirms(call_node, bindings, caller.file_path, resolved):
-                    continue
-                lifted = _lift_literal_args(call_node)
-                if lifted is None:
-                    continue
-                a, k = lifted
-                candidates.append(_Candidate(
-                    is_test=is_test, richness=_richness(a, k, None),
-                    file_path=caller.file_path, line=call_node.lineno,
-                    args=a, kwargs=k, ctor=None,
-                ))
+                if is_method:
+                    lifted = _method_call_confirms_and_lifts(
+                        call_node, bindings, caller.file_path, resolved)
+                    if lifted is None:
+                        continue
+                    m_args, m_kwargs, ctor = lifted
+                    candidates.append(_Candidate(
+                        is_test=is_test, richness=_richness(m_args, m_kwargs, ctor),
+                        file_path=caller.file_path, line=call_node.lineno,
+                        args=m_args, kwargs=m_kwargs, ctor=ctor,
+                    ))
+                else:
+                    if not _function_call_confirms(call_node, bindings, caller.file_path, resolved):
+                        continue
+                    lifted = _lift_literal_args(call_node)
+                    if lifted is None:
+                        continue
+                    a, k = lifted
+                    candidates.append(_Candidate(
+                        is_test=is_test, richness=_richness(a, k, None),
+                        file_path=caller.file_path, line=call_node.lineno,
+                        args=a, kwargs=k, ctor=None,
+                    ))
         if not candidates:
             return None
         best = sorted(
