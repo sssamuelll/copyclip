@@ -8,6 +8,7 @@ failure returns None — the floor then emits the `manual` needs_args widget.
 from __future__ import annotations
 
 import ast
+import json
 import sqlite3
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -157,3 +158,39 @@ def _function_call_confirms(
             return False
         return _import_module_matches(b.module, resolved.module)
     return False
+
+
+def _is_json_literal(value: Any) -> bool:
+    try:
+        json.dumps(value, allow_nan=False)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def _lift_literal_args(call_node: ast.Call) -> Optional[tuple[list, dict]]:
+    """Lift (args, kwargs) as literal, JSON-serializable values, or None if any
+    argument is non-literal, a splat, or not JSON-serializable."""
+    args: list = []
+    for a in call_node.args:
+        if isinstance(a, ast.Starred):
+            return None
+        try:
+            value = ast.literal_eval(a)
+        except (ValueError, SyntaxError, TypeError):
+            return None
+        if not _is_json_literal(value):
+            return None
+        args.append(value)
+    kwargs: dict = {}
+    for kw in call_node.keywords:
+        if kw.arg is None:  # **kwargs splat
+            return None
+        try:
+            value = ast.literal_eval(kw.value)
+        except (ValueError, SyntaxError, TypeError):
+            return None
+        if not _is_json_literal(value):
+            return None
+        kwargs[kw.arg] = value
+    return args, kwargs

@@ -15,6 +15,7 @@ from copyclip.intelligence.cuaderno.call_synth import (
     _dotted_name,
     _import_module_matches,
     _function_call_confirms,
+    _lift_literal_args,
 )
 
 
@@ -209,3 +210,32 @@ def test_function_call_confirms_unaliased_dotted_module_import():
     call = _one_call(src)
     resolved = _resolved("src/pkg/lib.py", "target", "pkg.lib")
     assert _function_call_confirms(call, b, "tests/test_lib.py", resolved) is True
+
+
+# ---------------------------------------------------------------------------
+# Task 4: _lift_literal_args
+# ---------------------------------------------------------------------------
+
+def test_lift_literal_args_pure_literals():
+    call = _one_call("f(1, 'two', [3, 4], k=True, j=None)")
+    out = _lift_literal_args(call)
+    assert out == ([1, "two", [3, 4]], {"k": True, "j": None})
+
+
+def test_lift_literal_args_rejects_free_name():
+    assert _lift_literal_args(_one_call("f(conn, 1)")) is None
+
+
+def test_lift_literal_args_rejects_call_arg():
+    assert _lift_literal_args(_one_call("f(Foo(), 1)")) is None
+
+
+def test_lift_literal_args_rejects_splat():
+    assert _lift_literal_args(_one_call("f(*xs)")) is None
+    assert _lift_literal_args(_one_call("f(**kw)")) is None
+
+
+def test_lift_literal_args_rejects_non_json_float():
+    assert _lift_literal_args(_one_call("f(float('nan'))")) is None  # not a literal anyway
+    # a literal that json rejects:
+    assert _lift_literal_args(_one_call("f(1e400)")) is None  # inf literal -> rejected
