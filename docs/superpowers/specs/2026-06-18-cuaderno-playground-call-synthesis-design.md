@@ -1,7 +1,7 @@
 # Cuaderno Playground — Automatic Call Synthesis — Design Spec
 
 **Date**: 2026-06-18
-**Status**: Approved for spec — **v2, recut after a unanimous 5/5 roster direction-check** (Lyra, Cassian, Voronov, Vex, Serrano)
+**Status**: **IMPLEMENTED (Core Stage 1)** on branch `feat/cuaderno-call-synthesis` → PR #178 (2026-06-25). Plan: `docs/superpowers/plans/2026-06-25-cuaderno-playground-call-synthesis.md`. The deferred fabricated-example mode (§9) is NOT built. — v2, recut after a unanimous 5/5 roster direction-check (Lyra, Cassian, Voronov, Vex, Serrano)
 **Relationship**: Extends the guided step-through (`2026-06-16-cuaderno-playground-stepthrough-design.md`). Makes the playground **configure the input itself** so the developer goes straight to the execution, instead of handing them an empty `name()` template to fill in by hand (the live-testing rejection that triggered this).
 
 ---
