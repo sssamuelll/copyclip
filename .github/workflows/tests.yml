@@ -34,7 +34,7 @@ jobs:
         # No LLM keys are configured, so the key-gated live tests skip cleanly
         # and the runner's clean HOME has no llm.yaml, so model-default tests
         # fall back to the in-repo DEFAULT_MODELS. The suite is hermetic.
-        run: python -m pytest -q
+        run: python -m pytest -v --tb=short
 
   vitest:
     runs-on: ubuntu-latest

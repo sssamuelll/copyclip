@@ -578,6 +578,16 @@ def _reclaim_tree(pid: int) -> None:
             pass
 
 
+def _killpg_unless_self(pid: int, sig: int) -> None:
+    """Signal a process's group — but NEVER our OWN process group, which would
+    SIGKILL the server/test process itself. A child spawned with
+    ``start_new_session`` is its own group leader (pgid != ours), so this proceeds
+    normally; a child that (mis)shares our group is left to ``proc.kill()``."""
+    pgid = os.getpgid(pid)
+    if pgid != os.getpgid(0):
+        os.killpg(pgid, sig)
+
+
 def _kill_group(proc: subprocess.Popen) -> None:
     """Reclaim the whole process TREE (spec §10 + PR #177 safety fix 6).
 
@@ -591,7 +601,7 @@ def _kill_group(proc: subprocess.Popen) -> None:
         if sys.platform == "win32":
             proc.send_signal(signal.CTRL_BREAK_EVENT)
         else:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            _killpg_unless_self(proc.pid, signal.SIGTERM)
     except Exception:  # noqa: BLE001
         pass
     try:
@@ -603,7 +613,7 @@ def _kill_group(proc: subprocess.Popen) -> None:
         if sys.platform == "win32":
             _reclaim_tree(proc.pid)
         else:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            _killpg_unless_self(proc.pid, signal.SIGKILL)
     except Exception:  # noqa: BLE001
         pass
     try:
