@@ -1,8 +1,5 @@
 import asyncio
-import sqlite3
 from pathlib import Path
-
-import pytest
 
 from copyclip.intelligence.analyzer import analyze
 from copyclip.intelligence.db import connect
@@ -60,5 +57,6 @@ def test_candidate_callers_finds_the_test_function(tmp_path):
     )
     resolved = resolve_function_ref(conn, pid, FunctionRef(file="src/pkg/lib.py", name="target"))
     sid = _resolve_target_symbol_id(conn, pid, resolved)
+    assert sid is not None
     callers = _candidate_callers(conn, pid, sid)
     assert any(c.name == "test_target" and c.file_path == "tests/test_lib.py" for c in callers)
