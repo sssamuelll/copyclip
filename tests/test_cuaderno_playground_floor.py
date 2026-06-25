@@ -443,3 +443,64 @@ def test_floor_proceeds_when_arity_unknown(tmp_path: Path):
         f"arity-unknown floor must still be offered (symbol resolved); declined: {reason!r}"
     )
     assert block is not None
+
+
+# ---------------------------------------------------------------------------
+# Task 7: synthesize_call wired into floor — tests-provenance or manual template
+# ---------------------------------------------------------------------------
+
+
+def test_floor_synthesizes_tests_call_for_arity_n_function(tmp_path):
+    root = str(tmp_path)
+    conn = sqlite3.connect(":memory:"); init_schema(conn)
+    conn.execute("INSERT INTO projects(root_path,name) VALUES(?,?)", (root, "t"))
+    pid = int(conn.execute("SELECT id FROM projects WHERE root_path=?", (root,)).fetchone()[0])
+    # Real source: an arity-1 function and a test that calls it with a literal.
+    src = tmp_path / "src" / "pkg" / "mod.py"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_text("def needs_arg(rel):\n    return rel.upper()\n", encoding="utf-8")
+    tst = tmp_path / "tests" / "test_mod.py"
+    tst.parent.mkdir(parents=True, exist_ok=True)
+    tst.write_text(
+        "from src.pkg.mod import needs_arg\n\n"
+        "def test_it():\n"
+        "    assert needs_arg('abc') == 'ABC'\n",
+        encoding="utf-8",
+    )
+    # Seed the symbols + the 'calls' edge that synthesize_call walks.
+    fn_id = int(conn.execute(
+        "INSERT INTO symbols(project_id,name,kind,file_path,line_start,line_end,parent_symbol_id,module) "
+        "VALUES(?,?,?,?,?,?,?,?)",
+        (pid, "needs_arg", "function", "src/pkg/mod.py", 1, 2, None, "pkg"),
+    ).lastrowid)
+    test_id = int(conn.execute(
+        "INSERT INTO symbols(project_id,name,kind,file_path,line_start,line_end,parent_symbol_id,module) "
+        "VALUES(?,?,?,?,?,?,?,?)",
+        (pid, "test_it", "function", "tests/test_mod.py", 3, 4, None, "tests"),
+    ).lastrowid)
+    conn.execute(
+        "INSERT INTO symbol_edges(project_id,from_symbol_id,to_symbol_id,edge_type) VALUES(?,?,?,'calls')",
+        (pid, test_id, fn_id),
+    )
+    conn.commit()
+
+    block, reason = _construct_playground_floor(
+        "run needs_arg", conn, pid, ledger=None, emitted=[], project_root=root)
+    assert reason is None
+    w = block.to_dict()["widget"]
+    assert w.get("needs_args") is None, "a synthesized tests call must NOT flag needs_args"
+    assert w.get("arg_source") == "tests"
+    assert w["call"]["args"] == ["abc"]
+    assert w["call_text"] == "needs_arg('abc')"
+
+
+def test_floor_falls_to_manual_when_no_literal_call_site(tmp_path):
+    root = str(tmp_path)
+    conn = sqlite3.connect(":memory:"); init_schema(conn)
+    pid = _seed_arity_n_function(conn, root, tmp_path)  # existing helper: arity-1 fn, NO call-site
+    block, reason = _construct_playground_floor(
+        "run needs_arg", conn, pid, ledger=None, emitted=[], project_root=root)
+    assert reason is None
+    w = block.to_dict()["widget"]
+    assert w.get("needs_args") is True
+    assert w.get("arg_source") == "manual"
