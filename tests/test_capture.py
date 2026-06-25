@@ -1698,6 +1698,7 @@ def test_driver_does_not_parse_stdout_when_rc_nonzero(tmp_path, monkeypatch):
 # tree is reclaimed; TerminateProcess alone leaks grandchildren.
 # ---------------------------------------------------------------------------
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only: signal.CTRL_BREAK_EVENT does not exist on POSIX")
 def test_kill_group_gives_ctrl_break_grace_before_kill_on_windows(monkeypatch):
     """On Windows, _kill_group must give CTRL_BREAK a grace window (proc.wait)
     before escalating to kill — an immediate proc.kill() leaks grandchildren."""

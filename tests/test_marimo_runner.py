@@ -761,6 +761,7 @@ import sys
 from unittest.mock import MagicMock
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only: signal.CTRL_BREAK_EVENT does not exist on POSIX")
 def test_best_effort_kill_uses_process_group_on_windows(monkeypatch):
     monkeypatch.setattr(sys, "platform", "win32")
     proc = MagicMock()
@@ -770,6 +771,7 @@ def test_best_effort_kill_uses_process_group_on_windows(monkeypatch):
     proc.send_signal.assert_any_call(signal.CTRL_BREAK_EVENT)
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only: signal.CTRL_BREAK_EVENT does not exist on POSIX")
 def test_best_effort_kill_reclaims_tree_on_windows_after_grace(monkeypatch):
     """PR #177 safety fix 6: on Windows, when the CTRL_BREAK + terminate grace
     expires, _best_effort_kill must reclaim the whole TREE (psutil children) — not
