@@ -844,7 +844,12 @@ def test_best_effort_kill_killpg_on_posix(monkeypatch):
     killpg_calls: list[tuple[int, object]] = []
     # getpgid / killpg are POSIX-only; patch them into the os module (raising=False
     # so the patch works even on Windows where they don't exist).
-    monkeypatch.setattr("os.getpgid", lambda pid: 4242, raising=False)
+    # The child (pid 999) resolves to group 4242; OUR group (getpgid(0)) must be a
+    # DIFFERENT value (1), or the `_killpg_unless_self` guard would (correctly) skip
+    # the kill — see test_best_effort_kill_skips_killpg_when_group_is_self.
+    monkeypatch.setattr(
+        "os.getpgid", lambda pid: 1 if pid == 0 else 4242, raising=False
+    )
     monkeypatch.setattr(
         "os.killpg",
         lambda pgid, sig: killpg_calls.append((pgid, sig)),
@@ -877,3 +882,40 @@ def test_best_effort_kill_killpg_on_posix(monkeypatch):
         f"SIGKILL escalation not sent after grace-period timeout; "
         f"killpg calls: {killpg_calls}"
     )
+
+
+def test_best_effort_kill_skips_killpg_when_group_is_self(monkeypatch):
+    """Regression: a process whose group is OUR OWN group must NEVER be killpg'd.
+
+    The unit tests fake the spawn with a process whose ``pid`` is ``0``; on POSIX
+    ``os.getpgid(0)`` resolves to the *calling* (pytest) process's group, so an
+    unguarded ``os.killpg(os.getpgid(0), SIGKILL)`` would SIGKILL the entire test
+    runner — which silently canceled CI mid-suite. The ``_killpg_unless_self`` guard
+    must detect the self-group and fall through to ``process.kill()`` instead."""
+    monkeypatch.setattr(sys, "platform", "linux")
+    killpg_calls: list[tuple[int, object]] = []
+    # Every pid (including 0) resolves to the SAME group → it IS our group.
+    monkeypatch.setattr("os.getpgid", lambda pid: 7777, raising=False)
+    monkeypatch.setattr(
+        "os.killpg",
+        lambda pgid, sig: killpg_calls.append((pgid, sig)),
+        raising=False,
+    )
+    if getattr(signal, "SIGKILL", None) is None:
+        import enum as _enum
+        monkeypatch.setattr(
+            signal,
+            "SIGKILL",
+            _enum.IntEnum("Signals", {"SIGKILL": 9})["SIGKILL"],
+            raising=False,
+        )
+    proc = MagicMock()
+    proc.poll.return_value = None
+    proc.pid = 0  # the faked-spawn pid that triggered the CI self-kill
+    proc.wait.side_effect = [__import__("subprocess").TimeoutExpired("x", 1), None]
+    MarimoRunner()._best_effort_kill(proc)
+    assert killpg_calls == [], (
+        f"killpg must NOT fire on our own process group, but got {killpg_calls}"
+    )
+    # The escalation still happens — just via the target-only process.kill().
+    proc.kill.assert_called()

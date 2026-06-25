@@ -331,7 +331,7 @@ class MarimoRunner:
             if sys.platform == "win32":
                 process.send_signal(signal.CTRL_BREAK_EVENT)
             else:
-                os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                _killpg_unless_self(process.pid, signal.SIGTERM)
         except Exception:
             pass
         try:
@@ -349,7 +349,7 @@ class MarimoRunner:
         # hung notebook spawned would leak — so walk the live tree with psutil.
         try:
             if sys.platform != "win32":
-                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                _killpg_unless_self(process.pid, signal.SIGKILL)
             else:
                 _reclaim_tree(process.pid)
             process.kill()
@@ -402,6 +402,18 @@ class MarimoRunner:
             except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
                 continue
         return False
+
+
+def _killpg_unless_self(pid: int, sig: int) -> None:
+    """Signal a process's group — but NEVER our OWN process group, which would
+    SIGKILL the server/test process itself. A child spawned with
+    ``start_new_session`` is its own group leader (pgid != ours), so this proceeds
+    normally; a child that (mis)shares our group — e.g. a faked process whose
+    ``pid`` is ``0``, where ``os.getpgid(0)`` resolves to OUR group — is left to
+    ``proc.kill()`` instead of taking the whole runner down with it."""
+    pgid = os.getpgid(pid)
+    if pgid != os.getpgid(0):
+        os.killpg(pgid, sig)
 
 
 def _reclaim_tree(pid: int) -> None:
