@@ -37,12 +37,12 @@ export function PreviewCall({ funcName, initialCall, onConfirm, onCancel, needsA
         <div style={s('flex:1;display:flex;flex-direction:column;justify-content:center;')}>
           <div style={s('font-family:var(--font-body);font-size:15px;color:var(--ink-2);margin-bottom:13px;')}>{t('playground_preview_lead', lang)}</div>
           {argSource ? (
-            <div
+            <span
               data-testid="arg-source-chip"
               style={s('display:inline-flex;align-self:flex-start;align-items:baseline;gap:6px;font-family:var(--font-mono);font-size:12.5px;color:var(--accent-ink);background:var(--accent-soft);border:1px solid var(--accent-line);padding:2px 8px 3px;border-radius:999px;letter-spacing:-0.01em;margin-bottom:10px;')}
             >
               {t(argSource === 'tests' ? 'playground_chip_tests' : 'playground_chip_manual', lang)}
-            </div>
+            </span>
           ) : null}
           {needsArgs ? (
             <div

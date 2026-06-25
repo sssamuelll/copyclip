@@ -250,7 +250,7 @@ def test_synthesize_call_lifts_literal_test_call(tmp_path):
         tmp_path, {"src/pkg/lib.py": _LIB, "tests/test_lib.py": _TEST}
     )
     resolved = resolve_function_ref(conn, pid, FunctionRef(file="src/pkg/lib.py", name="target"))
-    out = synthesize_call_for_test = call_synth.synthesize_call(resolved, conn, pid, root)
+    out = call_synth.synthesize_call(resolved, conn, pid, root)
     assert out is not None
     assert out.args == ["abc"]
     assert out.kwargs == {}
