@@ -60,3 +60,41 @@ def test_candidate_callers_finds_the_test_function(tmp_path):
     assert sid is not None
     callers = _candidate_callers(conn, pid, sid)
     assert any(c.name == "test_target" and c.file_path == "tests/test_lib.py" for c in callers)
+
+
+import ast
+from copyclip.intelligence.cuaderno.call_synth import _import_bindings, _Binding, _dotted_name
+
+
+def test_import_bindings_from_import_with_and_without_alias():
+    tree = ast.parse(
+        "from src.pkg.lib import target\n"
+        "from src.pkg.lib import target as tgt\n"
+        "import os\n"
+        "import a.b.c as abc\n"
+    )
+    b = _import_bindings(tree)
+    assert b["target"] == _Binding(module="src.pkg.lib", orig_name="target")
+    assert b["tgt"] == _Binding(module="src.pkg.lib", orig_name="target")
+    assert b["os"] == _Binding(module="os", orig_name=None)
+    assert b["abc"] == _Binding(module="a.b.c", orig_name=None)
+
+
+def test_import_bindings_plain_module_import_binds_full_dotted():
+    tree = ast.parse("import a.b.c\n")
+    b = _import_bindings(tree)
+    assert b["a.b.c"] == _Binding(module="a.b.c", orig_name=None)
+
+
+def test_import_bindings_skips_relative_imports():
+    tree = ast.parse("from . import sibling\nfrom .pkg import thing\n")
+    b = _import_bindings(tree)
+    assert "sibling" not in b
+    assert "thing" not in b
+
+
+def test_dotted_name():
+    call = ast.parse("a.b.c.func(1)", mode="eval").body
+    assert _dotted_name(call.func.value) == "a.b.c"
+    assert _dotted_name(ast.parse("bare", mode="eval").body) == "bare"
+    assert _dotted_name(ast.parse("x[0]", mode="eval").body) is None

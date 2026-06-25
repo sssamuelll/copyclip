@@ -7,6 +7,7 @@ failure returns None — the floor then emits the `manual` needs_args widget.
 """
 from __future__ import annotations
 
+import ast
 import sqlite3
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -61,3 +62,41 @@ def _candidate_callers(
         _Caller(name=r[0], kind=r[1], file_path=r[2], line_start=r[3], line_end=r[4])
         for r in rows
     ]
+
+
+@dataclass(frozen=True)
+class _Binding:
+    module: str               # dotted source module (e.g. "src.pkg.lib")
+    orig_name: Optional[str]  # "from m import orig [as bound]" -> orig; "import m" -> None
+
+
+def _dotted_name(node: ast.AST) -> Optional[str]:
+    """Reconstruct a dotted name from a Name/Attribute chain ('a.b.c'), else None."""
+    parts: list[str] = []
+    cur = node
+    while isinstance(cur, ast.Attribute):
+        parts.append(cur.attr)
+        cur = cur.value
+    if isinstance(cur, ast.Name):
+        parts.append(cur.id)
+        return ".".join(reversed(parts))
+    return None
+
+
+def _import_bindings(tree: ast.Module) -> dict[str, _Binding]:
+    """Map module-level bound names to their import binding. Relative imports are
+    skipped (v1: unconfirmable without resolving the caller's package)."""
+    out: dict[str, _Binding] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if node.level and node.level > 0:
+                continue  # relative import — conservative skip
+            mod = node.module or ""
+            for alias in node.names:
+                bound = alias.asname or alias.name
+                out[bound] = _Binding(module=mod, orig_name=alias.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                bound = alias.asname or alias.name
+                out[bound] = _Binding(module=alias.name, orig_name=None)
+    return out
