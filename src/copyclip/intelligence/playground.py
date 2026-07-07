@@ -622,9 +622,12 @@ def launch_playground(
         # Low display #6: for a method, use qualname (e.g. "MyClass.process") so
         # the stepper header shows class context; fall back to name otherwise.
         func_name = (resolved.qualname if resolved.parent_class else resolved.name)
+        executed_lines = {s.line for s in steps if s.line}
+        junctions = _junctions_for(resolved, project_root, executed_lines, truncated)
         return StepThroughResponse(
             trace=steps, source_lines=source_lines, func_name=func_name,
-            file_line=file_line, truncated=truncated, truncated_reason=truncated_reason)
+            file_line=file_line, truncated=truncated, truncated_reason=truncated_reason,
+            junctions=junctions)
 
     # Non-cuaderno sources: the Marimo iframe path is UNCHANGED.
     return _launch_marimo(req, project_root, resolved, runner, trace)
@@ -746,6 +749,26 @@ def _looks_absolute(path: str) -> bool:
     if len(path) >= 2 and path[1] == ":":
         return True
     return False
+
+
+def _junctions_for(
+    resolved: ResolvedFunction,
+    project_root: str,
+    executed_lines: set[int],
+    truncated: bool,
+) -> list[dict]:
+    """Read the target's source and compute its if/elif/else junctions. Pure
+    logic lives in cuaderno.junctions; this only supplies the source text and
+    fails open to [] so a read/parse problem never breaks the step-through."""
+    from .cuaderno.junctions import compute_junctions
+    try:
+        with open(os.path.join(project_root, resolved.file), encoding="utf-8") as fh:
+            source = fh.read()
+    except OSError:
+        return []
+    return compute_junctions(
+        source, resolved.line_start, resolved.name, executed_lines, truncated
+    )
 
 
 def _module_from_file(file_path: str) -> str:
