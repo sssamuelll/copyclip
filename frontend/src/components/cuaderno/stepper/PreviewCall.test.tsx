@@ -207,4 +207,55 @@ describe('PreviewCall', () => {
     render(<PreviewCall funcName="f" initialCall="f(1)" onConfirm={() => {}} onCancel={() => {}} />)
     expect(screen.getByRole('button', { name: /^step through$/i })).toBeEnabled()
   })
+
+  // ---- arg_source provenance chip ----
+
+  it('renders the tests-provenance chip (en) when argSource="tests"', () => {
+    render(
+      <PreviewCall
+        funcName="target"
+        initialCall="target('abc')"
+        onConfirm={() => {}}
+        onCancel={() => {}}
+        argSource="tests"
+        lang="en"
+      />
+    )
+    const chip = screen.getByTestId('arg-source-chip')
+    expect(chip).toHaveTextContent('from a test')
+  })
+
+  it('renders the tests-provenance chip (es, Venezuelan tuteo)', () => {
+    render(
+      <PreviewCall
+        funcName="target"
+        initialCall="target('abc')"
+        onConfirm={() => {}}
+        onCancel={() => {}}
+        argSource="tests"
+        lang="es"
+      />
+    )
+    expect(screen.getByTestId('arg-source-chip')).toHaveTextContent('args de un test')
+  })
+
+  it('renders the manual chip when argSource="manual"', () => {
+    render(
+      <PreviewCall
+        funcName="needs_arg"
+        initialCall="needs_arg()"
+        onConfirm={() => {}}
+        onCancel={() => {}}
+        needsArgs={true}
+        argSource="manual"
+        lang="es"
+      />
+    )
+    expect(screen.getByTestId('arg-source-chip')).toHaveTextContent('completa la llamada')
+  })
+
+  it('renders no chip when argSource is absent', () => {
+    render(<PreviewCall funcName="f" initialCall="f(1)" onConfirm={() => {}} onCancel={() => {}} />)
+    expect(screen.queryByTestId('arg-source-chip')).toBeNull()
+  })
 })

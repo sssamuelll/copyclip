@@ -15,6 +15,7 @@ from .prompts import (
     WIDGET_RECOVERY_DIRECTIVE_VISUAL, WIDGET_RECOVERY_DIRECTIVE_RUN,
     ALTITUDE_RETRY_DIRECTIVE,
 )
+from .call_synth import synthesize_call
 from .emit_fold import fold_playground_widget
 from .read_ledger import ReadLedger, is_content_bearing_read
 from .trace import NULL_TRACE
@@ -259,6 +260,18 @@ def _construct_playground_floor(question: str, conn: Optional[sqlite3.Connection
     # editable preview — the decline path is reserved for genuinely unresolvable symbols.
     doomed_reason = _doomed_floor_reason(resolved, project_root)
     needs_args = doomed_reason is not None
+    # Stage-1 call synthesis (spec 2026-06-18): when the bare floor would need
+    # args, try to lift a real, fully-literal call-site from the codebase. On a
+    # hit the widget ships a runnable `tests` call (no needs_args); on a miss it
+    # keeps the `manual` needs_args template.
+    synth = synthesize_call(resolved, conn, project_id, project_root) if needs_args else None
+    arg_source = None
+    if needs_args:
+        if synth is not None:
+            needs_args = False
+            arg_source = "tests"
+        else:
+            arg_source = "manual"
     fr: dict[str, Any] = {"file": resolved.file, "name": resolved.name}
     if resolved.line_start is not None:
         fr["line"] = resolved.line_start
@@ -284,11 +297,20 @@ def _construct_playground_floor(question: str, conn: Optional[sqlite3.Connection
             class_name = "Object"
         # Embed a synthetic qualname so fold_playground_widget renders "Class().method()".
         fr = {**fr, "qualname": f"{class_name}.{resolved.name}"}
-        # Pass top-level ctor so the fold picks it up (fold reads w.get("ctor")).
-        extra_widget_data["ctor"] = {"args": [], "kwargs": {}}
+        # A synthesized method call supplies a real ctor; otherwise the empty
+        # ctor that gives call_text a "Class().method()" template to edit.
+        if synth is not None and synth.ctor is not None:
+            extra_widget_data["ctor"] = synth.ctor
+        else:
+            extra_widget_data["ctor"] = {"args": [], "kwargs": {}}
+    # Synthesized positional/keyword literals (plain function or method args).
+    if synth is not None:
+        extra_widget_data["args"] = synth.args
+        extra_widget_data["kwargs"] = synth.kwargs
     raw_widget: Widget = Widget.playground(
         function_ref=fr, breadcrumb=breadcrumb,
         needs_args=needs_args if needs_args else None,
+        arg_source=arg_source,
     )
     # Merge extra fields (ctor for methods) into the widget data dict.
     # We patch the raw dict rather than the dataclass (frozen) to keep it simple.

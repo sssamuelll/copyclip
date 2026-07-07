@@ -62,7 +62,8 @@ class Widget:
     def playground(function_ref: dict, breadcrumb: str,
                    suggested_inputs: Optional[list] = None,
                    call: Optional[dict] = None,
-                   needs_args: Optional[bool] = None) -> "Widget":
+                   needs_args: Optional[bool] = None,
+                   arg_source: Optional[str] = None) -> "Widget":
         citation: dict[str, Any] = {"kind": "path", "path": function_ref.get("file")}
         if function_ref.get("line") is not None:
             citation["line_start"] = function_ref["line"]
@@ -74,6 +75,8 @@ class Widget:
             d["call"] = call
         if needs_args:
             d["needs_args"] = True
+        if arg_source is not None:
+            d["arg_source"] = arg_source
         return Widget(kind="playground", data=d)
 
     def to_dict(self) -> dict[str, Any]:

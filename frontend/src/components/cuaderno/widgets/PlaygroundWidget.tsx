@@ -87,6 +87,7 @@ export function PlaygroundWidget({ widget, onOpenCitation, lang }: Props) {
         onConfirm={doLaunch}
         onCancel={() => { setPreviewing(false); setPreviewToken(-1) }}
         needsArgs={widget.needs_args}
+        argSource={widget.arg_source}
         lang={lang}
       />
     )
