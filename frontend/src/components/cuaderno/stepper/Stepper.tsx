@@ -2,7 +2,7 @@ import { useState, useRef, useMemo } from 'react'
 import type { StepThroughResponse } from '../../../types/api'
 import { t } from '../strings'
 import {
-  ROW_H, clampStep, nextChange, trackFraction, lineModels, buildRows, markerLefts, sourceTranslateY,
+  ROW_H, clampStep, nextChange, trackFraction, lineModels, buildRows, markerLefts, sourceTranslateY, junctionOverlay,
 } from './trace'
 import { StateRow, s } from './StateRow'
 
@@ -60,6 +60,13 @@ export function Stepper({ response, onClose, onEdit, lang }: Props) {
   const hlTop = curIdx * ROW_H     // only used when !staleAnchor
   const handleLeft = total > 1 ? `${((cur - 1) / (total - 1)) * 100}%` : '0%'
   const markers = markerLefts(trace)
+
+  // Cruces v0.1: static per-run branch overlay. Suppressed when the source
+  // anchor is stale (same guard the current-step highlight uses).
+  const overlay = useMemo(
+    () => (staleAnchor ? { role: {}, chips: {} } : junctionOverlay(response.junctions)),
+    [response.junctions, staleAnchor],
+  )
 
   // raised: only treated as terminal if it's also the last step (cur === total)
   const raised = (tr.event === 'raise' || !!tr.raised) && cur === total
@@ -149,12 +156,19 @@ export function Stepper({ response, onClose, onEdit, lang }: Props) {
               data-testid="source-lines"
               style={{ ...s('position:relative;'), transform: `translateY(${srcTranslateY}px)`, transition: 'transform .22s cubic-bezier(.4,0,.2,1)' }}
             >
-              {lines.map((ln) => (
-                <div key={ln.num} style={s('display:flex;height:26px;')}>
-                  <span style={s(ln.numStyle)}>{ln.num}</span>
-                  <span style={s(ln.codeStyle)}>{ln.code}</span>
-                </div>
-              ))}
+              {lines.map((ln) => {
+                const dim = overlay.role[ln.num]
+                const chip = overlay.chips[ln.num]
+                return (
+                  <div key={ln.num} style={s('display:flex;height:26px;position:relative;')}>
+                    <span style={s(ln.numStyle)}>{ln.num}</span>
+                    <span style={{ ...s(ln.codeStyle), ...(dim ? { opacity: dim === 'unknown' ? 0.5 : 0.34 } : {}) }}>{ln.code}</span>
+                    {chip && (
+                      <span style={s('position:absolute;right:6px;top:0;font-family:var(--font-ui);font-size:10px;letter-spacing:.04em;color:var(--accent-ink);opacity:.85;')}>{chip}</span>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           </div>
           {/* divider */}
