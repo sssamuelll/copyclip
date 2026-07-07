@@ -54,3 +54,23 @@ def test_junctions_for_missing_file_returns_empty():
         module="m", line_start=1, parent_class=None,
     )
     assert pg._junctions_for(resolved, os.getcwd(), {1}, False) == []
+
+
+def test_junctions_for_non_utf8_source_fails_open(tmp_path):
+    # A PEP-263-declared latin-1 file: the capture driver decodes it fine (honors
+    # the cookie), but _junctions_for's strict utf-8 read hits the 0xE9 byte and
+    # raises UnicodeDecodeError (a ValueError, NOT an OSError). It must fail open
+    # to [] — never propagate and 500 the already-successful step-through.
+    (tmp_path / "legacy.py").write_bytes(
+        b"# -*- coding: latin-1 -*-\n"
+        b"def f(x):\n"
+        b"    y = '\xe9'\n"
+        b"    if x:\n"
+        b"        return y\n"
+        b"    return None\n"
+    )
+    resolved = ResolvedFunction(
+        file="legacy.py", name="f", qualname="f", kind="function",
+        module="legacy", line_start=2, parent_class=None,
+    )
+    assert pg._junctions_for(resolved, str(tmp_path), {2, 4, 5}, False) == []

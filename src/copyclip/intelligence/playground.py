@@ -764,11 +764,14 @@ def _junctions_for(
     try:
         with open(os.path.join(project_root, resolved.file), encoding="utf-8") as fh:
             source = fh.read()
-    except OSError:
+        return compute_junctions(
+            source, resolved.line_start, resolved.name, executed_lines, truncated
+        )
+    except (OSError, ValueError):
+        # OSError (missing/unreadable) or ValueError (a non-utf-8 source raises
+        # UnicodeDecodeError, a ValueError subclass) — fail open so this optional
+        # overlay never breaks a step-through the capture already produced.
         return []
-    return compute_junctions(
-        source, resolved.line_start, resolved.name, executed_lines, truncated
-    )
 
 
 def _module_from_file(file_path: str) -> str:

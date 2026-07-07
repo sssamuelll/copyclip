@@ -24,7 +24,7 @@ def compute_junctions(
     feature is invisible rather than wrong."""
     try:
         tree = ast.parse(source)
-    except SyntaxError:
+    except (SyntaxError, ValueError):
         return []
     target = _find_func(tree, func_line, func_name)
     if target is None:
@@ -47,28 +47,45 @@ def _find_func(tree: ast.AST, func_line: int | None, func_name: str):
     return named[0] if len(named) == 1 else None
 
 
-def _arm(kind: str, body: list, executed: set[int], truncated: bool) -> dict:
+def _classify(kind: str, keyword_line: int, body: list, executed: set[int]):
+    """Raw per-arm evidence: (lo, hi, hit, ambiguous).
+
+    An if/elif whose body starts ON its condition line (inline ``if x: a = 1``)
+    cannot be confirmed from a line trace: the condition line is recorded on every
+    evaluation, regardless of which arm runs. So evidence for such an arm starts
+    STRICTLY PAST the condition line — and an inline single-line body has no such
+    line, making it 'ambiguous' (indeterminable from line events alone)."""
     lo = body[0].lineno
     hi = body[-1].end_lineno
-    hit = any(lo <= line <= hi for line in executed)
-    if hit:
-        taken: bool | None = True
-    elif truncated:
-        taken = None      # unknown — the trace stopped early; do not claim "did not run"
-    else:
-        taken = False
-    return {"kind": kind, "lines": [lo, hi], "taken": taken}
+    ev_lo = lo + 1 if (kind in ("if", "elif") and lo == keyword_line) else lo
+    hit = any(ev_lo <= line <= hi for line in executed)
+    ambiguous = ev_lo > hi   # inline arm: no line distinctly proves it ran
+    return lo, hi, hit, ambiguous
 
 
 def _build_ladder(node: ast.If, executed: set[int], truncated: bool) -> dict:
-    arms = [_arm("if", node.body, executed, truncated)]
+    # (kind, keyword_line, body) for each arm of the if/elif/else ladder.
+    spans = [("if", node.lineno, node.body)]
     orelse = node.orelse
     while len(orelse) == 1 and isinstance(orelse[0], ast.If):
         elif_node = orelse[0]
-        arms.append(_arm("elif", elif_node.body, executed, truncated))
+        spans.append(("elif", elif_node.lineno, elif_node.body))
         orelse = elif_node.orelse
     if orelse:
-        arms.append(_arm("else", orelse, executed, truncated))
+        spans.append(("else", orelse[0].lineno, orelse))
+    classified = [(kind, *_classify(kind, kw, body, executed)) for (kind, kw, body) in spans]
+    any_hit = any(c[3] for c in classified)   # c = (kind, lo, hi, hit, ambiguous)
+    arms = []
+    for kind, lo, hi, hit, ambiguous in classified:
+        if hit:
+            taken: bool | None = True
+        elif ambiguous:
+            # inline arm with no distinguishable body line: a distinguishable
+            # sibling running proves this one did not; otherwise we cannot say.
+            taken = False if any_hit else None
+        else:
+            taken = None if truncated else False
+        arms.append({"kind": kind, "lines": [lo, hi], "taken": taken})
     return {"test_line": node.lineno, "arms": arms}
 
 
@@ -98,6 +115,11 @@ def _generic_child_bodies(node: ast.AST) -> list[list]:
     for handler in getattr(node, "handlers", []) or []:
         if handler.body:
             out.append(handler.body)
+    # match/case bodies live in the SAME frame (match creates no code object);
+    # its arms hang off cases[].body, which the field-loop above does not reach.
+    for case in getattr(node, "cases", []) or []:
+        if case.body:
+            out.append(case.body)
     return out
 
 
