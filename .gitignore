@@ -140,4 +140,8 @@ frontend/dist/
 frontend/*.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts
+.vite/
 intelligence.db
+
+# local dev smoke scripts (throwaway server launchers)
+.copyclip-verify.py

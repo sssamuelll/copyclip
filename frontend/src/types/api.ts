@@ -675,6 +675,11 @@ export type Step = {
   raised?: { type: string; message: string }  // only on the final step if it threw
 }
 
+export type Junction = {
+  test_line: number
+  arms: { kind: 'if' | 'elif' | 'else'; lines: [number, number]; taken: boolean | null }[]
+}
+
 export type StepThroughResponse = {
   kind: 'trace'
   trace: Step[]
@@ -683,6 +688,7 @@ export type StepThroughResponse = {
   file_line: string                   // e.g. "intelligence/symbols.py:255"
   truncated: boolean
   truncated_reason?: 'steps' | 'time' | null
+  junctions?: Junction[]
 }
 
 export type FallbackResponse = {

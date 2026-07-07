@@ -241,6 +241,9 @@ class StepThroughResponse:
     # overrun) — and never conflates truncation with a terminal raise. None when
     # the trace completed cleanly.
     truncated_reason: str | None = None
+    # Cruces v0.1: if/elif/else arms with taken=True|False|None, computed from
+    # the target AST + the executed-line set. Additive; [] means no junctions.
+    junctions: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -251,6 +254,7 @@ class StepThroughResponse:
             "file_line": self.file_line,
             "truncated": self.truncated,
             "truncated_reason": self.truncated_reason,
+            "junctions": list(self.junctions),
         }
 
 

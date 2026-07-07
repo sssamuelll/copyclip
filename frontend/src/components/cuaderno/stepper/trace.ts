@@ -1,4 +1,4 @@
-import type { Step, Var } from '../../../types/api'
+import type { Step, Var, Junction } from '../../../types/api'
 
 export const ROW_H = 26 // px — load-bearing: slab top = curIdx*ROW_H, line-height
 
@@ -125,4 +125,32 @@ export function markerLefts(trace: Step[]): number[] {
     .map((t, i) => ({ on: t.changed.length > 0, left: denom === 0 ? 50 : (i / denom) * 100 }))
     .filter((m) => m.on)
     .map((m) => m.left)
+}
+
+export type LineRole = 'not-taken' | 'unknown'
+export type JunctionOverlay = { role: Record<number, LineRole>; chips: Record<number, string> }
+
+// Static per-run overlay: dim the body lines of arms the run did not take
+// (or could not observe, under truncation), and chip the crossed arm on its
+// junction's test line. A junction whose test line is itself inside a dimmed
+// range is dead code for this run, so it gets no chip.
+export function junctionOverlay(junctions?: Junction[]): JunctionOverlay {
+  const role: Record<number, LineRole> = {}
+  const chips: Record<number, string> = {}
+  if (!junctions) return { role, chips }
+  for (const j of junctions) {
+    for (const arm of j.arms) {
+      if (arm.taken === true) continue
+      const r: LineRole = arm.taken === null ? 'unknown' : 'not-taken'
+      for (let n = arm.lines[0]; n <= arm.lines[1]; n++) {
+        if (!(n in role)) role[n] = r   // outer (processed first) wins over nested
+      }
+    }
+  }
+  for (const j of junctions) {
+    if (j.test_line in role) continue   // junction sits inside dead code this run
+    const taken = j.arms.find((a) => a.taken === true)
+    if (taken) chips[j.test_line] = `→ ${taken.kind}`
+  }
+  return { role, chips }
 }

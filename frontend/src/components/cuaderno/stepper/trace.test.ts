@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import type { Step, Var } from '../../../types/api'
-import { clampStep, nextChange, trackFraction, lineModels, buildRows, markerLefts, sourceTranslateY, ROW_H } from './trace'
+import type { Step, Var, Junction } from '../../../types/api'
+import { clampStep, nextChange, trackFraction, lineModels, buildRows, markerLefts, sourceTranslateY, ROW_H, junctionOverlay } from './trace'
 
 const v = (name: string, kind: Var['kind'], extra: Partial<Var> = {}): Var => ({ name, kind, ...extra })
 
@@ -153,5 +153,55 @@ describe('markerLefts (hero geometry)', () => {
     expect(lefts).toHaveLength(1)
     expect(lefts[0]).toBe(50)
     expect(Number.isNaN(lefts[0])).toBe(false)
+  })
+})
+
+describe('junctionOverlay', () => {
+  it('dims not-taken arm bodies and chips the crossed arm', () => {
+    const j: Junction[] = [{
+      test_line: 3,
+      arms: [
+        { kind: 'if', lines: [4, 5], taken: true },
+        { kind: 'else', lines: [7, 7], taken: false },
+      ],
+    }]
+    const { role, chips } = junctionOverlay(j)
+    expect(role[4]).toBeUndefined()   // taken arm: normal
+    expect(role[5]).toBeUndefined()
+    expect(role[7]).toBe('not-taken') // else body dimmed
+    expect(chips[3]).toBe('→ if')
+  })
+
+  it('marks unknown arms distinctly under truncation', () => {
+    const j: Junction[] = [{
+      test_line: 3,
+      arms: [
+        { kind: 'if', lines: [4, 4], taken: null },
+        { kind: 'else', lines: [6, 6], taken: null },
+      ],
+    }]
+    const { role, chips } = junctionOverlay(j)
+    expect(role[4]).toBe('unknown')
+    expect(role[6]).toBe('unknown')
+    expect(chips[3]).toBeUndefined()  // nothing crossed → no chip
+  })
+
+  it('suppresses the chip for a junction inside a dimmed (dead) range', () => {
+    // outer took the else-arm (lines 8..9); the inner if at line 8 is dead code
+    const j: Junction[] = [
+      { test_line: 3, arms: [
+        { kind: 'if', lines: [4, 5], taken: false },
+        { kind: 'else', lines: [8, 9], taken: true },
+      ] },
+      { test_line: 4, arms: [   // nested inside the not-taken if-arm (4..5)
+        { kind: 'if', lines: [5, 5], taken: false },
+      ] },
+    ]
+    const { chips } = junctionOverlay(j)
+    expect(chips[4]).toBeUndefined() // line 4 is inside the dimmed 4..5 range
+  })
+
+  it('returns empty maps for undefined junctions', () => {
+    expect(junctionOverlay(undefined)).toEqual({ role: {}, chips: {} })
   })
 })
