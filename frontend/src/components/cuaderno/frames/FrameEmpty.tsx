@@ -8,10 +8,34 @@ const mono = {
   fontSize: '0.85em',
 } as const
 
-// Rendering doctrine (prompts.py, get_entry_cue): "an AI burst shaped `X`
-// ~N days ago; you haven't been back". If stale, scope the claim to "as of the
-// last analysis ~N days ago" — never a present-tense gap past what analysis
-// witnessed. A null cue means nothing to surface: the default copy, no invention.
+const nDays = (n: number) => (n === 1 ? '1 day' : `${n} days`)
+
+// The gap claim, rescoped per the doctrine (prompts.py, get_entry_cue): the
+// burst itself is a witnessed commit — its age is exact even over a stale
+// table — but the ABSENCE of a return is only witnessed up to the last
+// analysis. So when stale=true the gap claim itself carries the scope and
+// drops to past tense; it is never asserted as a present-tense fact.
+function gapClaim(cue: EntryCue): string {
+  const scope = cue.stale
+    ? `As of the last analysis ~${nDays(cue.analyzed_age_days ?? 0)} ago, `
+    : ''
+  if (cue.never_human_touched) {
+    return cue.stale
+      ? `${scope}no human commit had touched it.`
+      : 'No human commit has ever touched it.'
+  }
+  if (cue.last_contact_days === 0) {
+    return cue.stale
+      ? `${scope}you hadn't been back after your same-day touch.`
+      : 'You touched it earlier today — the burst came after.'
+  }
+  return cue.stale
+    ? `${scope}you hadn't been back in ${nDays(cue.last_contact_days)}.`
+    : `You haven't been back in ${nDays(cue.last_contact_days)}.`
+}
+
+// A null cue means nothing honest to surface: neutral copy, no invention —
+// including no "first time" claim the system cannot witness either.
 export function FrameEmpty({ onAsk, entryCue }: Props) {
   const cue = entryCue ?? null
   return (
@@ -21,19 +45,11 @@ export function FrameEmpty({ onAsk, entryCue }: Props) {
           <h1 className="hi">
             An AI burst shaped{' '}
             <code style={mono}>{cue.file_path}</code>{' '}
-            {cue.ai_burst_days === 0 ? 'today' : `~${cue.ai_burst_days} days ago`}.{' '}
-            <em>
-              {cue.never_human_touched
-                ? 'No human commit has ever touched it.'
-                : `You haven't been back in ${cue.last_contact_days} days.`}
-            </em>
+            {cue.ai_burst_days === 0 ? 'today' : `~${nDays(cue.ai_burst_days)} ago`}.{' '}
+            <em>{gapClaim(cue)}</em>
           </h1>
           <p className="sub">
-            {cue.stale
-              ? `As of the last analysis${
-                  cue.analyzed_age_days != null ? ` ~${cue.analyzed_age_days} days ago` : ''
-                } — the gap may have closed since. `
-              : ''}
+            {cue.stale ? 'That may have changed since. ' : ''}
             Ask anything in your own words — every answer is anchored to real
             code; nothing invented.
           </p>
@@ -41,7 +57,7 @@ export function FrameEmpty({ onAsk, entryCue }: Props) {
       ) : (
         <>
           <h1 className="hi">
-            First time in this project. <em>What interests you?</em>
+            <em>What interests you?</em>
           </h1>
           <p className="sub">
             Ask anything in your own words — broad ("what does this project do?"),
