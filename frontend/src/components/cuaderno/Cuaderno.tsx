@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Block, Citation, CuadernoQuestion, ToolRow, CuadernoProvidersResponse } from '../../types/api'
+import type { Block, Citation, CuadernoQuestion, ToolRow, CuadernoProvidersResponse, EntryCue } from '../../types/api'
 import { SURVIVOR_NAV, type SurvivorPage } from '../../nav'
 import { Composer } from './Composer'
 import { AnswerCheck } from './AnswerCheck'
@@ -26,6 +26,7 @@ type Props = {
   onSelectFromHistory: (position: number) => void
   onSetAnswerCheck: (position: number, value: 'answers' | 'not_yet') => void
   questionLanguage?: string | null
+  entryCue?: EntryCue | null
 }
 
 export function Cuaderno({
@@ -44,6 +45,7 @@ export function Cuaderno({
   onSelectFromHistory,
   onSetAnswerCheck,
   questionLanguage,
+  entryCue = null,
 }: Props) {
   const [sidePanelFor, setSidePanelFor] = useState<Citation | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -140,7 +142,7 @@ export function Cuaderno({
       <div className="cua-stage swap-fade">
         <div className="cua-frame-wrap">
           <div className="cua-frame" key={activeQuestion?.position ?? scene}>
-            {scene === 'empty' && <FrameEmpty onAsk={onAsk} />}
+            {scene === 'empty' && <FrameEmpty onAsk={onAsk} entryCue={entryCue} />}
             {scene === 'midstream' && (
               <FrameMidStream
                 question={streamingQuestion || questions[questions.length - 1]?.question || '…'}

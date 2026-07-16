@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Block, CuadernoQuestion, ToolRow, CuadernoProvidersResponse } from '../types/api'
+import type { Block, CuadernoQuestion, ToolRow, CuadernoProvidersResponse, EntryCue } from '../types/api'
 import { Cuaderno } from '../components/cuaderno/Cuaderno'
 import { askStream, cuadernoApi } from '../api/cuaderno'
 import { reconcileOnMount, onActiveFrameChange } from '../components/cuaderno/playgroundSlot'
@@ -54,6 +54,13 @@ export function CuadernoPage({ onNavigate }: { onNavigate?: (target: SurvivorPag
   // Load the provider list / current selection once on mount.
   useEffect(() => {
     cuadernoApi.providers().then(setProviders).catch(() => {})
+  }, [])
+
+  // The entry cue: the one computed thing that greets the author unprompted.
+  // Silent on failure — an absent cue renders the default copy, never an error.
+  const [entryCue, setEntryCue] = useState<EntryCue | null>(null)
+  useEffect(() => {
+    cuadernoApi.entryCue().then((r) => setEntryCue(r.entry_cue)).catch(() => {})
   }, [])
 
   const onSetProvider = (provider: string, model: string) => {
@@ -210,6 +217,7 @@ export function CuadernoPage({ onNavigate }: { onNavigate?: (target: SurvivorPag
         onSelectFromHistory={onSelectFromHistory}
         onSetAnswerCheck={onSetAnswerCheck}
         questionLanguage={currentQuestionLanguage}
+        entryCue={entryCue}
       />
     </>
   )
