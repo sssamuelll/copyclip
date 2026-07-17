@@ -549,6 +549,12 @@ def get_active_decisions(project_root: str):
     """
     try:
         root = str(Path(project_root).resolve())
+        # Read-only probe: a folder that was never indexed has no decisions.
+        # Never route through connect()/db_path() here — db_path() mkdirs
+        # .copyclip, which would plant a DB in any folder the user merely
+        # exported/copied and make it "look like a project" to the front door.
+        if not (Path(root) / ".copyclip" / "intelligence.db").exists():
+            return []
         conn = connect(root)
         init_schema(conn)
 
