@@ -32,6 +32,53 @@ EXPORT_ONLY_FLAGS = frozenset({
 })
 
 
+def pack_chunks(parts: list, max_lines: int) -> list:
+    """Greedy file-boundary packing of export blocks into <=max_lines chunks.
+
+    A block never splits across chunks if it fits whole in one; only a block
+    that ALONE exceeds the budget is hard-split, each later slice carrying an
+    honest '(continued)' header (derived from the block's 'path:' first line
+    when it has one). The '\\n\\n' joiner between blocks counts as one line."""
+    chunks: list = []
+    cur: list = []
+    cur_lines = 0
+
+    def flush():
+        nonlocal cur, cur_lines
+        if cur:
+            chunks.append("\n\n".join(cur))
+            cur, cur_lines = [], 0
+
+    for part in parts:
+        n = part.count("\n") + 1
+        if n > max_lines:
+            flush()
+            lines = part.split("\n")
+            first = lines[0]
+            has_header = first.endswith(":")
+            i = 0
+            first_slice = True
+            while i < len(lines):
+                if first_slice:
+                    take = lines[i:i + max_lines]
+                    chunks.append("\n".join(take))
+                    first_slice = False
+                else:
+                    header = (first[:-1] + " (continued):") if has_header else "(continued)"
+                    take = lines[i:i + max_lines - 1]
+                    chunks.append(header + "\n" + "\n".join(take))
+                i += len(take)
+            continue
+        joiner = 1 if cur else 0
+        if cur_lines + joiner + n > max_lines:
+            flush()
+            joiner = 0
+        cur.append(part)
+        cur_lines += joiner + n
+    flush()
+    return chunks
+
+
 def classify_bare_invocation(argv: list) -> tuple:
     """Route a non-subcommand invocation. Returns ('start', folder) or
     ('error', offending_flag). The front door opens the shell; export flags
@@ -146,8 +193,13 @@ def run_export(argv_tail: list) -> None:
     parser.add_argument("--with-dependencies", action="store_true", help="Prepend Mermaid dependency graph (with --minimize contextual)")
     parser.add_argument("--no-decisions", action="store_true", help="Exclude architectural decisions from context")
     parser.add_argument("--prompt", help="Select files relevant to this task/intent via LLM")
+    parser.add_argument("--split-lines", type=int, default=None, metavar="N",
+                        help="Split output into chunks of <=N lines and copy them one at a time "
+                             "(paste, press Enter, repeat) — for paste-limited surfaces like chat UIs")
 
     args = parser.parse_args(argv_tail)
+    if args.split_lines is not None and args.split_lines < 2:
+        parser.error("--split-lines must be at least 2")
 
     # An LLM is only needed when --prompt asks the model to select files. A plain
     # clipboard export must never block on provider config or launch onboarding —
@@ -379,6 +431,33 @@ def run_export(argv_tail: list) -> None:
         final_output = "\n\n".join(output_parts)
 
         clipboard = ClipboardManager()
+
+        if args.split_lines is not None:
+            chunks = pack_chunks(output_parts, args.split_lines)
+            total = len(chunks)
+            if total > 1:
+                if not sys.stdin.isatty():
+                    print("[ERROR] --split-lines is an interactive flow (paste, Enter, repeat) — run it in a terminal.", file=sys.stderr)
+                    sys.exit(2)
+                for i, chunk in enumerate(chunks, 1):
+                    payload = f"--- copyclip part {i}/{total} ---\n{chunk}"
+                    if not clipboard.copy(payload):
+                        print("[ERROR] Failed to copy content to clipboard.", file=sys.stderr)
+                        sys.exit(1)
+                    n_lines = payload.count("\n") + 1
+                    if i < total:
+                        print(f"[INFO] part {i}/{total} copied ({n_lines} lines). Paste it, then press Enter for the next (Ctrl+C to stop)...", file=sys.stderr)
+                        try:
+                            input()
+                        except EOFError:
+                            print("[WARN] stdin closed — stopping after part "
+                                  f"{i}/{total}.", file=sys.stderr)
+                            sys.exit(1)
+                    else:
+                        print(f"[INFO] part {i}/{total} copied (final) — all {total} parts delivered.", file=sys.stderr)
+                return
+            # 0 or 1 chunks: fall through to the normal single copy below.
+
         if clipboard.copy(final_output):
             print("[INFO] Content has been copied to the clipboard.", file=sys.stderr)
             tokenizer_pref = os.environ.get("COPYCLIP_TOKENIZER")
