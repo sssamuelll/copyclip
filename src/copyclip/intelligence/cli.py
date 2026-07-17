@@ -11,7 +11,7 @@ from .db import connect, init_schema
 from .server import run_server
 
 
-COMMANDS = {"analyze", "serve", "start", "decision", "report", "issue", "audit", "mcp", "update", "bench", "export"}
+COMMANDS = {"analyze", "serve", "start", "decision", "report", "issue", "audit", "mcp", "update", "bench", "export", "copy"}
 
 
 def _use_color() -> bool:
@@ -246,7 +246,11 @@ def _maybe_handle_internal(argv) -> bool:
 
         root = os.path.abspath(args.path)
         if not _looks_like_project_folder(root):
+            # Never a dead end: say what CAN be done here. `copyclip <folder>`
+            # is also the old copy-this-folder muscle memory — point at it.
             print(_err(f"'{root}' is not a project folder."))
+            print(f"  to copy its contents to the clipboard:  copyclip copy {args.path}")
+            print(f"  to open the cuaderno here, index it first:  copyclip analyze {args.path}")
             return True
 
         # 1) Check LLM Configuration — launch onboarding if not configured
@@ -594,7 +598,9 @@ input("Press Enter to close...")
 
         sys.exit(0)
 
-    if cmd == "export":
+    if cmd in ("export", "copy"):
+        # `copy` is the original copy-this-folder verb, kept as an alias of
+        # export (the pre-intelligence CLI's muscle memory: `copyclip .`).
         # Import inside the handler to avoid circular imports (cli.py is imported by __main__.py).
         from copyclip.__main__ import run_export
         run_export(argv[2:])
