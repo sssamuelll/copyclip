@@ -1,4 +1,4 @@
-import type { CuadernoSession, CuadernoStreamEvent, CuadernoProvidersResponse } from '../types/api'
+import type { CuadernoSession, CuadernoStreamEvent, CuadernoProvidersResponse, EntryCueResponse } from '../types/api'
 
 async function patchJson<T>(url: string, body: unknown): Promise<T> {
   const r = await fetch(url, {
@@ -53,6 +53,9 @@ export const cuadernoApi = {
   },
   providers() {
     return getJson<CuadernoProvidersResponse>('/api/cuaderno/providers')
+  },
+  entryCue() {
+    return getJson<EntryCueResponse>('/api/cuaderno/entry-cue')
   },
   setProvider(provider: string, model: string) {
     return postJson<{ status: string }>('/api/config', {

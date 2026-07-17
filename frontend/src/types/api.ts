@@ -823,6 +823,20 @@ export type CuadernoSession = {
   questions: CuadernoQuestion[]
 }
 
+// The entry cue (pulso.build_entry_cue): the single most-overdue AI burst the
+// human has NOT returned to. null = nothing honest to surface (stay silent).
+export type EntryCue = {
+  file_path: string
+  last_contact_days: number
+  ai_burst_days: number
+  last_contact_source: 'git' | 'decision' | null
+  never_human_touched: boolean
+  analyzed_age_days: number | null
+  stale: boolean
+}
+
+export type EntryCueResponse = { entry_cue: EntryCue | null }
+
 export type ToolRow = {
   state: 'queued' | 'running' | 'done' | 'error'
   name: string

@@ -1363,6 +1363,19 @@ def run_server(
                     handle_settings_get(self, ctx, conn)
                     return
 
+                if parsed.path == "/api/cuaderno/entry-cue":
+                    # The entry cue wired to session-open: pure exposición — it
+                    # reads, it never records. Reading the cue is NOT returning
+                    # to the file (unlike /api/reacquaintance, which records a
+                    # visit), so no project_visits write here. An unindexed
+                    # project has nothing honest to surface -> silent null.
+                    if not pid:
+                        self._json({"entry_cue": None})
+                        return
+                    from .cuaderno.anchor import get_entry_cue
+                    self._json(get_entry_cue(conn, pid))
+                    return
+
                 if parsed.path == "/api/cuaderno/providers":
                     from .cuaderno.provider import (
                         provider_key_status, DEFAULT_MODELS, TOOL_INCAPABLE_MODELS,
